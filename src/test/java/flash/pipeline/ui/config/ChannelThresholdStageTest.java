@@ -62,6 +62,22 @@ public class ChannelThresholdStageTest {
     }
 
     @Test
+    public void savedThresholdAboveCurrentImageMaximumIsNotClampedWhenLockedAgain() {
+        RecordingThresholdStore store = new RecordingThresholdStore("200");
+        ChannelThresholdStage stage = new ChannelThresholdStage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertEquals("200", stage.currentThresholdTokenForTest());
+        assertTrue(stage.lockIn(context));
+
+        assertEquals("200", store.objectToken);
+        assertEquals("200", store.intensityToken);
+    }
+
+    @Test
     public void restartKeepsCurrentEditedThresholdAfterStageRebuild() {
         RecordingThresholdStore store = new RecordingThresholdStore("20");
         ChannelThresholdStage stage = new ChannelThresholdStage(store, new RecordingPreviewAdapter());

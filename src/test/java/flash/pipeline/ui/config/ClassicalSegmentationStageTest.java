@@ -343,6 +343,29 @@ public class ClassicalSegmentationStageTest {
     }
 
     @Test
+    public void savedThresholdAboveCurrentImageMaximumIsNotClampedWhenLockedAgain() throws Exception {
+        RecordingThresholdStore thresholdStore = new RecordingThresholdStore("200");
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        ClassicalSegmentationStage stage = stage(
+                thresholdStore,
+                new RecordingSizeStore("1-Infinity"),
+                adapter);
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Objects"));
+
+        assertEquals("200", stage.currentThresholdTokenForTest());
+
+        stage.runPreviewNowForTest();
+        assertEquals(200, adapter.lastThreshold);
+
+        assertTrue(stage.lockIn(context));
+        assertEquals("200", thresholdStore.token);
+        assertEquals("200", stage.currentThresholdTokenForTest());
+    }
+
+    @Test
     public void restartPreservesUnsavedThresholdAndSize() {
         RecordingThresholdStore thresholdStore = new RecordingThresholdStore("20");
         RecordingSizeStore sizeStore = new RecordingSizeStore("1-Infinity");

@@ -29,6 +29,17 @@ public class ThresholdControlPanelTest {
     }
 
     @Test
+    public void preservedThresholdValuesCanExceedCurrentImageDomain() {
+        ThresholdControlPanel panel = new ThresholdControlPanel();
+        panel.setImage(image(0, 25, 100));
+
+        panel.setThresholdPreservingRange(200.0, 200.0);
+
+        assertEquals(200.0, panel.getLowerThreshold(), 0.0001);
+        assertEquals(200.0, panel.getUpperThreshold(), 0.0001);
+    }
+
+    @Test
     public void lowerSliderCannotCrossUpperThreshold() {
         ThresholdControlPanel panel = new ThresholdControlPanel();
         panel.setImage(image(0, 100));

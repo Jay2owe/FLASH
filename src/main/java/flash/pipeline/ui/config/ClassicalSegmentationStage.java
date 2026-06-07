@@ -559,8 +559,9 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
                 && Double.isFinite(restartLowerThreshold.doubleValue())
                 && Double.isFinite(restartUpperThreshold.doubleValue())) {
             thresholdControl.setThresholdPreservingRange(restartLowerThreshold.doubleValue(),
-                    Math.max(restartLowerThreshold.doubleValue(),
-                            restartUpperThreshold.doubleValue()));
+                    Math.max(imageMaximum(filteredSource),
+                            Math.max(restartLowerThreshold.doubleValue(),
+                                    restartUpperThreshold.doubleValue())));
             return;
         }
         String token = ChannelThresholdStage.normalizeThresholdToken(thresholdStore.get());

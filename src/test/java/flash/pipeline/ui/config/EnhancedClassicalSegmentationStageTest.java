@@ -2,7 +2,9 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.segmentation.SegmentationTokenCodec;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
+import ij.process.ByteProcessor;
 import org.junit.Test;
 
 import javax.swing.JComboBox;
@@ -12,7 +14,9 @@ import javax.swing.JPanel;
 import javax.swing.border.TitledBorder;
 import java.awt.Component;
 import java.awt.Container;
+import java.util.Arrays;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -53,12 +57,51 @@ public class EnhancedClassicalSegmentationStageTest {
         assertTrue(toggle.isSelected());
     }
 
+    @Test
+    public void savedThresholdAboveCurrentImageMaximumIsPreservedInMethodToken() {
+        RecordingParameterStore parameterStore = new RecordingParameterStore("enhanced_classical");
+        RecordingThresholdStore thresholdStore = new RecordingThresholdStore("200");
+        EnhancedClassicalSegmentationStage stage = new EnhancedClassicalSegmentationStage(
+                parameterStore,
+                thresholdStore,
+                new RecordingSizeStore("1-Infinity"),
+                new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Objects"));
+
+        assertTrue(stage.lockIn(context));
+
+        assertEquals("200", thresholdStore.token);
+        assertTrue(parameterStore.token.contains("thresh=200"));
+    }
+
     private static EnhancedClassicalSegmentationStage stage(String methodToken) {
         return new EnhancedClassicalSegmentationStage(
                 new RecordingParameterStore(methodToken),
                 new RecordingThresholdStore("20"),
                 new RecordingSizeStore("100-Infinity"),
                 new RecordingPreviewAdapter());
+    }
+
+    private static ConfigQcContext context() {
+        return ConfigQcContext.fromImages(
+                null,
+                null,
+                null,
+                Arrays.asList(image("QC image")),
+                Arrays.asList("IBA1"),
+                0);
+    }
+
+    private static ImagePlus image(String title) {
+        ByteProcessor processor = new ByteProcessor(4, 1);
+        processor.set(0, 0, 0);
+        processor.set(1, 0, 25);
+        processor.set(2, 0, 75);
+        processor.set(3, 0, 100);
+        return new ImagePlus(title, processor);
     }
 
     private static boolean containsLabel(Component component, String text) {
@@ -190,14 +233,15 @@ public class EnhancedClassicalSegmentationStageTest {
     private static final class RecordingPreviewAdapter
             implements EnhancedClassicalSegmentationStage.PreviewAdapter {
         @Override public ImagePlus createRawSource(ConfigQcContext context) {
-            return null;
+            return context == null ? null : context.getCurrentImagePlus().duplicate();
         }
 
         @Override public ImagePlus createFilteredSource(ConfigQcContext context) {
-            return null;
+            return context == null ? null : context.getCurrentImagePlus().duplicate();
         }
 
         @Override public void close(ImagePlus image) {
+            if (image != null) image.flush();
         }
     }
 
