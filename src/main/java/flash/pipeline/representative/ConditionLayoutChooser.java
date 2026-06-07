@@ -72,6 +72,8 @@ public final class ConditionLayoutChooser {
         dialog.addComponent(preview.panel);
         final javax.swing.JButton tileEditorButton =
                 dialog.addButton("Preview / adjust single tile...");
+        final javax.swing.JButton layoutEditorButton =
+                dialog.addButton("Arrange full layout...");
 
         dialog.addHeader("Condition Layout");
         final LayoutAssignmentPanel layoutPanel =
@@ -116,6 +118,18 @@ public final class ConditionLayoutChooser {
                         previewSelection, tileOptions.buildConfig());
                 if (edited != null) {
                     tileOptions.applyEditorResult(edited);
+                    refresh.run();
+                }
+            }
+        });
+        layoutEditorButton.addActionListener(new java.awt.event.ActionListener() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                FigureLayoutEditor.Result arranged = FigureLayoutEditor.arrange(
+                        javax.swing.SwingUtilities.getWindowAncestor(layoutEditorButton),
+                        previewSelection, layoutPanel.createLayout(), tileOptions.buildConfig());
+                if (arranged != null) {
+                    layoutPanel.setLayout(arranged.layout());
+                    tileOptions.applySpacing(arranged.tileConfig());
                     refresh.run();
                 }
             }
@@ -285,6 +299,19 @@ public final class ConditionLayoutChooser {
                 rows.add(Integer.valueOf(row.rowNumber));
             }
             return RepresentativeLayout.fromRowAssignments(ordered, rows);
+        }
+
+        void setLayout(RepresentativeLayout layout) {
+            List<String> names = new ArrayList<String>();
+            for (int i = 0; i < model.getSize(); i++) {
+                names.add(model.getElementAt(i).condition);
+            }
+            applyLayout(names, layout);
+            list.setVisibleRowCount(Math.min(8, Math.max(3, model.getSize())));
+            if (model.getSize() > 0) {
+                list.setSelectedIndex(0);
+            }
+            fireChange();
         }
 
         private JPanel buttonPanel() {
@@ -733,6 +760,17 @@ public final class ConditionLayoutChooser {
             scaleBarLengthField.setText(formatNumber(edited.scaleBarLengthUm()));
             annotationColorBox.setSelectedItem(
                     Color.BLACK.equals(edited.annotationColor()) ? "Black" : "White");
+            fireChange();
+        }
+
+        void applySpacing(PresentationTileConfig spacing) {
+            if (spacing == null) {
+                return;
+            }
+            rowGapField.setText(String.valueOf(spacing.rowGapPx()));
+            conditionGapField.setText(String.valueOf(spacing.conditionGapPx()));
+            innerGapField.setText(String.valueOf(spacing.innerColGapPx()));
+            marginField.setText(String.valueOf(spacing.marginPx()));
             fireChange();
         }
 
