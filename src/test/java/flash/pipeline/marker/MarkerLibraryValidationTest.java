@@ -19,6 +19,7 @@ import java.util.Set;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class MarkerLibraryValidationTest {
@@ -162,6 +163,8 @@ public class MarkerLibraryValidationTest {
         assertNotNull(mCherry);
         assertEquals("reporter_mcherry", mCherry.getId());
         assertEquals("Red", mCherry.getConventionalLUT());
+        assertNull(library.exactMatch("reporter_mcherry"));
+        assertNull(library.exactMatch("405"));
     }
 
     private static boolean containsNuclearEntryInTopThree(List<MarkerLibrary.Entry> entries) {

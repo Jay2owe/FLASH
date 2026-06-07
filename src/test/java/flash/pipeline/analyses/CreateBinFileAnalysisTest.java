@@ -14,6 +14,8 @@ import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
+import flash.pipeline.qc.QcMinMaxPerConditionSelector;
+import flash.pipeline.qc.QcSelectionCandidate;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.CancelConfirmationDialog;
@@ -412,6 +414,13 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void minMaxOverallDoesNotRequireConditionMetadataReview() throws Exception {
+        assertFalse(invokeRequiresMinMaxConditionMetadataReview("Min and max overall"));
+        assertTrue(invokeRequiresMinMaxConditionMetadataReview("Min and max per condition"));
+        assertFalse(invokeRequiresMinMaxConditionMetadataReview("Randomly select images"));
+    }
+
+    @Test
     public void minMaxRoleLabelMapsOverallRolesForHeader() throws Exception {
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
 
@@ -419,6 +428,16 @@ public class CreateBinFileAnalysisTest {
         assertEquals("Overall MIN", invokeMinMaxRoleLabel(analysis, "OVERALL_MIN"));
         assertEquals("Overall MIN/MAX", invokeMinMaxRoleLabel(analysis, "OVERALL_MIN_MAX"));
         assertEquals("MAX", invokeMinMaxRoleLabel(analysis, "MAX"));
+    }
+
+    @Test
+    public void minMaxReviewLabelOmitsConditionForOverallRolesOnly() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+
+        assertEquals("Overall MAX", invokeMinMaxReviewLabel(analysis,
+                newSelectedSeries(2, "MouseA_LH_SCN", "MouseA", "Treatment", "OVERALL_MAX")));
+        assertEquals("Treatment - MAX", invokeMinMaxReviewLabel(analysis,
+                newSelectedSeries(2, "MouseA_LH_SCN", "MouseA", "Treatment", "MAX")));
     }
 
     @Test
@@ -544,6 +563,10 @@ public class CreateBinFileAnalysisTest {
         List<ConfigQcContext.ConfigQcImage> c2 =
                 (List<ConfigQcContext.ConfigQcImage>) method.invoke(
                         analysis, selections, Integer.valueOf(1));
+        @SuppressWarnings("unchecked")
+        List<ConfigQcContext.ConfigQcImage> c3 =
+                (List<ConfigQcContext.ConfigQcImage>) method.invoke(
+                        analysis, selections, Integer.valueOf(2));
 
         assertEquals("Alpha", c1.get(0).getSeriesName());
         assertEquals("Beta", c1.get(1).getSeriesName());
@@ -552,6 +575,57 @@ public class CreateBinFileAnalysisTest {
         assertEquals("Beta", c2.get(0).getSeriesName());
         assertEquals("Gamma", c2.get(1).getSeriesName());
         assertEquals("Alpha", c2.get(2).getSeriesName());
+    }
+
+    @Test
+    public void qcContextImages_filterMinMaxSelectionsToRequestedChannelAndUseChannelLabel() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        List<?> selections = privateQcSelectionsWithPartialChannelOrdersAndLabels();
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "filterParameterContextImages", List.class, int.class);
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        List<ConfigQcContext.ConfigQcImage> c1 =
+                (List<ConfigQcContext.ConfigQcImage>) method.invoke(
+                        analysis, selections, Integer.valueOf(0));
+        @SuppressWarnings("unchecked")
+        List<ConfigQcContext.ConfigQcImage> c2 =
+                (List<ConfigQcContext.ConfigQcImage>) method.invoke(
+                        analysis, selections, Integer.valueOf(1));
+        @SuppressWarnings("unchecked")
+        List<ConfigQcContext.ConfigQcImage> c3 =
+                (List<ConfigQcContext.ConfigQcImage>) method.invoke(
+                        analysis, selections, Integer.valueOf(2));
+
+        assertEquals(2, c1.size());
+        assertEquals("Alpha", c1.get(0).getSeriesName());
+        assertEquals("C1 MAX", c1.get(0).getReviewLabel());
+        assertEquals("Shared", c1.get(1).getSeriesName());
+        assertEquals("C1 MIN", c1.get(1).getReviewLabel());
+
+        assertEquals(2, c2.size());
+        assertEquals("Beta", c2.get(0).getSeriesName());
+        assertEquals("C2 MAX", c2.get(0).getReviewLabel());
+        assertEquals("Shared", c2.get(1).getSeriesName());
+        assertEquals("C2 MIN", c2.get(1).getReviewLabel());
+
+        assertEquals(0, c3.size());
+    }
+
+    @Test
+    public void filterParameterStageCustomBuilderUsesChannelFilteredQcImages() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = twoChannelConfig();
+        List<?> selections = privateQcSelectionsWithPartialChannelOrdersAndLabels();
+
+        FilterParameterStage stage = analysis.createFilterParameterStage(
+                rawQcSelections(selections), cfg, temp.getRoot(), 1);
+        List<?> builderImages = capturedCustomFilterBuilderImages(stage);
+
+        assertEquals(2, builderImages.size());
+        assertEquals("Beta", selectionField(builderImages.get(0), "seriesName"));
+        assertEquals("Shared", selectionField(builderImages.get(1), "seriesName"));
     }
 
     @Test
@@ -965,8 +1039,42 @@ public class CreateBinFileAnalysisTest {
         grid.nameFields[0].setText("mCherry");
         assertEquals("Red", grid.lutCombos[0].getSelectedItem());
 
+        grid.nameFields[0].setText("mCherry fusion");
+        assertEquals("Blue", grid.lutCombos[0].getSelectedItem());
+
+        grid.nameFields[1].setText("DAPI");
+        assertEquals("Magenta", grid.lutCombos[1].getSelectedItem());
+
+        grid.nameFields[1].setText("reporter_mcherry");
+        assertEquals("Magenta", grid.lutCombos[1].getSelectedItem());
+
         grid.nameFields[1].setText("GFP");
         assertEquals("Green", grid.lutCombos[1].getSelectedItem());
+    }
+
+    @Test
+    public void channelIdentityGridLoadedConfigDoesNotSeedAutoLutState() throws Exception {
+        CreateBinFileAnalysis.BinUserConfig defaults = twoChannelConfig();
+        defaults.names.set(0, "Channel1");
+        defaults.colors.set(0, "Blue");
+        CreateBinFileAnalysis.ChannelIdentityGrid grid =
+                CreateBinFileAnalysis.buildChannelIdentityGrid(defaults, true, true, null);
+        Object bindings = newBinSetupBindings(2);
+        copyBindingArray(bindings, "nameFields", grid.nameFields);
+        copyBindingArray(bindings, "colorCombos", grid.lutCombos);
+
+        CreateBinFileAnalysis.BinUserConfig loaded = twoChannelConfig();
+        loaded.names.set(0, "mCherry");
+        loaded.colors.set(0, "Red");
+        invokeApplyLoadedConfigToIdentityBindings(loaded, bindings);
+        assertEquals("Red", grid.lutCombos[0].getSelectedItem());
+
+        grid.nameFields[0].setText("mCherry fusion");
+        assertEquals("Red", grid.lutCombos[0].getSelectedItem());
+
+        loaded.colors.set(0, "Blue");
+        invokeApplyLoadedConfigToIdentityBindings(loaded, bindings);
+        assertEquals("Blue", grid.lutCombos[0].getSelectedItem());
     }
 
     @Test
@@ -1978,6 +2086,17 @@ public class CreateBinFileAnalysisTest {
         System.arraycopy(values, 0, target, 0, Math.min(values.length, target.length));
     }
 
+    private static void invokeApplyLoadedConfigToIdentityBindings(
+            CreateBinFileAnalysis.BinUserConfig cfg,
+            Object bindings) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "applyLoadedConfigToIdentityBindings",
+                CreateBinFileAnalysis.BinUserConfig.class,
+                bindings.getClass());
+        method.setAccessible(true);
+        method.invoke(null, cfg, bindings);
+    }
+
     private static CreateBinFileAnalysis.BinUserConfig invokeBuildBinUserConfigFromDialog(
             CreateBinFileAnalysis analysis,
             int channelCount,
@@ -2018,11 +2137,48 @@ public class CreateBinFileAnalysisTest {
         return ((Boolean) method.invoke(null, mode)).booleanValue();
     }
 
+    private static boolean invokeRequiresMinMaxConditionMetadataReview(String mode) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "requiresMinMaxConditionMetadataReview", String.class);
+        method.setAccessible(true);
+        return ((Boolean) method.invoke(null, mode)).booleanValue();
+    }
+
     private static String invokeMinMaxRoleLabel(CreateBinFileAnalysis analysis, String role) throws Exception {
         Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
                 "minMaxRoleLabel", String.class);
         method.setAccessible(true);
         return (String) method.invoke(analysis, role);
+    }
+
+    private static String invokeMinMaxReviewLabel(
+            CreateBinFileAnalysis analysis,
+            QcMinMaxPerConditionSelector.SelectedSeries selected) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "minMaxReviewLabel", QcMinMaxPerConditionSelector.SelectedSeries.class);
+        method.setAccessible(true);
+        return (String) method.invoke(analysis, selected);
+    }
+
+    private static QcMinMaxPerConditionSelector.SelectedSeries newSelectedSeries(
+            int seriesIndex,
+            String seriesName,
+            String animalName,
+            String conditionName,
+            String role) throws Exception {
+        QcSelectionCandidate candidate = new QcSelectionCandidate(
+                seriesIndex, seriesName, animalName, conditionName);
+        Class<?> scoreRecordClass =
+                Class.forName("flash.pipeline.qc.QcMinMaxPerConditionSelector$ScoreRecord");
+        Constructor<?> scoreRecordConstructor =
+                scoreRecordClass.getDeclaredConstructor(QcSelectionCandidate.class);
+        scoreRecordConstructor.setAccessible(true);
+        Object scoreRecord = scoreRecordConstructor.newInstance(candidate);
+        Constructor<QcMinMaxPerConditionSelector.SelectedSeries> selectedConstructor =
+                QcMinMaxPerConditionSelector.SelectedSeries.class.getDeclaredConstructor(
+                        scoreRecordClass, String.class);
+        selectedConstructor.setAccessible(true);
+        return selectedConstructor.newInstance(scoreRecord, role);
     }
 
     private static List<?> invokeOpenQcSelections(CreateBinFileAnalysis analysis,
@@ -2334,11 +2490,81 @@ public class CreateBinFileAnalysisTest {
         return selections;
     }
 
+    private static List<?> privateQcSelectionsWithPartialChannelOrdersAndLabels() throws Exception {
+        Class<?> type = Class.forName(
+                "flash.pipeline.analyses.CreateBinFileAnalysis$QcImageSelection");
+        Constructor<?> constructor = type.getDeclaredConstructor(
+                int.class, String.class, ImagePlus.class, String.class, String.class,
+                Map.class, Map.class);
+        constructor.setAccessible(true);
+
+        List<Object> selections = new ArrayList<Object>();
+        selections.add(constructor.newInstance(
+                Integer.valueOf(0), "Alpha", byteImage("Alpha"), "", "",
+                singleOrderMap(1, 0), singleLabelMap(1, "C1 MAX")));
+        selections.add(constructor.newInstance(
+                Integer.valueOf(1), "Beta", byteImage("Beta"), "", "",
+                singleOrderMap(2, 0), singleLabelMap(2, "C2 MAX")));
+        selections.add(constructor.newInstance(
+                Integer.valueOf(2), "Shared", byteImage("Shared"), "", "",
+                orderMap(1, 1), dualLabelMap("C1 MIN", "C2 MIN")));
+        return selections;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static List rawQcSelections(List<?> selections) {
+        return (List) selections;
+    }
+
+    private static List<?> capturedCustomFilterBuilderImages(FilterParameterStage stage) throws Exception {
+        Field builderField = FilterParameterStage.class.getDeclaredField("customFilterBuilder");
+        builderField.setAccessible(true);
+        Object builder = builderField.get(stage);
+        Field[] fields = builder.getClass().getDeclaredFields();
+        for (int i = 0; i < fields.length; i++) {
+            Field field = fields[i];
+            if (!List.class.isAssignableFrom(field.getType())) {
+                continue;
+            }
+            field.setAccessible(true);
+            Object value = field.get(builder);
+            if (!(value instanceof List<?>)) {
+                continue;
+            }
+            List<?> list = (List<?>) value;
+            if (!list.isEmpty()
+                    && list.get(0) != null
+                    && list.get(0).getClass().getName().contains("$QcImageSelection")) {
+                return list;
+            }
+        }
+        return Collections.emptyList();
+    }
+
     private static Map<Integer, Integer> orderMap(int c1Order, int c2Order) {
         LinkedHashMap<Integer, Integer> order = new LinkedHashMap<Integer, Integer>();
         order.put(Integer.valueOf(1), Integer.valueOf(c1Order));
         order.put(Integer.valueOf(2), Integer.valueOf(c2Order));
         return order;
+    }
+
+    private static Map<Integer, Integer> singleOrderMap(int channelNumber, int orderValue) {
+        LinkedHashMap<Integer, Integer> order = new LinkedHashMap<Integer, Integer>();
+        order.put(Integer.valueOf(channelNumber), Integer.valueOf(orderValue));
+        return order;
+    }
+
+    private static Map<Integer, String> singleLabelMap(int channelNumber, String label) {
+        LinkedHashMap<Integer, String> labels = new LinkedHashMap<Integer, String>();
+        labels.put(Integer.valueOf(channelNumber), label);
+        return labels;
+    }
+
+    private static Map<Integer, String> dualLabelMap(String c1Label, String c2Label) {
+        LinkedHashMap<Integer, String> labels = new LinkedHashMap<Integer, String>();
+        labels.put(Integer.valueOf(1), c1Label);
+        labels.put(Integer.valueOf(2), c2Label);
+        return labels;
     }
 
     private static ImagePlus byteImage(String title) {

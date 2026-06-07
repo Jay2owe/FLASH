@@ -351,7 +351,7 @@ public final class QcMinMaxPerConditionSelector {
                 SelectionBundle selectionBundle = assignAndSelectSeries(cached, activeChannels, scope);
                 List<Integer> selected = selectedSeriesIndexesFromSelection(selectionBundle.selectedSeries);
                 if (!selected.isEmpty()) {
-                    logSelectionSummary(cached, activeChannels, true, scope);
+                    logSelectionSummary(selectionBundle, activeChannels, true, scope);
                     String message = "Using cached " + scope.logLabel + " selection.\n"
                             + "Cache: " + scoresFile.getAbsolutePath();
                     return new SelectionResult(selected, selectionBundle.selectedSeries,
@@ -366,7 +366,7 @@ public final class QcMinMaxPerConditionSelector {
         List<ScoreRecord> scored = scoreCandidates(
                 lifFile, supplier, candidates, activeChannels, zSliceConfig, parallelThreads);
         SelectionBundle selectionBundle = assignAndSelectSeries(scored, activeChannels, scope);
-        logSelectionSummary(scored, activeChannels, false, scope);
+        logSelectionSummary(selectionBundle, activeChannels, false, scope);
         writeScoresCsv(scoresFile, scored, activeChannels);
         writeCacheProperties(directory, lifFile, activeChannels, zSliceConfig,
                 sourceSeriesSignature, scope.cacheValue, cacheFile);
@@ -378,7 +378,7 @@ public final class QcMinMaxPerConditionSelector {
                     + (selected.size() == 1 ? "" : "s") + ").\n"
                     + "Saved cache: " + scoresFile.getAbsolutePath();
         } else {
-            int nConditions = countSelectedConditions(scored);
+            int nConditions = countSelectedConditions(selectionBundle.selectedSeries);
             message = "Computed min/max per condition for " + nConditions + " condition"
                     + (nConditions == 1 ? "" : "s") + ".\n"
                     + "Saved cache: " + scoresFile.getAbsolutePath();
@@ -618,62 +618,188 @@ public final class QcMinMaxPerConditionSelector {
     private static List<SelectedSeries> selectedSeriesForChannel(List<ScoreRecord> records,
                                                                  int channelNumber) {
         List<ConditionSelection> orderedConditions =
-                orderedConditionSelections(records, Integer.valueOf(channelNumber));
+                channelConditionSelections(records, channelNumber);
         List<SelectedSeries> selected = new ArrayList<SelectedSeries>();
         LinkedHashSet<Integer> seen = new LinkedHashSet<Integer>();
         for (ConditionSelection condition : orderedConditions) {
-            addSelectedSeries(selected, seen, condition.max);
-            addSelectedSeries(selected, seen, condition.min);
+            if (condition.max != null && condition.max == condition.min) {
+                addSelectedSeries(selected, seen, condition.max, "MIN_MAX");
+            } else {
+                addSelectedSeries(selected, seen, condition.max, "MAX");
+                addSelectedSeries(selected, seen, condition.min, "MIN");
+            }
         }
         return selected;
     }
 
     static List<SelectedSeries> selectedSeriesOverall(List<ScoreRecord> records,
                                                       List<QcSelectionChannel> qcChannels) {
-        assignOverallSelectionRoles(records, qcChannels);
-        return overallSelectedSeriesFromAssignedRoles(records);
+        return flattenSelectedSeriesByChannelNumber(
+                selectedSeriesOverallByChannelNumber(records, qcChannels));
     }
 
-    private static SelectionBundle assignAndSelectSeries(List<ScoreRecord> records,
-                                                         List<QcSelectionChannel> qcChannels,
-                                                         SelectionScope scope) {
-        if (scope == SelectionScope.OVERALL) {
-            return new SelectionBundle(
-                    selectedSeriesOverall(records, qcChannels),
-                    null);
+    static Map<Integer, List<SelectedSeries>> selectedSeriesOverallByChannelNumber(
+            List<ScoreRecord> records,
+            List<QcSelectionChannel> qcChannels) {
+        LinkedHashMap<Integer, List<SelectedSeries>> byChannel =
+                new LinkedHashMap<Integer, List<SelectedSeries>>();
+        if (qcChannels == null) return byChannel;
+        for (QcSelectionChannel channel : qcChannels) {
+            if (channel == null) continue;
+            byChannel.put(Integer.valueOf(channel.channelNumber),
+                    selectedSeriesOverallForChannel(records, channel.channelNumber));
         }
-        assignSelectionRoles(records, qcChannels);
-        return new SelectionBundle(
-                selectedSeries(records),
-                selectedSeriesByChannelNumber(records, qcChannels));
+        return byChannel;
     }
 
-    private static List<SelectedSeries> overallSelectedSeriesFromAssignedRoles(List<ScoreRecord> records) {
-        ScoreRecord min = null;
-        ScoreRecord max = null;
-        if (records != null) {
-            for (ScoreRecord record : records) {
-                if (record == null || record.candidate == null) continue;
-                if ("MIN_MAX".equals(record.selectedRole)) {
-                    min = record;
-                    max = record;
-                } else if ("MIN".equals(record.selectedRole)) {
-                    min = record;
-                } else if ("MAX".equals(record.selectedRole)) {
-                    max = record;
-                }
-            }
-        }
-
+    private static List<SelectedSeries> selectedSeriesOverallForChannel(List<ScoreRecord> records,
+                                                                        int channelNumber) {
+        List<ScoreRecord> valid = channelScoredRecords(records, channelNumber);
         List<SelectedSeries> selected = new ArrayList<SelectedSeries>();
+        if (valid.isEmpty()) return selected;
+        sortByChannelScoreAscending(valid, channelNumber);
+        ScoreRecord min = valid.get(0);
+        ScoreRecord max = valid.get(valid.size() - 1);
         LinkedHashSet<Integer> seen = new LinkedHashSet<Integer>();
-        if (min != null && min == max) {
+        if (min == max) {
             addSelectedSeries(selected, seen, max, "OVERALL_MIN_MAX");
         } else {
             addSelectedSeries(selected, seen, max, "OVERALL_MAX");
             addSelectedSeries(selected, seen, min, "OVERALL_MIN");
         }
         return selected;
+    }
+
+    private static SelectionBundle assignAndSelectSeries(List<ScoreRecord> records,
+                                                         List<QcSelectionChannel> qcChannels,
+                                                         SelectionScope scope) {
+        Map<Integer, List<SelectedSeries>> selectedSeriesByChannelNumber =
+                scope == SelectionScope.OVERALL
+                        ? selectedSeriesOverallByChannelNumber(records, qcChannels)
+                        : selectedSeriesByChannelNumber(records, qcChannels);
+        List<SelectedSeries> selectedSeries =
+                flattenSelectedSeriesByChannelNumber(selectedSeriesByChannelNumber);
+        applyFlattenedSelectionRoles(records, selectedSeries);
+        return new SelectionBundle(selectedSeries, selectedSeriesByChannelNumber);
+    }
+
+    private static List<SelectedSeries> flattenSelectedSeriesByChannelNumber(
+            Map<Integer, List<SelectedSeries>> selectedSeriesByChannelNumber) {
+        List<SelectedSeries> flattened = new ArrayList<SelectedSeries>();
+        LinkedHashSet<Integer> seen = new LinkedHashSet<Integer>();
+        if (selectedSeriesByChannelNumber == null) return flattened;
+        for (List<SelectedSeries> selectedSeries : selectedSeriesByChannelNumber.values()) {
+            if (selectedSeries == null) continue;
+            for (SelectedSeries selected : selectedSeries) {
+                if (selected == null || selected.seriesIndex < 0) continue;
+                if (seen.add(Integer.valueOf(selected.seriesIndex))) {
+                    flattened.add(selected);
+                }
+            }
+        }
+        return flattened;
+    }
+
+    private static void applyFlattenedSelectionRoles(List<ScoreRecord> records,
+                                                     List<SelectedSeries> selectedSeries) {
+        resetSelectionRoles(records);
+        if (records == null || selectedSeries == null) return;
+        LinkedHashMap<Integer, ScoreRecord> recordsBySeries =
+                new LinkedHashMap<Integer, ScoreRecord>();
+        for (ScoreRecord record : records) {
+            if (record == null || record.candidate == null) continue;
+            recordsBySeries.put(Integer.valueOf(record.candidate.seriesIndex), record);
+        }
+        for (SelectedSeries selected : selectedSeries) {
+            if (selected == null || selected.seriesIndex < 0) continue;
+            ScoreRecord record = recordsBySeries.get(Integer.valueOf(selected.seriesIndex));
+            if (record != null && (record.selectedRole == null || record.selectedRole.isEmpty())) {
+                record.selectedRole = selected.selectedRole;
+            }
+        }
+    }
+
+    private static List<ConditionSelection> channelConditionSelections(List<ScoreRecord> records,
+                                                                       int channelNumber) {
+        LinkedHashMap<String, List<ScoreRecord>> byCondition =
+                new LinkedHashMap<String, List<ScoreRecord>>();
+        if (records != null) {
+            for (ScoreRecord record : records) {
+                if (record == null || record.candidate == null) continue;
+                if (!hasFiniteChannelScore(record, channelNumber)) continue;
+                List<ScoreRecord> group = byCondition.get(record.candidate.conditionName);
+                if (group == null) {
+                    group = new ArrayList<ScoreRecord>();
+                    byCondition.put(record.candidate.conditionName, group);
+                }
+                group.add(record);
+            }
+        }
+
+        List<ConditionSelection> selections = new ArrayList<ConditionSelection>();
+        for (Map.Entry<String, List<ScoreRecord>> entry : byCondition.entrySet()) {
+            List<ScoreRecord> valid = new ArrayList<ScoreRecord>(entry.getValue());
+            if (valid.isEmpty()) continue;
+            sortByChannelScoreAscending(valid, channelNumber);
+            selections.add(new ConditionSelection(
+                    entry.getKey(),
+                    valid.get(0),
+                    valid.get(valid.size() - 1),
+                    Integer.valueOf(channelNumber)));
+        }
+        sortConditionSelections(selections);
+        return selections;
+    }
+
+    private static List<ScoreRecord> channelScoredRecords(List<ScoreRecord> records,
+                                                          int channelNumber) {
+        List<ScoreRecord> valid = new ArrayList<ScoreRecord>();
+        if (records == null) return valid;
+        for (ScoreRecord record : records) {
+            if (record == null || record.candidate == null) continue;
+            if (hasFiniteChannelScore(record, channelNumber)) {
+                valid.add(record);
+            }
+        }
+        return valid;
+    }
+
+    private static void sortByChannelScoreAscending(List<ScoreRecord> records,
+                                                    final int channelNumber) {
+        Collections.sort(records, new Comparator<ScoreRecord>() {
+            @Override
+            public int compare(ScoreRecord a, ScoreRecord b) {
+                double sa = finiteChannelScore(a, channelNumber);
+                double sb = finiteChannelScore(b, channelNumber);
+                int cmp = Double.compare(sa, sb);
+                if (cmp != 0) return cmp;
+                int seriesA = a == null || a.candidate == null
+                        ? Integer.MAX_VALUE
+                        : a.candidate.seriesIndex;
+                int seriesB = b == null || b.candidate == null
+                        ? Integer.MAX_VALUE
+                        : b.candidate.seriesIndex;
+                return Integer.compare(seriesA, seriesB);
+            }
+        });
+    }
+
+    private static boolean hasFiniteChannelScore(ScoreRecord record, int channelNumber) {
+        double score = finiteChannelScore(record, channelNumber);
+        return !Double.isNaN(score) && !Double.isInfinite(score);
+    }
+
+    private static void sortConditionSelections(List<ConditionSelection> selections) {
+        Collections.sort(selections, new Comparator<ConditionSelection>() {
+            @Override
+            public int compare(ConditionSelection a, ConditionSelection b) {
+                int brightness = compareBrightnessDescending(a.maxBrightness, b.maxBrightness);
+                if (brightness != 0) return brightness;
+                int condition = a.conditionName.compareToIgnoreCase(b.conditionName);
+                if (condition != 0) return condition;
+                return Integer.compare(selectionSeriesIndex(a), selectionSeriesIndex(b));
+            }
+        });
     }
 
     private static List<ConditionSelection> orderedConditionSelections(List<ScoreRecord> records) {
@@ -882,12 +1008,13 @@ public final class QcMinMaxPerConditionSelector {
         return records;
     }
 
-    private static int countSelectedConditions(List<ScoreRecord> records) {
+    private static int countSelectedConditions(List<SelectedSeries> selectedSeries) {
         LinkedHashSet<String> selected = new LinkedHashSet<String>();
-        for (ScoreRecord record : records) {
-            if (record != null && record.candidate != null
-                    && record.selectedRole != null && !record.selectedRole.isEmpty()) {
-                selected.add(record.candidate.conditionName);
+        if (selectedSeries == null) return 0;
+        for (SelectedSeries selectedItem : selectedSeries) {
+            if (selectedItem != null && selectedItem.selectedRole != null
+                    && !selectedItem.selectedRole.isEmpty()) {
+                selected.add(selectedItem.conditionName);
             }
         }
         return selected.size();
@@ -956,24 +1083,74 @@ public final class QcMinMaxPerConditionSelector {
         return lines;
     }
 
-    private static void logSelectionSummary(List<ScoreRecord> records,
-                                            List<QcSelectionChannel> qcChannels,
-                                            boolean fromCache) {
-        logSelectionSummary(records, qcChannels, fromCache, SelectionScope.PER_CONDITION);
+    private static List<String> buildChannelSelectionLogLines(
+            SelectionBundle selectionBundle,
+            List<QcSelectionChannel> qcChannels,
+            SelectionScope scope) {
+        List<String> lines = new ArrayList<String>();
+        if (selectionBundle == null
+                || selectionBundle.selectedSeriesByChannelNumber == null
+                || qcChannels == null) {
+            return lines;
+        }
+        for (QcSelectionChannel channel : qcChannels) {
+            if (channel == null) continue;
+            List<SelectedSeries> selectedSeries =
+                    selectionBundle.selectedSeriesByChannelNumber.get(
+                            Integer.valueOf(channel.channelNumber));
+            if (selectedSeries == null || selectedSeries.isEmpty()) continue;
+            StringBuilder line = new StringBuilder();
+            line.append("  C").append(channel.channelNumber);
+            if (channel.channelName != null && !channel.channelName.trim().isEmpty()) {
+                line.append(" (").append(channel.channelName.trim()).append(")");
+            }
+            line.append(" -> ");
+            for (int i = 0; i < selectedSeries.size(); i++) {
+                if (i > 0) line.append(" | ");
+                line.append(describeSelectedSeries(selectedSeries.get(i), scope));
+            }
+            lines.add(line.toString());
+        }
+        return lines;
     }
 
-    private static void logSelectionSummary(List<ScoreRecord> records,
+    private static String describeSelectedSeries(SelectedSeries selected, SelectionScope scope) {
+        if (selected == null) return "";
+        StringBuilder sb = new StringBuilder();
+        String role = selected.selectedRole == null ? "" : selected.selectedRole.trim();
+        if (!role.isEmpty()) {
+            sb.append(role).append(": ");
+        }
+        if (scope != SelectionScope.OVERALL
+                && selected.conditionName != null
+                && !selected.conditionName.trim().isEmpty()) {
+            sb.append(selected.conditionName.trim()).append(" ");
+        }
+        sb.append("Series ").append(selected.seriesNumber);
+        if (selected.animalName != null && !selected.animalName.trim().isEmpty()) {
+            sb.append(" (").append(selected.animalName.trim()).append(")");
+        }
+        if (selected.seriesName != null && !selected.seriesName.trim().isEmpty()) {
+            sb.append(" [").append(selected.seriesName.trim()).append("]");
+        }
+        if (scope == SelectionScope.OVERALL
+                && selected.conditionName != null
+                && !selected.conditionName.trim().isEmpty()) {
+            sb.append(", condition=").append(selected.conditionName.trim());
+        }
+        return sb.toString();
+    }
+
+    private static void logSelectionSummary(SelectionBundle selectionBundle,
                                             List<QcSelectionChannel> qcChannels,
                                             boolean fromCache,
                                             SelectionScope scope) {
-        List<String> lines = scope == SelectionScope.OVERALL
-                ? buildOverallSelectionLogLines(records, qcChannels)
-                : buildSelectionLogLines(records, qcChannels);
+        List<String> lines = buildChannelSelectionLogLines(selectionBundle, qcChannels, scope);
         if (lines.isEmpty()) return;
         String label = scope == SelectionScope.OVERALL ? "overall min/max" : "min/max per condition";
         IJ.log("QC " + label + ": "
                 + (fromCache ? "cached" : "computed")
-                + " selection summary");
+                + " channel-specific selection summary");
         for (String line : lines) {
             IJ.log(line);
         }
@@ -1401,8 +1578,6 @@ public final class QcMinMaxPerConditionSelector {
         if (!channelSignature(qcChannels).equals(props.getProperty(KEY_QC_CHANNEL_SIGNATURE))) return false;
         if (!ZSliceConfigIO.signature(zSliceConfig).equals(props.getProperty(KEY_Z_SLICE_SIGNATURE, "zslice:full"))) return false;
         if (!safe(sourceSeriesSignature).equals(props.getProperty(KEY_SOURCE_SERIES_SIGNATURE, ""))) return false;
-        if (!selectionScopeOrDefault(selectionScope).equals(
-                props.getProperty(KEY_SELECTION_SCOPE, SELECTION_SCOPE_PER_CONDITION))) return false;
 
         File conditionFile = ConditionManifestIO.getExistingFile(directory);
         boolean conditionExists = conditionFile != null && conditionFile.isFile();

@@ -159,7 +159,7 @@ public class QcMinMaxPerConditionSelectorTest {
     }
 
     @Test
-    public void cacheInvalidatesWhenSelectionScopeChanges() throws Exception {
+    public void cacheRemainsValidWhenSelectionScopeChanges() throws Exception {
         File dir = temp.newFolder("cache-scope-project");
         File lif = temp.newFile("scope-source.lif");
         File cache = temp.newFile("scope-cache.properties");
@@ -186,7 +186,7 @@ public class QcMinMaxPerConditionSelectorTest {
                         "source-series:v1|0:0:scope-source.lif:MouseA_LH_SCN:0x0z12c0",
                         "overall",
                         cache, scores));
-        assertEquals(Boolean.FALSE,
+        assertEquals(Boolean.TRUE,
                 valid.invoke(null, dir.getAbsolutePath(), lif, qcChannels, null,
                         "source-series:v1|0:0:scope-source.lif:MouseA_LH_SCN:0x0z12c0",
                         "per_condition",
@@ -306,6 +306,39 @@ public class QcMinMaxPerConditionSelectorTest {
     }
 
     @Test
+    public void selectedSeriesByChannel_choosesMinAndMaxIndependentlyPerChannel() {
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false),
+                new QcSelectionChannel(1, "Marker", true, false, false));
+        List<QcMinMaxPerConditionSelector.ScoreRecord> records =
+                new ArrayList<QcMinMaxPerConditionSelector.ScoreRecord>();
+        records.add(record("CondA", 0, 100, 50));
+        records.add(record("CondA", 1, 1, 50));
+        records.add(record("CondA", 2, 50, 100));
+        records.add(record("CondA", 3, 50, 1));
+
+        Map<Integer, List<QcMinMaxPerConditionSelector.SelectedSeries>> byChannel =
+                QcMinMaxPerConditionSelector.selectedSeriesByChannelNumber(records, qcChannels);
+
+        List<QcMinMaxPerConditionSelector.SelectedSeries> c1 =
+                byChannel.get(Integer.valueOf(1));
+        List<QcMinMaxPerConditionSelector.SelectedSeries> c2 =
+                byChannel.get(Integer.valueOf(2));
+
+        assertEquals(2, c1.size());
+        assertEquals(0, c1.get(0).seriesIndex);
+        assertEquals("MAX", c1.get(0).selectedRole);
+        assertEquals(1, c1.get(1).seriesIndex);
+        assertEquals("MIN", c1.get(1).selectedRole);
+
+        assertEquals(2, c2.size());
+        assertEquals(2, c2.get(0).seriesIndex);
+        assertEquals("MAX", c2.get(0).selectedRole);
+        assertEquals(3, c2.get(1).seriesIndex);
+        assertEquals("MIN", c2.get(1).selectedRole);
+    }
+
+    @Test
     public void selectedSeriesOverall_returnsOnlyGlobalMaxThenMin() {
         List<QcSelectionChannel> qcChannels = Arrays.asList(
                 new QcSelectionChannel(0, "DAPI", true, false, false),
@@ -327,6 +360,40 @@ public class QcMinMaxPerConditionSelectorTest {
         assertEquals(1, selected.get(1).seriesIndex);
         assertEquals("Low", selected.get(1).conditionName);
         assertEquals("OVERALL_MIN", selected.get(1).selectedRole);
+    }
+
+    @Test
+    public void selectedSeriesOverallByChannel_choosesMinAndMaxIndependentlyPerChannel() {
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false),
+                new QcSelectionChannel(1, "Marker", false, true, false));
+        List<QcMinMaxPerConditionSelector.ScoreRecord> records =
+                new ArrayList<QcMinMaxPerConditionSelector.ScoreRecord>();
+        records.add(record("A", 0, 100, 50));
+        records.add(record("B", 1, 1, 50));
+        records.add(record("C", 2, 50, 100));
+        records.add(record("D", 3, 50, 1));
+
+        Map<Integer, List<QcMinMaxPerConditionSelector.SelectedSeries>> byChannel =
+                QcMinMaxPerConditionSelector.selectedSeriesOverallByChannelNumber(records, qcChannels);
+        List<QcMinMaxPerConditionSelector.SelectedSeries> c1 =
+                byChannel.get(Integer.valueOf(1));
+        List<QcMinMaxPerConditionSelector.SelectedSeries> c2 =
+                byChannel.get(Integer.valueOf(2));
+        List<QcMinMaxPerConditionSelector.SelectedSeries> flattened =
+                QcMinMaxPerConditionSelector.selectedSeriesOverall(records, qcChannels);
+
+        assertEquals(0, c1.get(0).seriesIndex);
+        assertEquals("OVERALL_MAX", c1.get(0).selectedRole);
+        assertEquals(1, c1.get(1).seriesIndex);
+        assertEquals("OVERALL_MIN", c1.get(1).selectedRole);
+
+        assertEquals(2, c2.get(0).seriesIndex);
+        assertEquals("OVERALL_MAX", c2.get(0).selectedRole);
+        assertEquals(3, c2.get(1).seriesIndex);
+        assertEquals("OVERALL_MIN", c2.get(1).selectedRole);
+
+        assertEquals(4, flattened.size());
     }
 
     @Test

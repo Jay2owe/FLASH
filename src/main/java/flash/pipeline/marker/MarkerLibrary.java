@@ -86,10 +86,8 @@ public final class MarkerLibrary {
         }
         for (Entry entry : entries) {
             if (entry == null) continue;
-            if (needle.equals(MarkerSearchRanking.normalize(entry.getId()))) return entry;
             if (needle.equals(MarkerSearchRanking.normalize(entry.getDisplayName()))) return entry;
             if (containsNormalized(entry.getAliases(), needle)) return entry;
-            if (containsNormalized(entry.getNameHints(), needle)) return entry;
         }
         return null;
     }
