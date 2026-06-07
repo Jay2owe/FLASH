@@ -104,6 +104,11 @@ public final class ThresholdControlPanel extends JPanel {
         refreshLayoutAndPaint();
     }
 
+    public void setThresholdPreservingRange(double lower, double upper) {
+        applyThreshold(lower, upper, false, false, true);
+        refreshLayoutAndPaint();
+    }
+
     public double getLowerThreshold() {
         return lowerValue;
     }
@@ -257,6 +262,14 @@ public final class ThresholdControlPanel extends JPanel {
     }
 
     private void applyThreshold(double requestedLower, double requestedUpper, boolean fire, boolean adjusting) {
+        applyThreshold(requestedLower, requestedUpper, fire, adjusting, false);
+    }
+
+    private void applyThreshold(double requestedLower, double requestedUpper, boolean fire, boolean adjusting,
+                                boolean allowDomainExpansion) {
+        if (allowDomainExpansion && expandDomainToInclude(requestedLower, requestedUpper)) {
+            configureSliderDomains();
+        }
         double lower = FijiStyleRangeSliderPanel.clamp(requestedLower, domainMin, domainMax);
         double upper = FijiStyleRangeSliderPanel.clamp(requestedUpper, domainMin, domainMax);
         if (lower > upper) {
@@ -280,6 +293,25 @@ public final class ThresholdControlPanel extends JPanel {
         if (fire && listener != null) {
             listener.thresholdChanged(lowerValue, upperValue, adjusting);
         }
+    }
+
+    private boolean expandDomainToInclude(double first, double second) {
+        double newMin = domainMin;
+        double newMax = domainMax;
+        if (Double.isFinite(first)) {
+            if (first < newMin) newMin = first;
+            if (first > newMax) newMax = first;
+        }
+        if (Double.isFinite(second)) {
+            if (second < newMin) newMin = second;
+            if (second > newMax) newMax = second;
+        }
+        if (newMin == domainMin && newMax == domainMax) {
+            return false;
+        }
+        domainMin = newMin;
+        domainMax = newMax;
+        return true;
     }
 
     private void refreshLayoutAndPaint() {

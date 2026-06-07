@@ -207,12 +207,14 @@ public final class ChannelThresholdStage implements ConfigQcStage {
         String token = normalizeThresholdToken(thresholdStore.get());
         double upper = imageMaximum(thresholdSource);
         if (restartLowerThreshold != null && Double.isFinite(restartLowerThreshold.doubleValue())) {
-            control.setThreshold(restartLowerThreshold.doubleValue(), upper);
+            double lower = restartLowerThreshold.doubleValue();
+            control.setThresholdPreservingRange(lower, upperThresholdFor(lower, thresholdSource));
             return;
         }
         if (isNumericThresholdToken(token)) {
             try {
-                control.setThreshold(Double.parseDouble(token), upper);
+                double lower = Double.parseDouble(token);
+                control.setThresholdPreservingRange(lower, upperThresholdFor(lower, thresholdSource));
                 return;
             } catch (NumberFormatException ignored) {
                 // Fall through to automatic suggestion.
@@ -300,6 +302,11 @@ public final class ChannelThresholdStage implements ConfigQcStage {
         if (processor == null) return 255.0;
         double max = processor.getMax();
         return Double.isFinite(max) ? max : 255.0;
+    }
+
+    private static double upperThresholdFor(double lower, ImagePlus image) {
+        double upper = imageMaximum(image);
+        return Double.isFinite(lower) ? Math.max(upper, lower) : upper;
     }
 
     private static boolean isValidThresholdValue(double threshold) {

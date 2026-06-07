@@ -225,7 +225,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             if (thresholdControl != null) {
                 try {
                     double lower = Double.parseDouble(threshold.value.trim());
-                    thresholdControl.setThreshold(lower, imageMaximum(filteredSource));
+                    thresholdControl.setThresholdPreservingRange(lower,
+                            upperThresholdFor(lower, filteredSource));
                 } catch (NumberFormatException ignored) {
                     // Keep the stored token; invalid legacy values are skipped by the UI.
                 }
@@ -557,14 +558,16 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
                 && restartUpperThreshold != null
                 && Double.isFinite(restartLowerThreshold.doubleValue())
                 && Double.isFinite(restartUpperThreshold.doubleValue())) {
-            thresholdControl.setThreshold(restartLowerThreshold.doubleValue(),
-                    restartUpperThreshold.doubleValue());
+            thresholdControl.setThresholdPreservingRange(restartLowerThreshold.doubleValue(),
+                    Math.max(restartLowerThreshold.doubleValue(),
+                            restartUpperThreshold.doubleValue()));
             return;
         }
         String token = ChannelThresholdStage.normalizeThresholdToken(thresholdStore.get());
         if (ChannelThresholdStage.isNumericThresholdToken(token)) {
             try {
-                thresholdControl.setThreshold(Double.parseDouble(token), upper);
+                double lower = Double.parseDouble(token);
+                thresholdControl.setThresholdPreservingRange(lower, upperThresholdFor(lower, filteredSource));
                 return;
             } catch (NumberFormatException ignored) {
                 // Fall through to automatic suggestion.
@@ -805,7 +808,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         if (thresholdControl != null) {
             try {
                 double lower = Double.parseDouble(previousSettingsThresholdToken);
-                thresholdControl.setThreshold(lower, imageMaximum(filteredSource));
+                thresholdControl.setThresholdPreservingRange(lower,
+                        upperThresholdFor(lower, filteredSource));
                 updateThresholdPreview(true);
             } catch (NumberFormatException e) {
                 setError("Could not restore the previous threshold.");
@@ -880,7 +884,8 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         Number minSize = numberValue(combo, ParameterId.MIN_SIZE);
         Number maxSize = numberValue(combo, ParameterId.MAX_SIZE);
         if (threshold != null && thresholdControl != null) {
-            thresholdControl.setThreshold(threshold.doubleValue(), imageMaximum(filteredSource));
+            double lower = threshold.doubleValue();
+            thresholdControl.setThresholdPreservingRange(lower, upperThresholdFor(lower, filteredSource));
         }
         updatingFields = true;
         try {
@@ -1108,6 +1113,11 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
         if (processor == null) return 255.0;
         double max = processor.getMax();
         return Double.isFinite(max) ? max : 255.0;
+    }
+
+    private static double upperThresholdFor(double lower, ImagePlus image) {
+        double upper = imageMaximum(image);
+        return Double.isFinite(lower) ? Math.max(upper, lower) : upper;
     }
 
     private static String normalizeMaxText(String value) {
