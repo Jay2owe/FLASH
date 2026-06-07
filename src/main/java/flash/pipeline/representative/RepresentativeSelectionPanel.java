@@ -19,6 +19,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
@@ -90,8 +91,12 @@ public final class RepresentativeSelectionPanel extends JPanel {
     private static final int META_WIDTH = 148;
     private static final int ROW_GAP = 8;
     private static final int MAX_THUMB_THREADS = 4;
+    private static final String RECOMMENDED_BADGE_TEXT = "RECOMMENDED";
+    private static final Color RECOMMENDED_BLUE = new Color(0x56, 0xB4, 0xE9);
+    private static final Color RECOMMENDED_RIM = new Color(0, 0, 0, 170);
 
     private final LinkedHashMap<String, List<RepresentativeSeries>> seriesByCondition;
+    private final LinkedHashMap<String, String> recommendedSeriesIdByCondition;
     private final LinkedHashMap<String, RepresentativeSeries> selectedByCondition =
             new LinkedHashMap<String, RepresentativeSeries>();
     private final LinkedHashMap<String, SeriesRowPanel> rowBySeriesId =
@@ -121,6 +126,9 @@ public final class RepresentativeSelectionPanel extends JPanel {
                                         RepresentativeStatTable statTable,
                                         RepresentativeSelection rememberedSelection) {
         this.seriesByCondition = groupByCondition(series);
+        this.recommendedSeriesIdByCondition = shouldShowStatsPanel(statistic)
+                ? recommendedSeriesIdsByCondition(seriesByCondition, statTable)
+                : new LinkedHashMap<String, String>();
         this.statsPanel = shouldShowStatsPanel(statistic)
                 ? new RepresentativeStatsPanel(statTable) : null;
         this.thumbnailExecutor = Executors.newFixedThreadPool(thumbnailThreadCount(),
@@ -195,6 +203,16 @@ public final class RepresentativeSelectionPanel extends JPanel {
 
     RepresentativeStatsPanel statsPanelForTests() {
         return statsPanel;
+    }
+
+    boolean isRecommendedForTests(String seriesId) {
+        String id = clean(seriesId);
+        for (String recommendedId : recommendedSeriesIdByCondition.values()) {
+            if (id.equals(clean(recommendedId))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void dispose() {
@@ -337,7 +355,7 @@ public final class RepresentativeSelectionPanel extends JPanel {
 
         List<SeriesRowPanel> rows = new ArrayList<SeriesRowPanel>();
         for (RepresentativeSeries series : seriesForCondition) {
-            SeriesRowPanel row = new SeriesRowPanel(series);
+            SeriesRowPanel row = new SeriesRowPanel(series, isRecommended(series));
             row.setAlignmentX(Component.LEFT_ALIGNMENT);
             rows.add(row);
             rowBySeriesId.put(series.id(), row);
@@ -348,6 +366,15 @@ public final class RepresentativeSelectionPanel extends JPanel {
         Dimension preferred = column.getPreferredSize();
         column.setPreferredSize(new Dimension(width, preferred.height));
         return column;
+    }
+
+    private boolean isRecommended(RepresentativeSeries series) {
+        if (series == null) {
+            return false;
+        }
+        String condition = RepresentativeSelection.conditionLabel(series.condition());
+        return clean(series.id()).equals(clean(
+                recommendedSeriesIdByCondition.get(condition)));
     }
 
     private int preferredColumnWidth(List<RepresentativeSeries> seriesForCondition) {
@@ -375,12 +402,18 @@ public final class RepresentativeSelectionPanel extends JPanel {
         }
     }
 
-    private JComponent buildMetaPanel(RepresentativeSeries series) {
+    private JComponent buildMetaPanel(RepresentativeSeries series,
+                                      boolean recommended) {
         JPanel meta = new JPanel();
         meta.setLayout(new BoxLayout(meta, BoxLayout.Y_AXIS));
         meta.setOpaque(false);
         meta.setPreferredSize(new Dimension(META_WIDTH, THUMB_HEIGHT + 24));
         meta.setMaximumSize(new Dimension(META_WIDTH, THUMB_HEIGHT + 24));
+
+        if (recommended) {
+            meta.add(recommendationBadge());
+            meta.add(Box.createVerticalStrut(3));
+        }
 
         JLabel title = metadataLabel(series.seriesName().isEmpty()
                 ? "Series " + series.seriesNumber()
@@ -396,6 +429,24 @@ public final class RepresentativeSelectionPanel extends JPanel {
         meta.add(region);
         meta.add(Box.createVerticalGlue());
         return meta;
+    }
+
+    private JLabel recommendationBadge() {
+        JLabel badge = new JLabel(RECOMMENDED_BADGE_TEXT, SwingConstants.CENTER);
+        badge.setFont(FlashTheme.bodyMedium().deriveFont(Font.BOLD, 9f));
+        badge.setForeground(Color.WHITE);
+        badge.setOpaque(true);
+        badge.setBackground(RECOMMENDED_BLUE);
+        badge.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(RECOMMENDED_RIM),
+                FlashTheme.pad(1, 5, 1, 5)));
+        badge.setToolTipText("Closest to the condition mean.");
+        badge.setAlignmentX(Component.LEFT_ALIGNMENT);
+        Dimension size = new Dimension(104, 18);
+        badge.setPreferredSize(size);
+        badge.setMinimumSize(size);
+        badge.setMaximumSize(size);
+        return badge;
     }
 
     private JLabel metadataLabel(String text, java.awt.Font font, Color color) {
@@ -547,22 +598,171 @@ public final class RepresentativeSelectionPanel extends JPanel {
         return statistic != null && statistic != RepresentativeStatistic.NONE;
     }
 
-    private static Border rowBorder(boolean selected) {
-        Color border = selected ? FlashTheme.SELECTION_BORDER : FlashTheme.BORDER;
-        int thickness = selected ? 2 : 1;
+    private static Border rowBorder(boolean selected, boolean recommended) {
+        Color border = recommended
+                ? RECOMMENDED_BLUE
+                : (selected ? FlashTheme.SELECTION_BORDER : FlashTheme.BORDER);
+        int thickness = recommended ? 3 : (selected ? 2 : 1);
         return BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(border, thickness),
                 FlashTheme.pad(FlashTheme.SPACE_S));
     }
 
+    private static LinkedHashMap<String, String> recommendedSeriesIdsByCondition(
+            LinkedHashMap<String, List<RepresentativeSeries>> seriesByCondition,
+            RepresentativeStatTable table) {
+        LinkedHashMap<String, String> recommendations =
+                new LinkedHashMap<String, String>();
+        if (seriesByCondition == null || table == null || table.isEmpty()) {
+            return recommendations;
+        }
+
+        LinkedHashMap<String, RepresentativeStatTable.Row> rowsBySeriesId =
+                new LinkedHashMap<String, RepresentativeStatTable.Row>();
+        for (RepresentativeStatTable.Row row : table.rows()) {
+            rowsBySeriesId.put(clean(row.seriesId), row);
+        }
+
+        for (Map.Entry<String, List<RepresentativeSeries>> entry
+                : seriesByCondition.entrySet()) {
+            String recommended = recommendedSeriesId(
+                    entry.getValue(), table, rowsBySeriesId);
+            if (!recommended.isEmpty()) {
+                recommendations.put(entry.getKey(), recommended);
+            }
+        }
+        return recommendations;
+    }
+
+    private static String recommendedSeriesId(
+            List<RepresentativeSeries> seriesForCondition,
+            RepresentativeStatTable table,
+            Map<String, RepresentativeStatTable.Row> rowsBySeriesId) {
+        if (seriesForCondition == null || seriesForCondition.isEmpty()) {
+            return "";
+        }
+
+        List<CandidateScore> candidates = new ArrayList<CandidateScore>();
+        LinkedHashMap<String, CandidateScore> candidatesById =
+                new LinkedHashMap<String, CandidateScore>();
+        for (RepresentativeSeries series : seriesForCondition) {
+            String id = series == null ? "" : clean(series.id());
+            RepresentativeStatTable.Row row = rowsBySeriesId.get(id);
+            if (id.isEmpty() || row == null) {
+                continue;
+            }
+            CandidateScore candidate =
+                    new CandidateScore(id, row, candidates.size());
+            candidates.add(candidate);
+            candidatesById.put(id, candidate);
+        }
+        if (candidates.isEmpty()) {
+            return "";
+        }
+
+        for (String channelName : table.channelNames()) {
+            List<ChannelValue> values = new ArrayList<ChannelValue>();
+            double sum = 0.0;
+            double min = Double.POSITIVE_INFINITY;
+            double max = Double.NEGATIVE_INFINITY;
+            for (CandidateScore candidate : candidates) {
+                Double value = candidate.row.value(channelName);
+                if (value == null || !Double.isFinite(value.doubleValue())) {
+                    continue;
+                }
+                double v = value.doubleValue();
+                values.add(new ChannelValue(candidate, v));
+                sum += v;
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
+            if (values.isEmpty()) {
+                continue;
+            }
+            double mean = sum / (double) values.size();
+            double scale = max > min ? max - min : 1.0;
+            for (ChannelValue value : values) {
+                value.candidate.addDistance(Math.abs(value.value - mean) / scale);
+            }
+        }
+
+        CandidateScore best = null;
+        for (CandidateScore candidate : candidatesById.values()) {
+            if (candidate.dimensionCount == 0) {
+                continue;
+            }
+            if (candidate.isBetterThan(best)) {
+                best = candidate;
+            }
+        }
+        return best == null ? "" : best.seriesId;
+    }
+
+    private static final class CandidateScore {
+        final String seriesId;
+        final RepresentativeStatTable.Row row;
+        final int order;
+        double distanceSum = 0.0;
+        int dimensionCount = 0;
+
+        CandidateScore(String seriesId,
+                       RepresentativeStatTable.Row row,
+                       int order) {
+            this.seriesId = seriesId;
+            this.row = row;
+            this.order = order;
+        }
+
+        void addDistance(double distance) {
+            if (!Double.isFinite(distance)) {
+                return;
+            }
+            distanceSum += distance;
+            dimensionCount++;
+        }
+
+        double averageDistance() {
+            return dimensionCount <= 0
+                    ? Double.POSITIVE_INFINITY
+                    : distanceSum / (double) dimensionCount;
+        }
+
+        boolean isBetterThan(CandidateScore other) {
+            if (other == null) {
+                return true;
+            }
+            int byDistance = Double.compare(averageDistance(),
+                    other.averageDistance());
+            if (byDistance != 0) {
+                return byDistance < 0;
+            }
+            if (dimensionCount != other.dimensionCount) {
+                return dimensionCount > other.dimensionCount;
+            }
+            return order < other.order;
+        }
+    }
+
+    private static final class ChannelValue {
+        final CandidateScore candidate;
+        final double value;
+
+        ChannelValue(CandidateScore candidate, double value) {
+            this.candidate = candidate;
+            this.value = value;
+        }
+    }
+
     private final class SeriesRowPanel extends JPanel {
         final RepresentativeSeries series;
+        final boolean recommended;
 
-        SeriesRowPanel(RepresentativeSeries series) {
+        SeriesRowPanel(RepresentativeSeries series, boolean recommended) {
             this.series = series;
+            this.recommended = recommended;
             setLayout(new BorderLayout(FlashTheme.SPACE_M, 0));
             setBackground(FlashTheme.TILE_BG);
-            setBorder(rowBorder(false));
+            setBorder(rowBorder(false, recommended));
             setPreferredSize(new Dimension(preferredColumnWidth(
                     Collections.singletonList(series)) - FlashTheme.SPACE_L,
                     THUMB_HEIGHT + 42));
@@ -580,14 +780,14 @@ public final class RepresentativeSelectionPanel extends JPanel {
             strip.add(thumbnailTile("Merge", series.mergeThumbnail(),
                     series.mergeCacheFile()));
 
-            add(buildMetaPanel(series), BorderLayout.WEST);
+            add(buildMetaPanel(series, recommended), BorderLayout.WEST);
             add(strip, BorderLayout.CENTER);
             installSelectionHandler(this, series);
         }
 
         void setSelected(boolean selected) {
             setBackground(selected ? FlashTheme.PRIMARY_BG : FlashTheme.TILE_BG);
-            setBorder(rowBorder(selected));
+            setBorder(rowBorder(selected, recommended));
             repaint();
         }
     }

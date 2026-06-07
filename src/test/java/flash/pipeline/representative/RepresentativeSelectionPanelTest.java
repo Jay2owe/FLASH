@@ -96,6 +96,8 @@ public class RepresentativeSelectionPanelTest {
                                 RepresentativeStatistic.NONE, table);
                 try {
                     assertNull(nonePanel.statsPanelForTests());
+                    assertFalse(nonePanel.isRecommendedForTests("0"));
+                    assertFalse(nonePanel.isRecommendedForTests("1"));
                 } finally {
                     nonePanel.dispose();
                 }
@@ -113,6 +115,53 @@ public class RepresentativeSelectionPanelTest {
                             .highlightedSeriesIdForTest());
                 } finally {
                     statsPanel.dispose();
+                }
+            }
+        });
+    }
+
+    @Test
+    public void recommendsClosestSeriesToConditionMeanAndShowsBadges()
+            throws Exception {
+        final RepresentativeSeries controlA = series("0", "Control", "Control-A");
+        final RepresentativeSeries controlB = series("1", "Control", "Control-B");
+        final RepresentativeSeries controlC = series("2", "Control", "Control-C");
+        final RepresentativeSeries treatmentA = series("3", "Treatment", "Treatment-A");
+        final RepresentativeSeries treatmentB = series("4", "Treatment", "Treatment-B");
+        final RepresentativeSeries treatmentC = series("5", "Treatment", "Treatment-C");
+        final RepresentativeStatTable table = new RepresentativeStatTable();
+        table.putValue("0", 0, 1, "Control-A", "Control-A",
+                "Control", "LH", "SCN", "DAPI", 10.0);
+        table.putValue("1", 1, 2, "Control-B", "Control-B",
+                "Control", "LH", "SCN", "DAPI", 12.0);
+        table.putValue("2", 2, 3, "Control-C", "Control-C",
+                "Control", "LH", "SCN", "DAPI", 18.0);
+        table.putValue("3", 3, 4, "Treatment-A", "Treatment-A",
+                "Treatment", "LH", "SCN", "DAPI", 100.0);
+        table.putValue("4", 4, 5, "Treatment-B", "Treatment-B",
+                "Treatment", "LH", "SCN", "DAPI", 130.0);
+        table.putValue("5", 5, 6, "Treatment-C", "Treatment-C",
+                "Treatment", "LH", "SCN", "DAPI", 140.0);
+
+        runOnEdt(new Runnable() {
+            @Override
+            public void run() {
+                RepresentativeSelectionPanel panel =
+                        new RepresentativeSelectionPanel(
+                                Arrays.asList(controlA, controlB, controlC,
+                                        treatmentA, treatmentB, treatmentC),
+                                RepresentativeStatistic.QUICK, table);
+                try {
+                    assertTrue(panel.isRecommendedForTests("1"));
+                    assertTrue(panel.isRecommendedForTests("4"));
+                    assertFalse(panel.isRecommendedForTests("0"));
+                    assertFalse(panel.isRecommendedForTests("2"));
+                    assertFalse(panel.isRecommendedForTests("3"));
+                    assertFalse(panel.isRecommendedForTests("5"));
+                    assertEquals(2, Collections.frequency(
+                            labelTexts(panel), "RECOMMENDED"));
+                } finally {
+                    panel.dispose();
                 }
             }
         });
