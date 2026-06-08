@@ -187,18 +187,18 @@ public final class IntensityDetailsWriter {
         w.write("<Intensity Spatial Analysis>\n");
         w.write("Enabled: " + safeConfig.isEnabled() + "\n");
         if (safeConfig.isEnabled()) {
-            w.write("Selected analyses: "
-                    + IntensitySpatialConfig.joinAnalysisTokens(safeConfig.getEnabledAnalyses()) + "\n");
-            w.write("2D spatial source: " + safeConfig.getSpatialSourceMode().token() + "\n");
-            w.write("MIP output: " + safeConfig.isMipEnabled() + "\n");
-            w.write("Native 3D output: " + safeConfig.isNative3dEnabled() + "\n");
+            w.write("Per-slice analyses: " + emptyFallback(
+                    IntensitySpatialConfig.joinAnalysisTokens(safeConfig.getEnabledPerSlice()), "none") + "\n");
+            w.write("MIP analyses: " + emptyFallback(
+                    IntensitySpatialConfig.joinAnalysisTokens(safeConfig.getEnabledMip()), "none") + "\n");
+            w.write("Native 3D analyses: " + emptyFallback(
+                    IntensitySpatialConfig.joinAnalysisTokens(safeConfig.getEnabled3D()), "none") + "\n");
             w.write("Overlays: " + safeConfig.isOverlaysEnabled() + "\n");
             w.write("Overlay path: " + emptyFallback(overlayPath, "Not written") + "\n");
         } else {
-            w.write("Selected analyses: none\n");
-            w.write("2D spatial source: full_stack\n");
-            w.write("MIP output: false\n");
-            w.write("Native 3D output: false\n");
+            w.write("Per-slice analyses: none\n");
+            w.write("MIP analyses: none\n");
+            w.write("Native 3D analyses: none\n");
             w.write("Overlays: false\n");
         }
         w.write("Z-slice mode: " + emptyFallback(zSliceSummary, "Full stack") + "\n");

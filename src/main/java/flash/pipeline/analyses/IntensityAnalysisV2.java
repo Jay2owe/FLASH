@@ -820,11 +820,12 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
         IJ.log("  Intensity-spatial: " + intensitySpatialConfig.isEnabled());
         if (intensitySpatialConfig.isEnabled()) {
-            IJ.log("  Intensity-spatial analyses: "
-                    + IntensitySpatialConfig.joinAnalysisTokens(intensitySpatialConfig.getEnabledAnalyses()));
-            IJ.log("  Intensity-spatial 2D source: "
-                    + intensitySpatialConfig.getSpatialSourceMode().token());
-            IJ.log("  Intensity-spatial native 3D: " + intensitySpatialConfig.isNative3dEnabled());
+            IJ.log("  Intensity-spatial per-slice: "
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensitySpatialConfig.getEnabledPerSlice()));
+            IJ.log("  Intensity-spatial MIP: "
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensitySpatialConfig.getEnabledMip()));
+            IJ.log("  Intensity-spatial native 3D: "
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensitySpatialConfig.getEnabled3D()));
         }
 
         // Output directories

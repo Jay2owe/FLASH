@@ -732,6 +732,9 @@ public class CLIConfig {
         final Map<Integer, String> thresholds = new LinkedHashMap<Integer, String>();
         Boolean spatialEnabled = null;
         Set<IntensitySpatialConfig.AnalysisKey> spatialAnalyses = null;
+        Set<IntensitySpatialConfig.AnalysisKey> spatialPerSliceAnalyses = null;
+        Set<IntensitySpatialConfig.AnalysisKey> spatialMipAnalyses = null;
+        Set<IntensitySpatialConfig.AnalysisKey> spatial3dAnalyses = null;
         IntensitySpatialConfig.SpatialSourceMode spatialSourceMode = null;
         Boolean spatialMipEnabled = null;
         Boolean spatialNative3dEnabled = null;
@@ -754,6 +757,21 @@ public class CLIConfig {
             return spatialAnalyses == null
                     ? Collections.<IntensitySpatialConfig.AnalysisKey>emptySet()
                     : Collections.unmodifiableSet(spatialAnalyses);
+        }
+        public Set<IntensitySpatialConfig.AnalysisKey> getSpatialPerSliceAnalyses() {
+            return spatialPerSliceAnalyses == null
+                    ? Collections.<IntensitySpatialConfig.AnalysisKey>emptySet()
+                    : Collections.unmodifiableSet(spatialPerSliceAnalyses);
+        }
+        public Set<IntensitySpatialConfig.AnalysisKey> getSpatialMipAnalyses() {
+            return spatialMipAnalyses == null
+                    ? Collections.<IntensitySpatialConfig.AnalysisKey>emptySet()
+                    : Collections.unmodifiableSet(spatialMipAnalyses);
+        }
+        public Set<IntensitySpatialConfig.AnalysisKey> getSpatial3dAnalyses() {
+            return spatial3dAnalyses == null
+                    ? Collections.<IntensitySpatialConfig.AnalysisKey>emptySet()
+                    : Collections.unmodifiableSet(spatial3dAnalyses);
         }
         public Boolean getSpatialMipEnabled() { return spatialMipEnabled; }
         public IntensitySpatialConfig.SpatialSourceMode getSpatialSourceMode() { return spatialSourceMode; }
@@ -783,6 +801,9 @@ public class CLIConfig {
         public boolean hasSpatialConfiguration() {
             return spatialEnabled != null
                     || spatialAnalyses != null
+                    || spatialPerSliceAnalyses != null
+                    || spatialMipAnalyses != null
+                    || spatial3dAnalyses != null
                     || spatialSourceMode != null
                     || spatialMipEnabled != null
                     || spatialNative3dEnabled != null
@@ -810,22 +831,41 @@ public class CLIConfig {
             IntensitySpatialConfig safeBase = base == null ? IntensitySpatialConfig.disabled() : base;
             IntensitySpatialConfig.Builder builder = IntensitySpatialConfig.builder(safeBase);
             boolean impliedEnabled = false;
-            if (spatialAnalyses != null) {
-                builder.enabledAnalyses(spatialAnalyses);
-                impliedEnabled = impliedEnabled || !spatialAnalyses.isEmpty();
-            }
-            if (spatialMipEnabled != null) {
-                builder.mipEnabled(spatialMipEnabled.booleanValue());
-                impliedEnabled = impliedEnabled || spatialMipEnabled.booleanValue();
-            }
-            if (spatialSourceMode != null) {
-                builder.spatialSourceMode(spatialSourceMode);
-                impliedEnabled = impliedEnabled
-                        || spatialSourceMode == IntensitySpatialConfig.SpatialSourceMode.MIP;
-            }
-            if (spatialNative3dEnabled != null) {
-                builder.native3dEnabled(spatialNative3dEnabled.booleanValue());
-                impliedEnabled = impliedEnabled || spatialNative3dEnabled.booleanValue();
+            boolean perModeProvided = spatialPerSliceAnalyses != null
+                    || spatialMipAnalyses != null
+                    || spatial3dAnalyses != null;
+            if (perModeProvided) {
+                // New per-mode CLI tokens win; legacy source/native flags are ignored for selection.
+                if (spatialPerSliceAnalyses != null) {
+                    builder.enabledPerSlice(spatialPerSliceAnalyses);
+                    impliedEnabled = impliedEnabled || !spatialPerSliceAnalyses.isEmpty();
+                }
+                if (spatialMipAnalyses != null) {
+                    builder.enabledMip(spatialMipAnalyses);
+                    impliedEnabled = impliedEnabled || !spatialMipAnalyses.isEmpty();
+                }
+                if (spatial3dAnalyses != null) {
+                    builder.enabled3D(spatial3dAnalyses);
+                    impliedEnabled = impliedEnabled || !spatial3dAnalyses.isEmpty();
+                }
+            } else {
+                if (spatialAnalyses != null) {
+                    builder.enabledAnalyses(spatialAnalyses);
+                    impliedEnabled = impliedEnabled || !spatialAnalyses.isEmpty();
+                }
+                if (spatialMipEnabled != null) {
+                    builder.mipEnabled(spatialMipEnabled.booleanValue());
+                    impliedEnabled = impliedEnabled || spatialMipEnabled.booleanValue();
+                }
+                if (spatialSourceMode != null) {
+                    builder.spatialSourceMode(spatialSourceMode);
+                    impliedEnabled = impliedEnabled
+                            || spatialSourceMode == IntensitySpatialConfig.SpatialSourceMode.MIP;
+                }
+                if (spatialNative3dEnabled != null) {
+                    builder.native3dEnabled(spatialNative3dEnabled.booleanValue());
+                    impliedEnabled = impliedEnabled || spatialNative3dEnabled.booleanValue();
+                }
             }
             if (spatialOverlaysEnabled != null) {
                 builder.overlaysEnabled(spatialOverlaysEnabled.booleanValue());

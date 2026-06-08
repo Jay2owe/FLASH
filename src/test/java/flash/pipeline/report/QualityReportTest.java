@@ -151,9 +151,9 @@ public class QualityReportTest {
         assertEquals(1, report.getSections().size());
         Map<String, String> params = report.getSections().get(0).params;
         assertEquals("true", params.get("Intensity Spatial"));
-        assertEquals("hotspots,anisotropy_3d", params.get("Spatial Families"));
-        assertEquals("true", params.get("Spatial MIP"));
-        assertEquals("true", params.get("Spatial Native 3D"));
+        assertEquals("", params.get("Spatial Per-Slice"));
+        assertEquals("hotspots", params.get("Spatial MIP"));
+        assertEquals("anisotropy_3d", params.get("Spatial Native 3D"));
         assertEquals("true", params.get("Spatial Overlays"));
         assertEquals("OrientationJ missing", params.get("Spatial Dependency Warnings"));
     }

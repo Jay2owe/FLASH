@@ -271,8 +271,11 @@ public final class CLIArgumentParser {
                 + "  intensity.preset=threshold_puncta\n"
                 + "  intensity.threshold_channel2=45\n"
                 + "  intensity.spatial=true|false\n"
-                + "  intensity.spatial.analyses=patchiness,hotspots,depth,anisotropy,crossmark,mi,distance_shell\n"
-                + "  intensity.spatial.source=mip|full_stack\n"
+                + "  intensity.spatial.perslice=nullmodel,depth,glcm,scaledivergence   (per-mode, preferred)\n"
+                + "  intensity.spatial.mip_analyses=patchiness,hotspots,glcm,anisotropy\n"
+                + "  intensity.spatial.native3d_analyses=anisotropy3d,crossmark3d\n"
+                + "  intensity.spatial.analyses=patchiness,hotspots,depth,anisotropy,crossmark,mi,distance_shell   (legacy)\n"
+                + "  intensity.spatial.source=mip|full_stack   (legacy; ignored when per-mode tokens are set)\n"
                 + "  intensity.spatial.mip=true|false\n"
                 + "  intensity.spatial.native3d=true|false\n"
                 + "  intensity.spatial.overlays=true|false\n"
@@ -685,6 +688,21 @@ public final class CLIArgumentParser {
         String analyses = getValue(options, "intensity.spatial.analyses");
         if (analyses != null) {
             intensity.spatialAnalyses = IntensitySpatialConfig.parseAnalysisList(analyses);
+        }
+
+        // Per-mode selection tokens (preferred). When any is present it wins over the
+        // legacy analyses+source+native3d flags during merge.
+        String perslice = getValue(options, "intensity.spatial.perslice");
+        if (perslice != null) {
+            intensity.spatialPerSliceAnalyses = IntensitySpatialConfig.parseAnalysisList(perslice);
+        }
+        String mipAnalyses = getValue(options, "intensity.spatial.mip_analyses");
+        if (mipAnalyses != null) {
+            intensity.spatialMipAnalyses = IntensitySpatialConfig.parseAnalysisList(mipAnalyses);
+        }
+        String native3dAnalyses = getValue(options, "intensity.spatial.native3d_analyses");
+        if (native3dAnalyses != null) {
+            intensity.spatial3dAnalyses = IntensitySpatialConfig.parseAnalysisList(native3dAnalyses);
         }
 
         intensity.spatialMipEnabled = parseNullableBoolean(

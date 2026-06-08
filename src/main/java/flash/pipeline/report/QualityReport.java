@@ -192,11 +192,12 @@ public class QualityReport {
                 : spatialConfig;
         params.put("Intensity Spatial", String.valueOf(safeSpatial.isEnabled()));
         if (safeSpatial.isEnabled()) {
-            params.put("Spatial Families",
-                    IntensitySpatialConfig.joinAnalysisTokens(safeSpatial.getEnabledAnalyses()));
-            params.put("Spatial 2D Source", safeSpatial.getSpatialSourceMode().token());
-            params.put("Spatial MIP", String.valueOf(safeSpatial.isMipEnabled()));
-            params.put("Spatial Native 3D", String.valueOf(safeSpatial.isNative3dEnabled()));
+            params.put("Spatial Per-Slice",
+                    IntensitySpatialConfig.joinAnalysisTokens(safeSpatial.getEnabledPerSlice()));
+            params.put("Spatial MIP",
+                    IntensitySpatialConfig.joinAnalysisTokens(safeSpatial.getEnabledMip()));
+            params.put("Spatial Native 3D",
+                    IntensitySpatialConfig.joinAnalysisTokens(safeSpatial.getEnabled3D()));
             params.put("Spatial Overlays", String.valueOf(safeSpatial.isOverlaysEnabled()));
             params.put("Spatial Dependency Warnings",
                     dependencyWarnings == null || dependencyWarnings.trim().isEmpty()

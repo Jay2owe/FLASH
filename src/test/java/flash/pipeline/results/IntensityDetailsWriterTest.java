@@ -92,9 +92,9 @@ public class IntensityDetailsWriterTest {
         String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(text.contains("<Intensity Spatial Analysis>"));
-        assertTrue(text.contains("Selected analyses: patchiness,crossmark,anisotropy_3d"));
-        assertTrue(text.contains("MIP output: true"));
-        assertTrue(text.contains("Native 3D output: true"));
+        assertTrue(text.contains("Per-slice analyses: none"));
+        assertTrue(text.contains("MIP analyses: patchiness,crossmark"));
+        assertTrue(text.contains("Native 3D analyses: anisotropy_3d"));
         assertTrue(text.contains("Overlays: true"));
         assertTrue(text.contains("Dependency gates: Coloc 2 checked at run time"));
         assertTrue(text.contains("Partial failures: No partial failures"));
