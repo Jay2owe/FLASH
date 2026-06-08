@@ -3,6 +3,7 @@ package flash.pipeline.cli;
 import flash.pipeline.FLASH_Pipeline;
 import flash.pipeline.bin.BinField;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
+import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
 import org.junit.Test;
 
 import java.io.File;
@@ -494,6 +495,48 @@ public class CLIArgumentParserTest {
         assertEquals(IntensitySpatialConfig.SpatialSourceMode.FULL_STACK,
                 merged.getSpatialSourceMode());
         assertFalse(merged.isMipEnabled());
+    }
+
+    @Test
+    public void parse_intensitySpatialPerModeTokensPopulateEachMode() {
+        CLIConfig parsed = CLIArgumentParser.parse("dir=[/tmp/data] "
+                + "intensity.spatial=true "
+                + "intensity.spatial.perslice=nullmodel,glcm "
+                + "intensity.spatial.mip_analyses=patchiness,glcm "
+                + "intensity.spatial.native3d_analyses=anisotropy3d");
+
+        IntensitySpatialConfig merged = parsed.getIntensity().mergeSpatialConfig(
+                IntensitySpatialConfig.disabled(), 1, new boolean[]{false}, null);
+
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.NULLMODEL,
+                IntensitySpatialOutputMode.BASE));
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.GLCM,
+                IntensitySpatialOutputMode.BASE));
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.PATCHINESS,
+                IntensitySpatialOutputMode.MIP));
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.GLCM,
+                IntensitySpatialOutputMode.MIP));
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D,
+                IntensitySpatialOutputMode.NATIVE_3D));
+        assertFalse(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.NULLMODEL,
+                IntensitySpatialOutputMode.MIP));
+    }
+
+    @Test
+    public void parse_intensitySpatialPerModeTokensWinOverLegacyAnalyses() {
+        CLIConfig parsed = CLIArgumentParser.parse("dir=[/tmp/data] "
+                + "intensity.spatial=true "
+                + "intensity.spatial.analyses=patchiness "
+                + "intensity.spatial.source=full_stack "
+                + "intensity.spatial.mip_analyses=glcm");
+
+        IntensitySpatialConfig merged = parsed.getIntensity().mergeSpatialConfig(
+                IntensitySpatialConfig.disabled(), 1, new boolean[]{false}, null);
+
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.GLCM,
+                IntensitySpatialOutputMode.MIP));
+        assertTrue(merged.getEnabledPerSlice().isEmpty());
+        assertFalse(merged.getEnabledAnalyses().contains(IntensitySpatialConfig.AnalysisKey.PATCHINESS));
     }
 
     @Test
