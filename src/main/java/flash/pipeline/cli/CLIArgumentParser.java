@@ -309,6 +309,7 @@ public final class CLIArgumentParser {
                 + "  stats.metric_aggregation=Col1:sum,Col2:mean\n"
                 + "  stats.sum_metrics=CountLikeCol   stats.mean_metrics=MeanLikeCol\n"
                 + "  splitmerge.useDeconv=true|false\n"
+                + "  splitmerge.applyOrientationTransforms=true|false\n"
                 + "  threeD.useDeconv=true|false\n"
                 + "  intensityV2.useDeconv=true|false\n"
                 + "\n"
@@ -1330,6 +1331,15 @@ public final class CLIArgumentParser {
         String splitMergeUseDeconv = getValue(options, "splitmerge.useDeconv");
         if (splitMergeUseDeconv != null) {
             cfg.splitMergeUseDeconv = parseBooleanValue("splitmerge.useDeconv", splitMergeUseDeconv, true);
+        }
+
+        String splitMergeApplyOrientation = firstValue(options,
+                "splitmerge.applyOrientationTransforms",
+                "splitmerge.applyOrientation",
+                "splitmerge.orientationTransforms");
+        if (splitMergeApplyOrientation != null) {
+            cfg.splitMergeApplyOrientationTransforms = parseBooleanValue(
+                    "splitmerge.applyOrientationTransforms", splitMergeApplyOrientation, true);
         }
 
         String threeDUseDeconv = getValue(options, "threeD.useDeconv");

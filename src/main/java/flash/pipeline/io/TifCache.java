@@ -60,6 +60,7 @@ public class TifCache {
         // Prefix with zero-padded index to preserve order
         String filename = String.format(Locale.ROOT, "%04d_%s.tif", index, safeName);
         File outFile = new File(cacheDir, filename);
+        removeExistingSeriesFiles(cacheDir, index, outFile);
         FileSaver saver = new FileSaver(imp);
         if (imp.getStackSize() > 1) {
             saver.saveAsTiffStack(outFile.getAbsolutePath());
@@ -202,6 +203,22 @@ public class TifCache {
             }
         }
         return null;
+    }
+
+    private static void removeExistingSeriesFiles(File cacheDir, int index, File outputFile) {
+        File[] tifs = listTifs(cacheDir);
+        if (tifs == null || index < 0) return;
+        String prefix = String.format(Locale.ROOT, "%04d_", index);
+        for (File tif : tifs) {
+            if (tif == null || !tif.getName().startsWith(prefix)) continue;
+            if (outputFile != null && tif.equals(outputFile)) {
+                //noinspection ResultOfMethodCallIgnored
+                tif.delete();
+                continue;
+            }
+            //noinspection ResultOfMethodCallIgnored
+            tif.delete();
+        }
     }
 
     private static String sanitizeFilename(String title) {

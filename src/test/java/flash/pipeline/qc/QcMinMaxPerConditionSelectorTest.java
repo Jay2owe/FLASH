@@ -16,6 +16,11 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -70,6 +75,37 @@ public class QcMinMaxPerConditionSelectorTest {
         assertEquals("Control", candidates.get(0).conditionName);
         assertEquals("MouseB", candidates.get(1).animalName);
         assertEquals("Treatment", candidates.get(1).conditionName);
+    }
+
+    @Test
+    public void awaitScoreWorkers_waitsUntilWorkersFinishAfterFirstPoll() throws Exception {
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        final AtomicInteger completed = new AtomicInteger(0);
+        final CountDownLatch started = new CountDownLatch(1);
+        pool.submit(new Runnable() {
+            @Override
+            public void run() {
+                started.countDown();
+                try {
+                    Thread.sleep(200L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                completed.incrementAndGet();
+            }
+        });
+        pool.shutdown();
+        assertTrue("worker should start", started.await(1, TimeUnit.SECONDS));
+
+        long start = System.nanoTime();
+        QcMinMaxPerConditionSelector.awaitScoreWorkers(
+                pool, completed, 1, 75L, TimeUnit.MILLISECONDS);
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        assertTrue("wait returned before the worker finished", elapsedMs >= 120L);
+        assertEquals(1, completed.get());
+        assertTrue(pool.isTerminated());
     }
 
     @Test

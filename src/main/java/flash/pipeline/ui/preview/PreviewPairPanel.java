@@ -2198,6 +2198,14 @@ public final class PreviewPairPanel extends JPanel {
     }
 
     private void refreshDisplayControlImage() {
+        if (!displayRangeControlsActive()) {
+            displayControlImage = null;
+            displayRangeInitialized = false;
+            displaySettingsByImage.clear();
+            displaySettings = displaySettingsWithoutRange();
+            applyDisplaySettings();
+            return;
+        }
         if (!displaySettingsAvailable()) {
             displaySettings = PreviewDisplaySettings.defaultFor(channelLutName);
             applyDisplaySettings();
@@ -2251,15 +2259,24 @@ public final class PreviewPairPanel extends JPanel {
 
     private void updateDisplaySettingsFromControls(boolean notifyListener,
                                                    boolean renderObjectOverlay) {
-        PreviewDisplaySettings.LutMode mode = lutModeChoice.getSelectedIndex() == 0
-                ? PreviewDisplaySettings.LutMode.GREY
-                : PreviewDisplaySettings.LutMode.CHANNEL;
-        displaySettings = PreviewDisplaySettings.of(
-                displayControls.getMinValue(),
-                displayControls.getMaxValue(),
-                mode,
-                channelLutName);
-        rememberCurrentDisplaySettings();
+        PreviewDisplaySettings.LutMode mode = selectedLutMode();
+        if (displayRangeControlsActive()) {
+            displaySettings = PreviewDisplaySettings.of(
+                    displayControls.getMinValue(),
+                    displayControls.getMaxValue(),
+                    mode,
+                    channelLutName);
+            rememberCurrentDisplaySettings();
+        } else {
+            displayControlImage = null;
+            displayRangeInitialized = false;
+            displaySettingsByImage.clear();
+            displaySettings = PreviewDisplaySettings.of(
+                    Double.NaN,
+                    Double.NaN,
+                    mode,
+                    channelLutName);
+        }
         applyDisplaySettings(renderObjectOverlay);
         updateLutToggleButton();
         if (notifyListener && displaySettingsChangeListener != null) {
@@ -2549,6 +2566,24 @@ public final class PreviewPairPanel extends JPanel {
 
     private boolean displaySettingsAvailable() {
         return displayControlsAvailable || lutToggleAvailable || largeDisplayControlsActivated;
+    }
+
+    private boolean displayRangeControlsActive() {
+        return displayControlsAvailable || largeDisplayControlsActivated;
+    }
+
+    private PreviewDisplaySettings displaySettingsWithoutRange() {
+        return PreviewDisplaySettings.of(
+                Double.NaN,
+                Double.NaN,
+                selectedLutMode(),
+                channelLutName);
+    }
+
+    private PreviewDisplaySettings.LutMode selectedLutMode() {
+        return lutModeChoice.getSelectedIndex() == 0
+                ? PreviewDisplaySettings.LutMode.GREY
+                : PreviewDisplaySettings.LutMode.CHANNEL;
     }
 
     private void activateLargeDisplayControls() {

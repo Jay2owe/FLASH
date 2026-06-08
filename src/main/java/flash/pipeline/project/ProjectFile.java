@@ -1,5 +1,7 @@
 package flash.pipeline.project;
 
+import flash.pipeline.naming.ConditionAxis;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -27,6 +29,12 @@ public final class ProjectFile {
      */
     public String outputRoot;
     public List<Item> items = new ArrayList<Item>();
+    /**
+     * Ordered schema of condition axes for the multi-condition model
+     * (e.g. Genotype, Timepoint). Empty for legacy single-condition projects,
+     * which behave as one implicit {@code Condition} axis.
+     */
+    public List<ConditionAxis> conditionAxes = new ArrayList<ConditionAxis>();
     public Map<String, Object> extras = new LinkedHashMap<String, Object>();
 
     public static final class Item {
@@ -43,6 +51,8 @@ public final class ProjectFile {
         public String hemisphere;
         public String region;
         public String condition;
+        /** Multi-axis condition values (axisId -&gt; value); empty in single-condition mode. */
+        public Map<String, String> conditions = new LinkedHashMap<String, String>();
         public String notes;
         /**
          * Per-series metadata overrides for multi-series container files. Empty
@@ -70,6 +80,8 @@ public final class ProjectFile {
         public String hemisphere;
         public String region;
         public String condition;
+        /** Multi-axis condition values (axisId -&gt; value); empty in single-condition mode. */
+        public Map<String, String> conditions = new LinkedHashMap<String, String>();
         public String notes;
         public Map<String, Object> extras = new LinkedHashMap<String, Object>();
     }

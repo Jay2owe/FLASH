@@ -1,5 +1,6 @@
 package flash.pipeline.project;
 
+import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.ui.wizard.JsonIO;
 
 import java.io.IOException;
@@ -35,6 +36,8 @@ public final class ProjectFileCodec {
     private static final String K_NOTES = "notes";
     private static final String K_SERIES_META = "seriesMeta";
     private static final String K_INDEX = "index";
+    private static final String K_CONDITIONS = "conditions";
+    private static final String K_CONDITION_AXES = "conditionAxes";
 
     private ProjectFileCodec() {
     }
@@ -64,6 +67,9 @@ public final class ProjectFileCodec {
         root.put(K_NAME, project.name);
         root.put(K_OUTPUT_ROOT, project.outputRoot);
         root.put(K_ITEMS, itemsToJson(project.items));
+        if (project.conditionAxes != null && !project.conditionAxes.isEmpty()) {
+            root.put(K_CONDITION_AXES, axesToJson(project.conditionAxes));
+        }
         appendUnknown(root, project.extras);
         return root;
     }
@@ -80,6 +86,7 @@ public final class ProjectFileCodec {
         project.name = JsonIO.stringValue(root.get(K_NAME));
         project.outputRoot = JsonIO.stringValue(root.get(K_OUTPUT_ROOT));
         project.items = itemsFromJson(JsonIO.asList(root.get(K_ITEMS)));
+        project.conditionAxes = axesFromJson(JsonIO.asList(root.get(K_CONDITION_AXES)));
         project.extras = extras(root, rootKnownKeys());
         return project;
     }
@@ -102,6 +109,9 @@ public final class ProjectFileCodec {
             row.put(K_HEMISPHERE, item.hemisphere);
             row.put(K_REGION, item.region);
             row.put(K_CONDITION, item.condition);
+            if (item.conditions != null && !item.conditions.isEmpty()) {
+                row.put(K_CONDITIONS, conditionsToJson(item.conditions));
+            }
             row.put(K_NOTES, item.notes);
             if (item.seriesMeta != null && !item.seriesMeta.isEmpty()) {
                 row.put(K_SERIES_META, seriesMetaToJson(item.seriesMeta));
@@ -127,6 +137,7 @@ public final class ProjectFileCodec {
             item.hemisphere = JsonIO.stringValue(row.get(K_HEMISPHERE));
             item.region = JsonIO.stringValue(row.get(K_REGION));
             item.condition = JsonIO.stringValue(row.get(K_CONDITION));
+            item.conditions = conditionsFromJson(row.get(K_CONDITIONS));
             item.notes = JsonIO.stringValue(row.get(K_NOTES));
             item.seriesMeta = seriesMetaFromJson(JsonIO.asList(row.get(K_SERIES_META)));
             item.extras = extras(row, itemKnownKeys());
@@ -153,6 +164,9 @@ public final class ProjectFileCodec {
             row.put(K_HEMISPHERE, series.hemisphere);
             row.put(K_REGION, series.region);
             row.put(K_CONDITION, series.condition);
+            if (series.conditions != null && !series.conditions.isEmpty()) {
+                row.put(K_CONDITIONS, conditionsToJson(series.conditions));
+            }
             row.put(K_NOTES, series.notes);
             appendUnknown(row, series.extras);
             out.add(row);
@@ -175,6 +189,7 @@ public final class ProjectFileCodec {
             series.hemisphere = JsonIO.stringValue(row.get(K_HEMISPHERE));
             series.region = JsonIO.stringValue(row.get(K_REGION));
             series.condition = JsonIO.stringValue(row.get(K_CONDITION));
+            series.conditions = conditionsFromJson(row.get(K_CONDITIONS));
             series.notes = JsonIO.stringValue(row.get(K_NOTES));
             series.extras = extras(row, seriesItemKnownKeys());
             out.add(series);
@@ -228,6 +243,61 @@ public final class ProjectFileCodec {
         }
     }
 
+    private static List<Object> axesToJson(List<ConditionAxis> axes) {
+        List<Object> out = new ArrayList<Object>();
+        if (axes == null) return out;
+        for (ConditionAxis axis : axes) {
+            if (axis == null) continue;
+            Map<String, Object> o = JsonIO.object();
+            o.put("id", axis.id);
+            o.put("label", axis.label);
+            o.put("order", Integer.valueOf(axis.order));
+            out.add(o);
+        }
+        return out;
+    }
+
+    private static List<ConditionAxis> axesFromJson(List<Object> values) {
+        List<ConditionAxis> out = new ArrayList<ConditionAxis>();
+        if (values == null) return out;
+        for (Object value : values) {
+            if (value == null) continue;
+            Map<String, Object> o = JsonIO.asObject(value);
+            if (o == null) continue;
+            String id = JsonIO.stringValue(o.get("id"));
+            String label = JsonIO.stringValue(o.get("label"));
+            int order = JsonIO.intValue(o.get("order"), out.size());
+            ConditionAxis axis = new ConditionAxis(id, label, order);
+            if (!axis.id.isEmpty()) out.add(axis);
+        }
+        return out;
+    }
+
+    private static Map<String, Object> conditionsToJson(Map<String, String> conditions) {
+        Map<String, Object> obj = JsonIO.object();
+        if (conditions == null) return obj;
+        for (Map.Entry<String, String> entry : conditions.entrySet()) {
+            if (entry.getKey() == null) continue;
+            String value = entry.getValue();
+            if (value != null && !value.trim().isEmpty()) {
+                obj.put(entry.getKey(), value);
+            }
+        }
+        return obj;
+    }
+
+    private static Map<String, String> conditionsFromJson(Object value) {
+        Map<String, String> out = new LinkedHashMap<String, String>();
+        if (value == null) return out;
+        Map<String, Object> obj = JsonIO.asObject(value);
+        if (obj == null) return out;
+        for (Map.Entry<String, Object> entry : obj.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) continue;
+            out.put(entry.getKey(), String.valueOf(entry.getValue()));
+        }
+        return out;
+    }
+
     private static Map<String, Object> extras(Map<String, Object> source, Map<String, Boolean> knownKeys) {
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         if (source == null) {
@@ -266,6 +336,7 @@ public final class ProjectFileCodec {
         keys.put(K_NAME, Boolean.TRUE);
         keys.put(K_OUTPUT_ROOT, Boolean.TRUE);
         keys.put(K_ITEMS, Boolean.TRUE);
+        keys.put(K_CONDITION_AXES, Boolean.TRUE);
         return keys;
     }
 
@@ -278,6 +349,7 @@ public final class ProjectFileCodec {
         keys.put(K_HEMISPHERE, Boolean.TRUE);
         keys.put(K_REGION, Boolean.TRUE);
         keys.put(K_CONDITION, Boolean.TRUE);
+        keys.put(K_CONDITIONS, Boolean.TRUE);
         keys.put(K_NOTES, Boolean.TRUE);
         keys.put(K_SERIES_META, Boolean.TRUE);
         return keys;
@@ -292,6 +364,7 @@ public final class ProjectFileCodec {
         keys.put(K_HEMISPHERE, Boolean.TRUE);
         keys.put(K_REGION, Boolean.TRUE);
         keys.put(K_CONDITION, Boolean.TRUE);
+        keys.put(K_CONDITIONS, Boolean.TRUE);
         keys.put(K_NOTES, Boolean.TRUE);
         return keys;
     }

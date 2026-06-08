@@ -30,6 +30,7 @@ public class CLIArgumentParserDeconvTest {
                 + "deconv.useCache=false "
                 + "deconv.skipPreview=true "
                 + "splitmerge.useDeconv=false "
+                + "splitmerge.applyOrientationTransforms=false "
                 + "threeD.useDeconv=true "
                 + "intensityV2.useDeconv=true";
 
@@ -50,6 +51,7 @@ public class CLIArgumentParserDeconvTest {
         assertEquals(false, parsed.getDeconv().isUseCache());
         assertTrue(parsed.getDeconv().isSkipPreview());
         assertEquals(false, parsed.isSplitMergeUseDeconv());
+        assertEquals(false, parsed.isSplitMergeApplyOrientationTransforms());
         assertEquals(true, parsed.isThreeDUseDeconv());
         assertEquals(true, parsed.isIntensityV2UseDeconv());
 
@@ -70,6 +72,8 @@ public class CLIArgumentParserDeconvTest {
         assertEquals(parsed.getDeconv().isUseCache(), reparsed.getDeconv().isUseCache());
         assertEquals(parsed.getDeconv().isSkipPreview(), reparsed.getDeconv().isSkipPreview());
         assertEquals(parsed.isSplitMergeUseDeconv(), reparsed.isSplitMergeUseDeconv());
+        assertEquals(parsed.isSplitMergeApplyOrientationTransforms(),
+                reparsed.isSplitMergeApplyOrientationTransforms());
         assertEquals(parsed.isThreeDUseDeconv(), reparsed.isThreeDUseDeconv());
         assertEquals(parsed.isIntensityV2UseDeconv(), reparsed.isIntensityV2UseDeconv());
     }

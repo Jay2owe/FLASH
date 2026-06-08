@@ -54,6 +54,7 @@ public final class QcMinMaxPerConditionSelector {
     private static final int MAX_SAMPLED_PLANES = 10;
     private static final double BRIGHTEST_FRACTION = 0.01;
     private static final long MIN_FREE_BYTES = 500L * 1024 * 1024;
+    private static final long SCORE_WORKER_PROGRESS_LOG_SECONDS = 60L;
 
     private static final String KEY_CACHE_VERSION = "cache.version";
     private static final String KEY_SCORE_METHOD = "score.method";
@@ -1252,15 +1253,41 @@ public final class QcMinMaxPerConditionSelector {
             });
         }
         pool.shutdown();
-        pool.awaitTermination(1, TimeUnit.HOURS);
+        try {
+            awaitScoreWorkers(pool, completedCandidates, candidates.size(),
+                    SCORE_WORKER_PROGRESS_LOG_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            pool.shutdownNow();
+            Thread.currentThread().interrupt();
+            throw new IOException("QC min/max scoring was interrupted before all candidates completed.", e);
+        }
 
         List<ScoreRecord> ordered = new ArrayList<ScoreRecord>();
         for (QcSelectionCandidate candidate : candidates) {
             ScoreRecord record = scored.get(candidate.seriesIndex);
-            if (record == null) record = new ScoreRecord(candidate);
+            if (record == null) {
+                throw new IOException("QC min/max scoring did not complete for series "
+                        + candidate.seriesNumber + " (" + candidate.seriesName + ").");
+            }
             ordered.add(record);
         }
         return ordered;
+    }
+
+    static void awaitScoreWorkers(ExecutorService pool,
+                                  AtomicInteger completedCandidates,
+                                  int totalCandidates,
+                                  long progressInterval,
+                                  TimeUnit progressUnit) throws InterruptedException {
+        long started = System.currentTimeMillis();
+        long interval = Math.max(1L, progressInterval);
+        TimeUnit unit = progressUnit == null ? TimeUnit.SECONDS : progressUnit;
+        while (!pool.awaitTermination(interval, unit)) {
+            int completed = completedCandidates == null ? 0 : completedCandidates.get();
+            IJ.log("QC min/max selector: waiting for scoring workers ("
+                    + completed + "/" + totalCandidates + " scored, "
+                    + elapsed(started) + " elapsed).");
+        }
     }
 
     private static void logCandidateScored(ScoreRecord record,
@@ -1797,6 +1824,15 @@ public final class QcMinMaxPerConditionSelector {
 
     private static String cell(String[] row, int index) {
         return index >= 0 && index < row.length ? row[index] : "";
+    }
+
+    private static String elapsed(long startedMillis) {
+        long millis = Math.max(0L, System.currentTimeMillis() - startedMillis);
+        long seconds = millis / 1000L;
+        long minutes = seconds / 60L;
+        seconds = seconds % 60L;
+        if (minutes > 0L) return minutes + "m " + seconds + "s";
+        return seconds + "s";
     }
 
     private static String safe(String value) {

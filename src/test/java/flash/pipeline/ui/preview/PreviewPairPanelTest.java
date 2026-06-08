@@ -822,6 +822,35 @@ public class PreviewPairPanelTest {
     }
 
     @Test
+    public void lutOnlyPreviewUsesAdjustedImageDisplayRangeInsteadOfHiddenControls() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ImagePlus original = singleSlice("original", 0, 100);
+        ImagePlus adjusted = singleSlice("adjusted", 0, 255);
+        adjusted.setDisplayRange(20.0, 80.0);
+
+        pair.setDisplayControlsAvailable(false, true);
+        pair.setOriginal(original);
+        pair.setAdjusted(adjusted);
+
+        assertFalse(pair.displayControlsButton().isVisible());
+        assertTrue(pair.lutToggleButton().isVisible());
+        assertFalse(pair.displaySettingsForTest().hasDisplayRange());
+        ImageProcessor rendered = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertEquals(20.0, rendered.getMin(), 0.0001);
+        assertEquals(80.0, rendered.getMax(), 0.0001);
+
+        adjusted.setDisplayRange(30.0, 70.0);
+        pair.setAdjusted(adjusted);
+        pair.lutToggleButton().doClick();
+
+        assertFalse(pair.displaySettingsForTest().hasDisplayRange());
+        ImageProcessor renderedAfterLutToggle =
+                pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertEquals(30.0, renderedAfterLutToggle.getMin(), 0.0001);
+        assertEquals(70.0, renderedAfterLutToggle.getMax(), 0.0001);
+    }
+
+    @Test
     public void largePreviewLutButtonWorksWhenBrightnessHidden() {
         assumeFalse(GraphicsEnvironment.isHeadless());
 

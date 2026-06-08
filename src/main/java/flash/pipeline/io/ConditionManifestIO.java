@@ -1,6 +1,8 @@
 package flash.pipeline.io;
 
 import ij.IJ;
+import flash.pipeline.naming.ConditionAssignments;
+import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.naming.ConditionNameParser;
 
 import java.io.File;
@@ -337,6 +339,137 @@ public final class ConditionManifestIO {
         write(manifest, cleaned);
         IJ.log("Condition assignments saved: " + manifest.getAbsolutePath()
                 + " (" + cleaned.size() + " entries)");
+    }
+
+    // ---- N-axis condition model (multi-condition support) ----------------
+
+    /**
+     * Read the manifest into the N-axis {@link ConditionAssignments} model.
+     * A legacy {@code AnimalName,Condition} file loads as a single axis named
+     * {@code Condition}; an {@code AnimalName,Condition_<axis>...} file
+     * reconstructs one axis per column. Returns an empty model when no file.
+     */
+    public static ConditionAssignments readAssignmentsModel(String directory) {
+        File manifest = getExistingFile(directory);
+        if (manifest == null) return new ConditionAssignments();
+        try {
+            return readAssignments(manifest);
+        } catch (IOException e) {
+            IJ.log("Warning: could not read condition manifest: " + e.getMessage());
+            return new ConditionAssignments();
+        }
+    }
+
+    /** Persist the N-axis condition model, dropping animals with no values. */
+    public static void saveAssignments(String directory, ConditionAssignments assignments) throws IOException {
+        File manifest = getFile(directory);
+        File exportDir = manifest.getParentFile();
+        if (exportDir != null && !exportDir.isDirectory()) {
+            IoUtils.mustMkdirs(exportDir);
+        }
+
+        ConditionAssignments cleaned = new ConditionAssignments();
+        for (ConditionAxis axis : assignments.axes()) {
+            cleaned.addAxis(axis);
+        }
+        int entries = 0;
+        for (String animal : assignments.animals()) {
+            String trimmedAnimal = trimToEmpty(animal);
+            if (trimmedAnimal.isEmpty()) continue;
+            boolean any = false;
+            for (ConditionAxis axis : assignments.axes()) {
+                String value = trimToEmpty(assignments.get(animal, axis.id));
+                if (!value.isEmpty()) {
+                    cleaned.put(trimmedAnimal, axis.id, value);
+                    any = true;
+                }
+            }
+            if (any) entries++;
+        }
+
+        writeAssignments(manifest, cleaned);
+        IJ.log("Condition assignments saved: " + manifest.getAbsolutePath()
+                + " (" + entries + " entries, " + cleaned.axes().size() + " axes)");
+    }
+
+    static ConditionAssignments readAssignments(File manifest) throws IOException {
+        ConditionAssignments out = new ConditionAssignments();
+        CsvSupport.RecordReader csv = CsvSupport.openRecordReader(manifest);
+        try {
+            CsvSupport.Record header = csv.readRecord();
+            if (header == null) return out;
+            String[] cols = CsvSupport.parseRecord(header.text);
+
+            List<ConditionAxis> axes = new ArrayList<ConditionAxis>();
+            for (int i = 1; i < cols.length; i++) {
+                ConditionAxis axis = new ConditionAxis(null, axisLabelFromColumn(cols[i]), i - 1);
+                out.addAxis(axis);
+                axes.add(axis);
+            }
+
+            CsvSupport.Record record;
+            while ((record = csv.readRecord()) != null) {
+                if (CsvSupport.isBlankRecord(record.text)) continue;
+                String[] row = CsvSupport.parseRecord(record.text);
+                String animal = row.length > 0 ? row[0].trim() : "";
+                if (animal.isEmpty()) continue;
+                for (int i = 0; i < axes.size(); i++) {
+                    int colIdx = i + 1;
+                    String value = colIdx < row.length ? row[colIdx].trim() : "";
+                    if (!value.isEmpty()) {
+                        out.put(animal, axes.get(i).id, value);
+                    }
+                }
+            }
+        } finally {
+            csv.close();
+        }
+        return out;
+    }
+
+    static void writeAssignments(File manifest, final ConditionAssignments assignments) throws IOException {
+        final List<ConditionAxis> axes = assignments.axes();
+        // A lone default "Condition" axis keeps the exact legacy header so old
+        // FLASH versions and single-condition projects round-trip unchanged.
+        final boolean legacySingle = axes.size() == 1 && "condition".equals(axes.get(0).id);
+        CsvSupport.writeAtomically(manifest, new CsvSupport.WriterAction() {
+            @Override
+            public void write(PrintWriter pw) {
+                List<String> headerRow = new ArrayList<String>();
+                headerRow.add("AnimalName");
+                if (axes.isEmpty() || legacySingle) {
+                    headerRow.add("Condition");
+                } else {
+                    for (ConditionAxis axis : axes) {
+                        headerRow.add(axis.csvColumnName());
+                    }
+                }
+                pw.println(CsvSupport.joinRow(headerRow));
+
+                for (String animal : assignments.animals()) {
+                    List<String> rowOut = new ArrayList<String>();
+                    rowOut.add(animal);
+                    if (axes.isEmpty()) {
+                        rowOut.add("");
+                    } else {
+                        for (ConditionAxis axis : axes) {
+                            rowOut.add(assignments.get(animal, axis.id));
+                        }
+                    }
+                    pw.println(CsvSupport.joinRow(rowOut));
+                }
+            }
+        });
+    }
+
+    private static String axisLabelFromColumn(String column) {
+        String c = column == null ? "" : column.trim();
+        String prefix = "Condition_";
+        if (c.equalsIgnoreCase("Condition")) return "Condition";
+        if (c.length() > prefix.length() && c.regionMatches(true, 0, prefix, 0, prefix.length())) {
+            return c.substring(prefix.length());
+        }
+        return c.isEmpty() ? "Condition" : c;
     }
 
     public static String extractAnimalName(String seriesName) {

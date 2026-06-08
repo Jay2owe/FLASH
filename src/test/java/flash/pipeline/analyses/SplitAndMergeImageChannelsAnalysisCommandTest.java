@@ -35,6 +35,7 @@ public class SplitAndMergeImageChannelsAnalysisCommandTest {
         assertFalse(plugin.visible());
         assertParameter("directory");
         assertParameter("coordinator");
+        assertParameter("applyOrientationTransforms");
     }
 
     @Test

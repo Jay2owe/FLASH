@@ -105,6 +105,8 @@ public final class ParameterSnapshot {
         out.put("verbose", Boolean.valueOf(cfg.isVerbose()));
         out.put("headless", Boolean.valueOf(cfg.isHeadless()));
         out.put("split_merge_use_deconv", Boolean.valueOf(cfg.isSplitMergeUseDeconv()));
+        out.put("split_merge_apply_orientation_transforms",
+                Boolean.valueOf(cfg.isSplitMergeApplyOrientationTransforms()));
         out.put("three_d_use_deconv", Boolean.valueOf(cfg.isThreeDUseDeconv()));
         out.put("intensity_v2_use_deconv", Boolean.valueOf(cfg.isIntensityV2UseDeconv()));
         return out;

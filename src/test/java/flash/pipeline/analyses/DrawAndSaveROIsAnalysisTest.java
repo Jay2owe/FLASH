@@ -17,6 +17,7 @@ import flash.pipeline.orientation.RoiOrientationManifestService;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.zslice.ZSliceMode;
 import ij.ImagePlus;
+import ij.gui.Roi;
 import ij.process.ByteProcessor;
 import org.junit.After;
 import org.junit.Rule;
@@ -30,6 +31,7 @@ import java.awt.image.IndexColorModel;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -180,6 +182,85 @@ public class DrawAndSaveROIsAnalysisTest {
         assertEquals(12, DrawAndSaveROIsAnalysis.parseRoiChannelChoice("12"));
         assertEquals(1, DrawAndSaveROIsAnalysis.parseRoiChannelChoice("DAPI"));
         assertEquals(1, DrawAndSaveROIsAnalysis.parseRoiChannelChoice(null));
+    }
+
+    @Test
+    public void resolveImportedRoiLayout_acceptsOnePerImageOrFlashPairs() {
+        assertEquals(DrawAndSaveROIsAnalysis.ImportedRoiLayout.ONE_PER_IMAGE,
+                DrawAndSaveROIsAnalysis.resolveImportedRoiLayout(4, 4));
+        assertEquals(DrawAndSaveROIsAnalysis.ImportedRoiLayout.FLASH_PAIRS,
+                DrawAndSaveROIsAnalysis.resolveImportedRoiLayout(8, 4));
+    }
+
+    @Test
+    public void resolveImportedRoiLayout_rejectsMismatchedCounts() {
+        try {
+            DrawAndSaveROIsAnalysis.resolveImportedRoiLayout(5, 4);
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("Expected either 4 ROI"));
+            return;
+        }
+        throw new AssertionError("mismatched ROI count should be rejected");
+    }
+
+    @Test
+    public void sourceRoiForImport_usesEvenRoisFromFlashPairs() {
+        List<Roi> rois = new ArrayList<Roi>();
+        Roi first = new Roi(0, 0, 2, 2);
+        Roi firstCropped = new Roi(0, 0, 1, 1);
+        Roi second = new Roi(1, 1, 2, 2);
+        Roi secondCropped = new Roi(0, 0, 1, 1);
+        rois.add(first);
+        rois.add(firstCropped);
+        rois.add(second);
+        rois.add(secondCropped);
+
+        assertEquals(first, DrawAndSaveROIsAnalysis.sourceRoiForImport(rois,
+                DrawAndSaveROIsAnalysis.ImportedRoiLayout.FLASH_PAIRS, 0));
+        assertEquals(second, DrawAndSaveROIsAnalysis.sourceRoiForImport(rois,
+                DrawAndSaveROIsAnalysis.ImportedRoiLayout.FLASH_PAIRS, 1));
+    }
+
+    @Test
+    public void validateImportedFlashPairNames_requiresCroppedOddSlots() {
+        List<Roi> rois = new ArrayList<Roi>();
+        Roi first = new Roi(0, 0, 2, 2);
+        first.setName("Mouse_LH_SCN");
+        Roi firstCropped = new Roi(0, 0, 1, 1);
+        firstCropped.setName("Mouse_LH_SCN_Cropped");
+        rois.add(first);
+        rois.add(firstCropped);
+
+        DrawAndSaveROIsAnalysis.validateImportedFlashPairNames(rois, 1);
+
+        firstCropped.setName("Mouse_LH_SCN");
+        try {
+            DrawAndSaveROIsAnalysis.validateImportedFlashPairNames(rois, 1);
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("_Cropped"));
+            return;
+        }
+        throw new AssertionError("FLASH pair import should reject unnamed cropped slot");
+    }
+
+    @Test
+    public void importedRoiBoundsWithinImage_rejectsOutOfBoundsAndInvalidRois() {
+        assertTrue(DrawAndSaveROIsAnalysis.importedRoiBoundsWithinImage(
+                new Roi(1, 1, 3, 2), 5, 5));
+        assertFalse(DrawAndSaveROIsAnalysis.importedRoiBoundsWithinImage(
+                new Roi(3, 1, 3, 2), 5, 5));
+        assertFalse(DrawAndSaveROIsAnalysis.importedRoiBoundsWithinImage(
+                new Roi(-1, 1, 2, 2), 5, 5));
+        assertFalse(DrawAndSaveROIsAnalysis.importedRoiBoundsWithinImage(
+                null, 5, 5));
+    }
+
+    @Test
+    public void importSetNameFromZip_stripsRoiSuffixAndSanitizesFilename() {
+        assertEquals("SCN", DrawAndSaveROIsAnalysis.importSetNameFromZip(
+                new File("SCN ROIs.zip")));
+        assertEquals("bad_name", DrawAndSaveROIsAnalysis.importSetNameFromZip(
+                new File("bad:name.zip")));
     }
 
     @Test

@@ -2156,7 +2156,7 @@ public final class RepresentativePreviewRenderer {
             if (fixedImage != null) {
                 synchronized (fixedImage) {
                     ImagePlus duplicate = ImageOps.duplicateThreadSafe(fixedImage);
-                    ensureOriginalTifForExport(item, duplicate);
+                    ensureOriginalTifForExport(item, duplicate, true);
                     return duplicate;
                 }
             }
@@ -2164,7 +2164,7 @@ public final class RepresentativePreviewRenderer {
             if (cached != null) {
                 IJ.log("[Representative Figure] Opened series " + item.seriesNumber
                         + " from the in-session image cache.");
-                ensureOriginalTifForExport(item, cached);
+                ensureOriginalTifForExport(item, cached, true);
                 return cached;
             }
             if (useTifCache && directory != null && !directory.isEmpty()
@@ -2180,11 +2180,13 @@ public final class RepresentativePreviewRenderer {
             IJ.log("[Representative Figure] Opening source series " + item.seriesNumber
                     + " (" + safe(item.seriesName) + ").");
             ImagePlus opened = supplier.openSeriesMaterialized(item.seriesIndex);
-            ensureOriginalTifForExport(item, opened);
+            ensureOriginalTifForExport(item, opened, true);
             return opened;
         }
 
-        private void ensureOriginalTifForExport(WorkItem item, ImagePlus source)
+        private void ensureOriginalTifForExport(WorkItem item,
+                                                ImagePlus source,
+                                                boolean refreshExisting)
                 throws IOException {
             if (!cacheMissingOriginalTifs || source == null || item == null) return;
             if (directory == null || directory.trim().isEmpty()) return;
@@ -2192,8 +2194,10 @@ public final class RepresentativePreviewRenderer {
             if (isReadableTif(item.sourcePath)) return;
             synchronized (ORIGINAL_TIF_CACHE_LOCK) {
                 File existing = TifCache.cachedFileForSeries(directory, item.seriesIndex);
-                if (isReadableTif(existing)) return;
-                IJ.log("[Representative Figure] Saving original TIFF for series "
+                if (!refreshExisting && isReadableTif(existing)) return;
+                IJ.log("[Representative Figure] "
+                        + (isReadableTif(existing) ? "Refreshing" : "Saving")
+                        + " original TIFF for series "
                         + item.seriesNumber + " to the TIFF cache for export.");
                 TifCache.saveToCache(directory, source, item.seriesIndex);
                 File saved = TifCache.cachedFileForSeries(directory, item.seriesIndex);

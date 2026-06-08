@@ -63,8 +63,10 @@ public class ParameterSnapshotTest {
         assertTrue(params.get("parallel") instanceof Boolean);
         assertTrue(params.get("tif_cache") instanceof Boolean);
         assertTrue(params.get("qc_report") instanceof Boolean);
+        assertTrue(params.get("split_merge_apply_orientation_transforms") instanceof Boolean);
         // default overwrite is "Auto-Overwrite", so skip_existing is false
         assertEquals(Boolean.FALSE, params.get("skip_existing"));
+        assertEquals(Boolean.TRUE, params.get("split_merge_apply_orientation_transforms"));
     }
 
     @Test

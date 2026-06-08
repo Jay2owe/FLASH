@@ -102,6 +102,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
     private long lifOpenTimeMs = 0;
     private final long startTimeMillis = System.currentTimeMillis();
     private boolean useDeconvolvedInput = true;
+    private boolean applyOrientationTransforms = true;
     private CLIConfig cliConfig = null;
     private AnalysisRunContext runRecordContext = null;
     private final List<PresentationTileRecord> presentationTileRecords =
@@ -184,6 +185,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         this.cliConfig = config;
         if (config != null) {
             this.useDeconvolvedInput = config.isSplitMergeUseDeconv();
+            this.applyOrientationTransforms = config.isSplitMergeApplyOrientationTransforms();
         }
     }
 
@@ -219,6 +221,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         int backgroundIndex;
         boolean[] subtractFromChannels;
         boolean useDeconvolvedInput;
+        boolean applyOrientationTransforms;
         PresentationTileConfig tileConfig;
     }
 
@@ -489,7 +492,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         // "Load settings from previous run" can restore it. We re-read after the
         // min-max sync above so display_min_max reflects the dialog's chosen
         // presentation display ranges, matching what the load applier reads back.
-        recordSplitMergeRunParameters(loadBinConfig(directory));
+        recordSplitMergeRunParameters(loadBinConfig(directory), mdr);
 
         try {
             File detailsFile = AnalysisDetailsWriter.write(
@@ -578,12 +581,20 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
      * {@code display_min_max}) so {@link LoadedRunParameters#binConfig(java.util.Map)}
      * recognises them on load.
      */
-    private void recordSplitMergeRunParameters(BinConfig cfg) {
+    private void recordSplitMergeRunParameters(BinConfig cfg, MainDialogResult mdr) {
         if (runRecordContext == null || cfg == null) {
             return;
         }
         try {
-            runRecordContext.recordParameters(ParameterSnapshot.fromBinConfig(cfg));
+            Map<String, Object> splitMergeOptions = new LinkedHashMap<String, Object>();
+            splitMergeOptions.put("split_merge_use_deconv",
+                    Boolean.valueOf(mdr == null ? useDeconvolvedInput : mdr.useDeconvolvedInput));
+            splitMergeOptions.put("split_merge_apply_orientation_transforms",
+                    Boolean.valueOf(mdr == null
+                            ? applyOrientationTransforms
+                            : mdr.applyOrientationTransforms));
+            runRecordContext.recordParameters(ParameterSnapshot.merged(
+                    ParameterSnapshot.fromBinConfig(cfg), splitMergeOptions));
         } catch (RuntimeException e) {
             IJ.log("[FLASH] Could not capture Make Presentation Images run parameters: " + e.getMessage());
         }
@@ -738,9 +749,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
             IJ.log("  Parsed: Animal=" + parts.animal
                     + ", Hemisphere=" + (parts.hemisphere.isEmpty() ? "N/A" : parts.hemisphere)
                     + ", Region=" + (parts.region.isEmpty() ? "N/A" : parts.region));
-            logOrientationResolution(metadata);
-
-            OrientationOps.applyTransform(imp, metadata);
+            applyOrientationPolicy(imp, metadata, mdr.applyOrientationTransforms);
 
             File perAnimalDir = new File(outRoot, parts.animal);
             try {
@@ -855,8 +864,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
 
                             long imageStartTime = System.currentTimeMillis();
 
-                            logOrientationResolution(metadata);
-                            OrientationOps.applyTransform(imp, metadata);
+                            applyOrientationPolicy(imp, metadata, mdr.applyOrientationTransforms);
 
                             File perAnimalDir = new File(outRoot, parts.animal);
                             try {
@@ -997,13 +1005,15 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         pd.beginAdvancedSection("splitMerge");
         final JTextField additionalMergesField = pd.addStringField(
                 "Additional merges (e.g. 1-2 3-4):", "", 15);
-        pd.endAdvancedSection();
-
+        final ToggleSwitch applyOrientationToggle = pd.addToggle(
+                "Apply saved orientation transforms", applyOrientationTransforms);
         final TileOptionsPanel tileOptions = new TileOptionsPanel(defaultTileOrder(channelNames));
         pd.addComponent(tileOptions.panel);
         final BackgroundSubtractionPanel backgroundOptions =
                 new BackgroundSubtractionPanel(channelNames, bgChoices, autoBackgroundIndex);
         pd.addComponent(backgroundOptions.panel);
+        pd.endAdvancedSection();
+
         tileOptions.previewButton.addActionListener(new java.awt.event.ActionListener() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent e) {
@@ -1021,7 +1031,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
                     @Override public LoadedRunParameters.Result applyLoadedParameters(
                             Map<String, Object> parameters) {
                         return SplitAndMergeImageChannelsAnalysis.this.applyLoadedParameters(
-                                parameters, channelGrid, useDeconvToggle);
+                                parameters, channelGrid, useDeconvToggle, applyOrientationToggle);
                     }
                 });
 
@@ -1042,6 +1052,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         result.additionalMergeSpec = additionalMergesField.getText() == null
                 ? "" : additionalMergesField.getText().trim();
         result.tileConfig = tileOptions.buildConfig();
+        result.applyOrientationTransforms = applyOrientationToggle.isSelected();
+        applyOrientationTransforms = result.applyOrientationTransforms;
 
         result.subtractBackground = backgroundOptions.subtractBackground();
         result.backgroundIndex = backgroundOptions.backgroundIndex();
@@ -1052,9 +1064,15 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
 
     public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
         LoadedRunParameters.Result result = LoadedRunParameters.resultForKnownKeys(parameters,
-                LoadedRunParameters.keys("split_merge_use_deconv"));
+                LoadedRunParameters.keys("split_merge_use_deconv",
+                        "split_merge_apply_orientation_transforms"));
         if (parameters != null && parameters.containsKey("split_merge_use_deconv")) {
             useDeconvolvedInput = booleanValue(parameters.get("split_merge_use_deconv"), useDeconvolvedInput);
+        }
+        if (parameters != null && parameters.containsKey("split_merge_apply_orientation_transforms")) {
+            applyOrientationTransforms = booleanValue(
+                    parameters.get("split_merge_apply_orientation_transforms"),
+                    applyOrientationTransforms);
         }
         LoadedRunParameters.rememberLastResult(result);
         return result;
@@ -1062,13 +1080,22 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
 
     private LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters,
                                                             ChannelSettingsGrid grid,
-                                                            ToggleSwitch useDeconvToggle) {
+                                                            ToggleSwitch useDeconvToggle,
+                                                            ToggleSwitch applyOrientationToggle) {
         LoadedRunParameters.PresetLoad<BinConfig> binLoad = LoadedRunParameters.binConfig(parameters);
         BinConfig cfg = binLoad.payload;
         if (parameters != null && parameters.containsKey("split_merge_use_deconv")) {
             useDeconvolvedInput = booleanValue(parameters.get("split_merge_use_deconv"), useDeconvolvedInput);
             if (useDeconvToggle != null) {
                 useDeconvToggle.setSelected(useDeconvolvedInput);
+            }
+        }
+        if (parameters != null && parameters.containsKey("split_merge_apply_orientation_transforms")) {
+            applyOrientationTransforms = booleanValue(
+                    parameters.get("split_merge_apply_orientation_transforms"),
+                    applyOrientationTransforms);
+            if (applyOrientationToggle != null) {
+                applyOrientationToggle.setSelected(applyOrientationTransforms);
             }
         }
         if (grid != null && cfg != null) {
@@ -1087,7 +1114,8 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
             }
         }
         LoadedRunParameters.Result deconv = LoadedRunParameters.resultForKnownKeys(parameters,
-                LoadedRunParameters.keys("split_merge_use_deconv"));
+                LoadedRunParameters.keys("split_merge_use_deconv",
+                        "split_merge_apply_orientation_transforms"));
         return LoadedRunParameters.Result.merge(binLoad.result, deconv);
     }
 
@@ -1878,6 +1906,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         result.saveOmeTiff = false;
         result.additionalMergeSpec = "";
         result.useDeconvolvedInput = useDeconvolvedInput;
+        result.applyOrientationTransforms = applyOrientationTransforms;
         result.tileConfig = PresentationTileConfig.disabled(defaultTileOrder(channelNames));
         result.subtractBackground = autoBackgroundIndex >= 0;
         result.backgroundIndex = autoBackgroundIndex;
@@ -2653,8 +2682,21 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         return hours + " Hours";
     }
 
-    private static void logOrientationResolution(ResolvedImageMetadata metadata) {
+    private static void applyOrientationPolicy(ImagePlus imp,
+                                               ResolvedImageMetadata metadata,
+                                               boolean applyTransforms) {
+        if (metadata == null) {
+            IJ.log("  Orientation source: unavailable");
+            return;
+        }
         IJ.log("  Orientation source: " + metadata.sourceLabel());
+        if (!applyTransforms) {
+            IJ.log(metadata.hasTransform()
+                    ? "  Orientation transform skipped by presentation image option."
+                    : "  Orientation transform skipped.");
+            return;
+        }
+        OrientationOps.applyTransform(imp, metadata);
         IJ.log(metadata.hasTransform()
                 ? "  Orientation transform applied."
                 : "  Orientation transform skipped.");

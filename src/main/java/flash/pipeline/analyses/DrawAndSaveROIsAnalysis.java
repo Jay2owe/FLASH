@@ -74,10 +74,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import javax.swing.JComboBox;
+import javax.swing.JButton;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JTextField;
 import javax.swing.UIManager;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 /**
  * Migration of drawROIs().
@@ -100,6 +103,41 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
     private boolean commandMode = false;
     private CLIConfig cliConfig = null;
     private AnalysisRunContext runRecordContext = null;
+
+    private enum ImportPromptChoice {
+        DRAW,
+        IMPORT,
+        CANCEL
+    }
+
+    enum ImportedRoiLayout {
+        ONE_PER_IMAGE,
+        FLASH_PAIRS
+    }
+
+    private enum ImportPreviewDecision {
+        CONTINUE,
+        SKIP_REMAINING,
+        CANCEL
+    }
+
+    private static final class RoiImportOptions {
+        final String roiSetName;
+        final boolean previewBeforeSaving;
+        final int roiChannel;
+        final String imageProcessing;
+        final boolean drawOnSubset;
+
+        RoiImportOptions(String roiSetName, boolean previewBeforeSaving,
+                         int roiChannel, String imageProcessing,
+                         boolean drawOnSubset) {
+            this.roiSetName = roiSetName;
+            this.previewBeforeSaving = previewBeforeSaving;
+            this.roiChannel = roiChannel;
+            this.imageProcessing = imageProcessing == null ? "None" : imageProcessing;
+            this.drawOnSubset = drawOnSubset;
+        }
+    }
 
     @Override
     public Set<BinField> requiredBinFields() {
@@ -172,6 +210,30 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             return;
         }
 
+        BinConfig roiBinCfg = loadBinConfig(directory);
+        if (!suppressDialogs) {
+            ImportPromptChoice importChoice = promptForRoiImport();
+            if (importChoice == ImportPromptChoice.CANCEL) {
+                IJ.log("[FLASH] Draw ROIs and Orientate Images cancelled by user.");
+                return;
+            }
+            if (importChoice == ImportPromptChoice.IMPORT) {
+                File importZip = chooseImportedRoiZip(projectRoot);
+                if (importZip == null) {
+                    IJ.log("[FLASH] ROI import cancelled before selecting a zip.");
+                    return;
+                }
+                RoiImportOptions importOptions =
+                        promptForRoiImportOptions(importZip, roiBinCfg);
+                if (importOptions == null) {
+                    IJ.log("[FLASH] ROI import cancelled before saving.");
+                    return;
+                }
+                importRoiSet(directory, projectRoot, importZip, importOptions, roiBinCfg);
+                return;
+            }
+        }
+
         List<File> roiFiles = RoiIO.listRoiZipFiles(projectRoot);
         List<String> roiNames = new ArrayList<>();
         for (File f : roiFiles) {
@@ -181,7 +243,6 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         }
 
         // ── Main dialog ────────────────────────────────────────────────
-        BinConfig roiBinCfg = loadBinConfig(directory);
         String[] roiChannelChoices = buildRoiChannelChoices(roiBinCfg);
         String defaultRoiChannelChoice = defaultRoiChannelChoice(roiBinCfg, roiChannelChoices);
         boolean showZSliceSourceChoice = shouldShowZSliceSourceChoice(roiBinCfg);
@@ -616,6 +677,500 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
     BinConfig loadBinConfig(String directory) {
         return BinConfigIO.readPartialFromDirectory(directory);
+    }
+
+    private ImportPromptChoice promptForRoiImport() {
+        PipelineDialog dialog = new PipelineDialog(
+                "Draw ROIs & Orientate Images", PipelineDialog.Phase.SETUP);
+        dialog.addAnalysisHelpHeader("Draw ROIs and Orientate Images",
+                FLASH_Pipeline.IDX_DRAW_ROIS);
+        dialog.addMessage("Draw a new ROI set as usual, or import an existing ImageJ ROI zip "
+                + "and convert it into FLASH's paired ROI format.");
+        dialog.addHelpText("Imported zips must contain one ROI per image, or an existing "
+                + "FLASH-compatible pair set with uncropped and _Cropped ROIs. ROI order "
+                + "must match the image series order.");
+        dialog.setPrimaryButtonText("Draw ROIs");
+        JButton importButton = dialog.addRightFooterButton("Import...");
+        importButton.addActionListener(e -> dialog.closeWithAction("import"));
+
+        if (dialog.showDialog()) {
+            return ImportPromptChoice.DRAW;
+        }
+        return "import".equals(dialog.getActionCommand())
+                ? ImportPromptChoice.IMPORT
+                : ImportPromptChoice.CANCEL;
+    }
+
+    private File chooseImportedRoiZip(File projectRoot) {
+        JFileChooser chooser = new JFileChooser(
+                projectRoot == null ? new File(".") : projectRoot);
+        chooser.setDialogTitle("Import ROI zip");
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setFileFilter(new FileNameExtensionFilter("ROI zip files", "zip"));
+        if (chooser.showOpenDialog(imageJMainWindow()) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        File selected = chooser.getSelectedFile();
+        if (!isZipFile(selected)) {
+            IJ.error("Import ROI Set", "Please choose a .zip file exported by ImageJ ROI Manager.");
+            return null;
+        }
+        return selected;
+    }
+
+    private RoiImportOptions promptForRoiImportOptions(File importZip, BinConfig roiBinCfg) {
+        String[] roiChannelChoices = buildRoiChannelChoices(roiBinCfg);
+        String defaultRoiChannelChoice = defaultRoiChannelChoice(roiBinCfg, roiChannelChoices);
+        boolean showZSliceSourceChoice = shouldShowZSliceSourceChoice(roiBinCfg);
+
+        PipelineDialog dialog = new PipelineDialog("Import ROI Set", PipelineDialog.Phase.SETUP);
+        dialog.addHeader("Import ROI Zip");
+        dialog.addMessage("Selected file:<br>" + htmlEscape(importZip.getName()));
+        dialog.addStringField("ROI Set Name", importSetNameFromZip(importZip), 18);
+        dialog.addToggle("Preview ROIs before saving", true);
+        dialog.addChoice("ROI Channel", roiChannelChoices, defaultRoiChannelChoice);
+        dialog.addChoice("Image Adjustment", new String[]{"None", "Automatic", "Manual"}, "None");
+        if (showZSliceSourceChoice) {
+            dialog.addChoice("Import ROIs on",
+                    new String[]{FULL_IMAGE_SOURCE, CONFIGURED_SUBSET_SOURCE},
+                    FULL_IMAGE_SOURCE);
+        }
+        dialog.addHelpText("The import checks ROI count and ROI bounds against the prepared image "
+                + "series, then saves a FLASH-compatible ROI zip, cropped previews, and ROI "
+                + "properties. ROI order must match the image series order.");
+        dialog.setPrimaryButtonText("Import");
+
+        if (!dialog.showDialog()) {
+            return null;
+        }
+
+        String roiSetName = sanitizeRoiSetName(dialog.getNextString());
+        boolean preview = dialog.getNextBoolean();
+        int roiChannel = parseRoiChannelChoice(dialog.getNextChoice());
+        String imageProcessing = dialog.getNextChoice();
+        boolean drawOnSubset = showZSliceSourceChoice
+                && CONFIGURED_SUBSET_SOURCE.equals(dialog.getNextChoice());
+        return new RoiImportOptions(roiSetName, preview, roiChannel,
+                imageProcessing, drawOnSubset);
+    }
+
+    private boolean importRoiSet(String directory,
+                                 File projectRoot,
+                                 File importZip,
+                                 RoiImportOptions options,
+                                 BinConfig roiBinCfg) {
+        AnalysisRunContext.InputHandle zipInput = null;
+        long started = System.currentTimeMillis();
+        String inputStatus = "failed";
+        RoiManager rm = null;
+        try {
+            validateImportZipFile(importZip);
+            if (runRecordContext != null) {
+                zipInput = runRecordContext.recordInputStart(importZip, 0, null);
+            }
+
+            List<Roi> importedRois = RoiIO.loadRoisFromZip(importZip);
+            DeferredImageSupplier supplier = ImageSourceDispatcher.createSupplier(directory);
+            int totalImages = supplier.getTotalSeries();
+            ImportedRoiLayout layout = resolveImportedRoiLayout(importedRois.size(), totalImages);
+            if (layout == ImportedRoiLayout.FLASH_PAIRS) {
+                validateImportedFlashPairNames(importedRois, totalImages);
+            }
+
+            File attrDir = RoiIO.attributesWriteDir(projectRoot);
+            File imageOutputDir = RoiIO.imageOutputsWriteDir(projectRoot);
+            IoUtils.mustMkdirs(attrDir);
+            IoUtils.mustMkdirs(imageOutputDir);
+
+            File roiZip = new File(RoiIO.roiSetWriteDir(projectRoot),
+                    options.roiSetName + " ROIs.zip");
+            File roiPropsOut = new File(attrDir,
+                    options.roiSetName + " ROI Properties.csv");
+            if (!confirmOverwriteImportOutputs(roiZip, roiPropsOut)) {
+                inputStatus = "cancelled";
+                return false;
+            }
+
+            IJ.log("[DrawROIs] Importing " + importedRois.size() + " ROI(s) from "
+                    + importZip.getName() + " for " + totalImages + " image(s).");
+            rm = RoiManager.getInstance();
+            if (rm == null) rm = new RoiManager();
+            rm.reset();
+
+            ResultsTable roiProps = new ResultsTable();
+            RoiOrientationManifestService orientationManifestService =
+                    new RoiOrientationManifestService(directory);
+            boolean preview = options.previewBeforeSaving;
+
+            for (int i = 0; i < totalImages; i++) {
+                PreparedImage prep = null;
+                try {
+                    prep = prepareImage(directory, supplier, i, options.roiChannel,
+                            options.imageProcessing, options.drawOnSubset, roiBinCfg);
+                    if (prep == null || prep.maxProjection == null) {
+                        throw new IllegalStateException(
+                                "Could not prepare image " + (i + 1) + " for ROI import.");
+                    }
+
+                    Roi imported = duplicateRoi(sourceRoiForImport(importedRois, layout, i));
+                    validateImportedRoiBounds(imported, prep.maxProjection.getWidth(),
+                            prep.maxProjection.getHeight(), i);
+
+                    if (preview) {
+                        ImportPreviewDecision decision =
+                                previewImportedRoi(prep, imported, i, totalImages);
+                        if (decision == ImportPreviewDecision.CANCEL) {
+                            inputStatus = "cancelled";
+                            closePreparedImages(prep);
+                            closeAllNoPrompt();
+                            return false;
+                        }
+                        if (decision == ImportPreviewDecision.SKIP_REMAINING) {
+                            preview = false;
+                        }
+                    }
+
+                    addImportedFlashRoiPair(rm, roiProps, options.roiSetName,
+                            prep, imported, i, imageOutputDir);
+                    saveOrientationDecision(orientationManifestService, prep,
+                            "Saved during ROI zip import");
+                } finally {
+                    closePreparedImages(prep);
+                }
+            }
+
+            roiProps.setPrecision(9);
+            addRunIdColumn(roiProps, currentRunId());
+            roiProps.save(roiPropsOut.getAbsolutePath());
+            recordOutput(roiPropsOut, "csv");
+
+            if (!RoiSetValidator.validateStrictWithDialog(rm, 0, totalImages, null)) {
+                return false;
+            }
+
+            rm.runCommand("Save", roiZip.getAbsolutePath());
+            recordOutput(roiZip, "zip");
+            rm.close();
+            rm = null;
+            inputStatus = "processed";
+
+            showOrLog("Import ROI Set",
+                    "Imported ROIs to:\n" + roiZip.getAbsolutePath()
+                    + "\n\nROI properties saved to:\n" + roiPropsOut.getAbsolutePath());
+            closeAllNoPrompt();
+            return true;
+        } catch (Exception e) {
+            String message = e.getMessage() == null ? String.valueOf(e) : e.getMessage();
+            IJ.log("[DrawROIs] ROI import failed: " + message);
+            recordWarn("ROI import failed: " + message);
+            showOrLog("Import ROI Set", "Could not import ROI zip:\n" + message);
+            return false;
+        } finally {
+            if (runRecordContext != null && zipInput != null) {
+                runRecordContext.recordInputEnd(zipInput, inputStatus,
+                        System.currentTimeMillis() - started);
+            }
+            if (rm != null) {
+                rm.close();
+            }
+        }
+    }
+
+    private static void validateImportZipFile(File importZip) {
+        if (importZip == null) {
+            throw new IllegalArgumentException("No ROI zip was selected.");
+        }
+        if (!importZip.isFile()) {
+            throw new IllegalArgumentException(
+                    "ROI zip does not exist: " + importZip.getAbsolutePath());
+        }
+        if (!isZipFile(importZip)) {
+            throw new IllegalArgumentException(
+                    "ROI import requires a .zip file: " + importZip.getName());
+        }
+    }
+
+    static ImportedRoiLayout resolveImportedRoiLayout(int roiCount, int totalImages) {
+        if (totalImages <= 0) {
+            throw new IllegalArgumentException("No image series were found for this project.");
+        }
+        if (roiCount == totalImages) {
+            return ImportedRoiLayout.ONE_PER_IMAGE;
+        }
+        long expectedPairs = (long) totalImages * 2L;
+        if (roiCount == expectedPairs) {
+            return ImportedRoiLayout.FLASH_PAIRS;
+        }
+        throw new IllegalArgumentException("ROI zip contains " + roiCount
+                + " ROI(s), but this image series has " + totalImages
+                + " image(s). Expected either " + totalImages
+                + " ROI(s) (one per image) or " + expectedPairs
+                + " ROI(s) (FLASH uncropped/_Cropped pairs).");
+    }
+
+    static Roi sourceRoiForImport(List<Roi> importedRois,
+                                  ImportedRoiLayout layout,
+                                  int imageIndex) {
+        if (importedRois == null) {
+            throw new IllegalArgumentException("No imported ROIs were loaded.");
+        }
+        if (layout == null) {
+            throw new IllegalArgumentException("Imported ROI layout is not known.");
+        }
+        int sourceIndex = layout == ImportedRoiLayout.FLASH_PAIRS
+                ? imageIndex * 2
+                : imageIndex;
+        if (sourceIndex < 0 || sourceIndex >= importedRois.size()) {
+            throw new IllegalArgumentException("Imported ROI set is missing ROI "
+                    + (sourceIndex + 1) + ".");
+        }
+        Roi roi = importedRois.get(sourceIndex);
+        if (roi == null) {
+            throw new IllegalArgumentException("Imported ROI " + (sourceIndex + 1)
+                    + " could not be read.");
+        }
+        return roi;
+    }
+
+    static void validateImportedFlashPairNames(List<Roi> importedRois, int totalImages) {
+        for (int i = 0; i < totalImages; i++) {
+            Roi uncropped = sourceRoiForImport(importedRois,
+                    ImportedRoiLayout.ONE_PER_IMAGE, i * 2);
+            Roi cropped = sourceRoiForImport(importedRois,
+                    ImportedRoiLayout.ONE_PER_IMAGE, i * 2 + 1);
+            String uncroppedName = uncropped.getName();
+            String croppedName = cropped.getName();
+            if (uncroppedName != null && uncroppedName.endsWith("_Cropped")) {
+                throw new IllegalArgumentException("Imported FLASH pair " + (i + 1)
+                        + " has a cropped ROI in the uncropped slot.");
+            }
+            if (croppedName == null || !croppedName.endsWith("_Cropped")) {
+                throw new IllegalArgumentException("Imported FLASH pair " + (i + 1)
+                        + " is missing a _Cropped ROI in the cropped slot.");
+            }
+        }
+    }
+
+    static boolean importedRoiBoundsWithinImage(Roi roi, int width, int height) {
+        if (roi == null || width <= 0 || height <= 0) return false;
+        Rectangle bounds = roi.getBounds();
+        if (bounds == null || bounds.width <= 0 || bounds.height <= 0) return false;
+        return bounds.x >= 0
+                && bounds.y >= 0
+                && bounds.x + bounds.width <= width
+                && bounds.y + bounds.height <= height;
+    }
+
+    private static void validateImportedRoiBounds(Roi roi, int width, int height, int imageIndex) {
+        if (importedRoiBoundsWithinImage(roi, width, height)) {
+            return;
+        }
+        Rectangle bounds = roi == null ? null : roi.getBounds();
+        String boundsText = bounds == null
+                ? "no bounds"
+                : bounds.x + "," + bounds.y + " " + bounds.width + "x" + bounds.height;
+        throw new IllegalArgumentException("Imported ROI " + (imageIndex + 1)
+                + " does not fit image " + (imageIndex + 1) + " (image "
+                + width + "x" + height + ", ROI bounds " + boundsText + ").");
+    }
+
+    private boolean confirmOverwriteImportOutputs(File roiZip, File roiPropsOut) {
+        boolean roiExists = roiZip != null && roiZip.exists();
+        boolean propsExists = roiPropsOut != null && roiPropsOut.exists();
+        if (!roiExists && !propsExists) {
+            return true;
+        }
+        StringBuilder body = new StringBuilder();
+        body.append("Importing this ROI set will overwrite existing output:\n\n");
+        if (roiExists) body.append(roiZip.getAbsolutePath()).append('\n');
+        if (propsExists) body.append(roiPropsOut.getAbsolutePath()).append('\n');
+        body.append("\nContinue?");
+        return JOptionPane.showConfirmDialog(imageJMainWindow(), body.toString(),
+                "Overwrite ROI Import Outputs", JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    private ImportPreviewDecision previewImportedRoi(PreparedImage prep,
+                                                     Roi imported,
+                                                     int imageIndex,
+                                                     int totalImages) {
+        if (prep == null || prep.maxProjection == null) {
+            return ImportPreviewDecision.CANCEL;
+        }
+        Roi previewRoi = duplicateRoi(imported);
+        prep.maxProjection.setRoi(previewRoi);
+        prep.maxProjection.show();
+        placeRoiImageWindowNearImageJ(prep.maxProjection, imageJMainWindow());
+
+        Object[] options = new Object[]{
+                "Next ROI",
+                "Import without more previews",
+                "Cancel import"
+        };
+        int choice = JOptionPane.showOptionDialog(imageJMainWindow(),
+                "Previewing imported ROI " + (imageIndex + 1) + "/" + totalImages
+                + ".\n\nCheck that the ROI overlay matches the displayed image.",
+                "Import ROI Set Preview",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]);
+        if (choice == 0) return ImportPreviewDecision.CONTINUE;
+        if (choice == 1) return ImportPreviewDecision.SKIP_REMAINING;
+        return ImportPreviewDecision.CANCEL;
+    }
+
+    private void addImportedFlashRoiPair(RoiManager rm,
+                                         ResultsTable roiProps,
+                                         String roiSetName,
+                                         PreparedImage prep,
+                                         Roi imported,
+                                         int imageIndex,
+                                         File imageOutputDir) {
+        if (rm == null) throw new IllegalStateException("ROI Manager is not available.");
+        if (prep == null || prep.maxProjection == null) {
+            throw new IllegalStateException("Prepared ROI image is not available.");
+        }
+
+        NameParts parts = prep.parts;
+        String animal = parts == null ? "" : parts.animal;
+        String hemisphere = parts == null ? "" : parts.hemisphere;
+        String region = parts == null ? "" : parts.region;
+        String base = RoiNaming.baseName(animal, hemisphere, region);
+        String croppedName = RoiNaming.croppedName(animal, hemisphere, region);
+
+        Roi uncropped = duplicateRoi(imported);
+        uncropped.setName(base);
+        rm.addRoi(uncropped);
+
+        ImagePlus cropped = prep.maxProjection.duplicate();
+        try {
+            Roi cropSource = duplicateRoi(imported);
+            cropped.setRoi(cropSource);
+            IJ.run(cropped, "Crop", "");
+            Roi croppedRoi = cropped.getRoi();
+            Roi managerCropped = croppedRoi == null
+                    ? duplicateRoi(imported)
+                    : duplicateRoi(croppedRoi);
+            managerCropped.setName(croppedName);
+            rm.addRoi(managerCropped);
+
+            appendImportedRoiProperties(roiProps, roiSetName, prep, imported, imageIndex);
+            saveImportedCroppedPreview(imageOutputDir, parts, cropped);
+        } finally {
+            closeImageNoPrompt(cropped);
+        }
+    }
+
+    private void saveImportedCroppedPreview(File imageOutputDir,
+                                            NameParts parts,
+                                            ImagePlus cropped) {
+        if (imageOutputDir == null || cropped == null) return;
+        String suffix = parts == null ? "" : parts.fileSuffix();
+        String croppedName = suffix.isEmpty()
+                ? "Cropped.PNG"
+                : "Cropped_" + suffix + ".PNG";
+        File croppedOutput = new File(imageOutputDir, croppedName);
+        IJ.saveAs(cropped, "PNG", croppedOutput.getAbsolutePath());
+        recordOutput(croppedOutput, "png");
+    }
+
+    private static void appendImportedRoiProperties(ResultsTable roiProps,
+                                                    String roiSetName,
+                                                    PreparedImage prep,
+                                                    Roi roi,
+                                                    int imageIndex) {
+        if (roiProps == null || prep == null || roi == null) return;
+        NameParts parts = prep.parts;
+        String animal = parts == null ? "" : parts.animal;
+        String hemisphere = parts == null ? "" : parts.hemisphere;
+        String region = parts == null ? "" : parts.region;
+
+        Rectangle b = roi.getBounds();
+        roiProps.incrementCounter();
+        int row = roiProps.size() - 1;
+        roiProps.setValue("Animal Name", row, animal);
+        String regionLabel = (hemisphere.isEmpty() && region.isEmpty())
+                ? "" : hemisphere + region;
+        roiProps.setValue("Region", row, regionLabel);
+        roiProps.setValue(roiSetName, row, imageIndex + 1);
+
+        ImagePlus imp = prep.original;
+        ij.measure.Calibration cal = imp == null ? null : imp.getCalibration();
+        boolean hasCalibration = cal != null
+                && !"pixel".equalsIgnoreCase(cal.getUnit())
+                && !"pixels".equalsIgnoreCase(cal.getUnit())
+                && cal.pixelWidth != 0 && cal.pixelHeight != 0;
+        double roiArea = roi.getStatistics().area;
+        if (hasCalibration) {
+            double pixelArea = roiArea / (cal.pixelWidth * cal.pixelHeight);
+            roiProps.setValue("Area (pixel)", row, pixelArea);
+            roiProps.setValue("Area (um^2)", row, roiArea);
+            int slices = imp == null ? 1 : Math.max(1, imp.getNSlices());
+            double zDepth = cal.pixelDepth * slices;
+            double volumeUm3 = roiArea * zDepth;
+            double volumeMm3 = volumeUm3 / 1e9;
+            roiProps.setValue("Volume (micron^3)", row, volumeUm3);
+            roiProps.setValue("Volume (mm^3)", row, volumeMm3);
+        } else {
+            roiProps.setValue("Area (pixel)", row, roiArea);
+        }
+        roiProps.setValue("Width", row, b == null ? 0 : b.width);
+        roiProps.setValue("Height", row, b == null ? 0 : b.height);
+    }
+
+    static String importSetNameFromZip(File zip) {
+        String name = zip == null ? "" : zip.getName();
+        name = name.replaceAll("(?i)\\s*ROIs\\.zip$", "");
+        name = name.replaceAll("(?i)\\.zip$", "");
+        return sanitizeRoiSetName(name);
+    }
+
+    static String sanitizeRoiSetName(String value) {
+        String name = value == null ? "" : value.trim();
+        name = name.replaceAll("[\\\\/:*?\"<>|]+", "_").trim();
+        return name.isEmpty() ? "Imported ROIs" : name;
+    }
+
+    private static boolean isZipFile(File file) {
+        return file != null
+                && file.getName() != null
+                && file.getName().toLowerCase(Locale.ROOT).endsWith(".zip");
+    }
+
+    private static Roi duplicateRoi(Roi roi) {
+        if (roi == null) return null;
+        return (Roi) roi.clone();
+    }
+
+    private static String htmlEscape(String value) {
+        if (value == null) return "";
+        StringBuilder escaped = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            switch (ch) {
+                case '&':
+                    escaped.append("&amp;");
+                    break;
+                case '<':
+                    escaped.append("&lt;");
+                    break;
+                case '>':
+                    escaped.append("&gt;");
+                    break;
+                case '"':
+                    escaped.append("&quot;");
+                    break;
+                case '\'':
+                    escaped.append("&#39;");
+                    break;
+                default:
+                    escaped.append(ch);
+                    break;
+            }
+        }
+        return escaped.toString();
     }
 
     private static void showOrLog(String title, String body) {

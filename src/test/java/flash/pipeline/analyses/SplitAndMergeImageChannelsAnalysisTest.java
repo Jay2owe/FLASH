@@ -29,9 +29,11 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import javax.imageio.ImageIO;
 import javax.swing.JComboBox;
 import java.io.File;
 import java.awt.Color;
+import java.awt.image.BufferedImage;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -424,6 +426,21 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
+    public void parallelProcessingCanSkipOrientationTransformsForPresentationImages() throws Exception {
+        File dir = temp.newFolder("skipOrientationTransforms");
+
+        BufferedImage applied = runOneChannelParallelPresentationExport(
+                dir, "applied", true);
+        BufferedImage skipped = runOneChannelParallelPresentationExport(
+                dir, "skipped", false);
+
+        assertEquals(2, applied.getWidth());
+        assertEquals(4, applied.getHeight());
+        assertEquals(4, skipped.getWidth());
+        assertEquals(2, skipped.getHeight());
+    }
+
+    @Test
     public void presentationManifestMergeKeepsDuplicateLabelsWhenImageIdsDiffer() throws Exception {
         File presentationRoot = temp.newFolder("presentationMerge");
         File images = new File(presentationRoot, "Images/Animal1");
@@ -614,7 +631,55 @@ public class SplitAndMergeImageChannelsAnalysisTest {
         setField(result, "subtractBackground", Boolean.FALSE);
         setField(result, "backgroundIndex", Integer.valueOf(-1));
         setField(result, "subtractFromChannels", new boolean[channelCount]);
+        setField(result, "applyOrientationTransforms", Boolean.TRUE);
         return result;
+    }
+
+    private BufferedImage runOneChannelParallelPresentationExport(File project,
+                                                                  String outputName,
+                                                                  boolean applyOrientation)
+            throws Exception {
+        File outRoot = new File(project, outputName + "/Images");
+        File tifDir = new File(project, outputName + "/OME-TIFF");
+        File detailsRoot = new File(project, outputName + "/Details");
+        Object dialogResult = newMainDialogResult(1);
+        setField(dialogResult, "applyOrientationTransforms", Boolean.valueOf(applyOrientation));
+
+        ImagePlus imp = oneChannelImage("Experiment-Animal1_LH_Cortex", 4, 2);
+        BoundedImageLoader loader = new BoundedImageLoader(
+                new SyntheticDeferredImageSupplier(imp),
+                Collections.singletonList(Integer.valueOf(0)),
+                1);
+        loader.start();
+
+        invokeProcessImagesParallel(new SplitAndMergeImageChannelsAnalysis(),
+                loader,
+                project,
+                null,
+                new String[]{"DAPI"},
+                new String[]{"Blue"},
+                outRoot,
+                tifDir,
+                detailsRoot,
+                dialogResult,
+                1);
+        AsyncImageSaver.waitForAll();
+        File output = new File(new File(outRoot, "Animal1"), "DAPI_LH_Cortex.png");
+        assertFileWritten(output);
+        return ImageIO.read(output);
+    }
+
+    private static ImagePlus oneChannelImage(String title, int width, int height) {
+        byte[] pixels = new byte[width * height];
+        for (int i = 0; i < pixels.length; i++) {
+            pixels[i] = (byte) (i + 1);
+        }
+        ImageStack stack = new ImageStack(width, height);
+        stack.addSlice("DAPI", pixels);
+        ImagePlus image = new ImagePlus(title, stack);
+        image.setDimensions(1, 1, 1);
+        image.setOpenAsHyperStack(true);
+        return image;
     }
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {

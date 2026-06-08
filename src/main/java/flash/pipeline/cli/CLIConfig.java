@@ -42,6 +42,7 @@ public class CLIConfig {
     int loaderPercent = 50;
     int gpuPermits = 0;
     boolean splitMergeUseDeconv = true;
+    boolean splitMergeApplyOrientationTransforms = true;
     boolean threeDUseDeconv = true;
     boolean intensityV2UseDeconv = true;
     final DeconvConfig deconv = new DeconvConfig();
@@ -70,6 +71,7 @@ public class CLIConfig {
     public int getLoaderPercent() { return loaderPercent; }
     public int getGpuPermits() { return gpuPermits; }
     public boolean isSplitMergeUseDeconv() { return splitMergeUseDeconv; }
+    public boolean isSplitMergeApplyOrientationTransforms() { return splitMergeApplyOrientationTransforms; }
     public boolean isThreeDUseDeconv() { return threeDUseDeconv; }
     public boolean isIntensityV2UseDeconv() { return intensityV2UseDeconv; }
     public DeconvConfig getDeconv() { return deconv; }
@@ -389,6 +391,9 @@ public class CLIConfig {
         }
 
         if (!splitMergeUseDeconv) parts.add("splitmerge.useDeconv=false");
+        if (!splitMergeApplyOrientationTransforms) {
+            parts.add("splitmerge.applyOrientationTransforms=false");
+        }
         if (!threeDUseDeconv) parts.add("threeD.useDeconv=false");
         if (!intensityV2UseDeconv) parts.add("intensityV2.useDeconv=false");
 

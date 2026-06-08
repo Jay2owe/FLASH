@@ -291,6 +291,8 @@ public final class IntensitySpatialRunner {
     private long logSameChannelStart(IntensitySpatialAnalysis analysis,
                                      IntensitySpatialContext context) {
         if (!progressLogging) return 0L;
+        IJ.showStatus("Intensity-spatial " + analysis.key().token()
+                + ": " + sameChannelLabel(context));
         IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
                 + " running: " + sameChannelLabel(context)
                 + " (cost " + analysis.estimatedCost() + ")");
@@ -310,6 +312,8 @@ public final class IntensitySpatialRunner {
     private long logPairStart(IntensitySpatialPairAnalysis analysis,
                               IntensitySpatialPairContext context) {
         if (!progressLogging) return 0L;
+        IJ.showStatus("Intensity-spatial " + analysis.key().token()
+                + ": " + pairLabel(context));
         IJ.log("[FLASH] Intensity-spatial " + analysis.key().token()
                 + " running: " + pairLabel(context)
                 + " (cost " + analysis.estimatedCost() + ")");

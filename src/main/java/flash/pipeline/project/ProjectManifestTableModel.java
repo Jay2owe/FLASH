@@ -1,6 +1,7 @@
 package flash.pipeline.project;
 
 import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.naming.ConditionNameParser;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
@@ -9,8 +10,12 @@ import javax.swing.table.AbstractTableModel;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Backing JTable model for the Project Builder dialog. Holds one
@@ -53,6 +58,8 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     private final List<Row> rows = new ArrayList<Row>();
     /** Flattened file + expanded-series rows the JTable actually renders. */
     private final List<View> visible = new ArrayList<View>();
+    /** Ordered condition-axis schema (multi-condition). Empty = single implicit "Condition". */
+    private final List<ConditionAxis> conditionAxes = new ArrayList<ConditionAxis>();
 
     /** Index/name pair used to populate a file's per-series rows. */
     public static final class SeriesEntry {
@@ -74,6 +81,8 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         public String hemisphere = "";
         public String region = "";
         public String condition = "";
+        /** Extra condition axes beyond the primary (axisId -&gt; value). */
+        public final Map<String, String> conditions = new LinkedHashMap<String, String>();
         public String notes = "";
 
         SeriesRow(int index) {
@@ -100,6 +109,8 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         public String hemisphere = "";
         public String region = "";
         public String condition = "";
+        /** Extra condition axes beyond the primary (axisId -&gt; value). */
+        public final Map<String, String> conditions = new LinkedHashMap<String, String>();
         public String notes = "";
 
         Row(File source) {
@@ -375,6 +386,118 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         }
     }
 
+    // ── Multi-condition axes ───────────────────────────────────────────────
+
+    /** Ordered condition-axis schema (defensive copy). Empty = single implicit "Condition". */
+    public List<ConditionAxis> conditionAxes() {
+        return new ArrayList<ConditionAxis>(conditionAxes);
+    }
+
+    /** Replace the condition-axis schema (de-duplicated by id). */
+    public void setConditionAxes(List<ConditionAxis> axes) {
+        conditionAxes.clear();
+        if (axes != null) {
+            for (ConditionAxis axis : axes) {
+                if (axis == null) continue;
+                boolean dup = false;
+                for (ConditionAxis a : conditionAxes) {
+                    if (a.id.equals(axis.id)) { dup = true; break; }
+                }
+                if (!dup) conditionAxes.add(axis);
+            }
+        }
+        fireTableDataChanged();
+    }
+
+    private String primaryAxisId() {
+        return conditionAxes.isEmpty() ? "condition" : conditionAxes.get(0).id;
+    }
+
+    /** Ordered, de-duplicated, non-blank values seen for one axis (dropdowns / merge). */
+    public Set<String> distinctConditionValues(String axisId) {
+        String norm = ConditionAxis.normaliseId(axisId);
+        boolean primary = norm.equals(primaryAxisId());
+        Set<String> out = new LinkedHashSet<String>();
+        for (Row r : rows) {
+            collectValue(out, primary ? r.condition : r.conditions.get(norm));
+            for (SeriesRow s : r.series) {
+                collectValue(out, primary ? s.condition : s.conditions.get(norm));
+            }
+        }
+        return out;
+    }
+
+    /** Bulk-assign a value on one condition axis to a set of rendered rows. */
+    public void setConditionForRows(int[] rowIndexes, String axisId, String value) {
+        if (rowIndexes == null) return;
+        String norm = ConditionAxis.normaliseId(axisId);
+        boolean primary = norm.equals(primaryAxisId());
+        String v = value == null ? "" : value;
+        for (int idx : rowIndexes) {
+            if (idx < 0 || idx >= visible.size()) continue;
+            SeriesRow series = seriesRowAt(idx);
+            if (series != null) {
+                if (primary) series.condition = v;
+                else putOrRemove(series.conditions, norm, v);
+            } else {
+                Row row = rows.get(fileIndexAt(idx));
+                if (isContainerSource(row.source)) continue;
+                if (primary) {
+                    row.condition = v;
+                    for (SeriesRow s : row.series) s.condition = v;
+                } else {
+                    putOrRemove(row.conditions, norm, v);
+                    for (SeriesRow s : row.series) putOrRemove(s.conditions, norm, v);
+                }
+            }
+            if (primary) fireTableCellUpdated(idx, COL_CONDITION);
+        }
+    }
+
+    /** Complete axis-&gt;value map for persistence; empty for single-axis projects. */
+    private Map<String, String> fullConditions(String primaryValue, Map<String, String> extras) {
+        Map<String, String> full = new LinkedHashMap<String, String>();
+        if (conditionAxes.size() < 2) return full;   // single/implicit axis -> legacy field only
+        String primaryId = primaryAxisId();
+        String pv = primaryValue == null ? "" : primaryValue.trim();
+        if (!pv.isEmpty()) full.put(primaryId, pv);
+        if (extras != null) {
+            for (Map.Entry<String, String> e : extras.entrySet()) {
+                if (e.getKey() == null || e.getKey().equals(primaryId)) continue;
+                String v = e.getValue();
+                if (v != null && !v.trim().isEmpty()) full.put(e.getKey(), v.trim());
+            }
+        }
+        return full;
+    }
+
+    /** Split a persisted axis-&gt;value map into extras + return the primary value. */
+    private String applyLoadedConditions(Map<String, String> targetExtras,
+                                         Map<String, String> source, String currentPrimary) {
+        targetExtras.clear();
+        String primary = nullToEmpty(currentPrimary);
+        if (source == null) return primary;
+        String primaryId = primaryAxisId();
+        for (Map.Entry<String, String> e : source.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null) continue;
+            if (e.getKey().equals(primaryId)) {
+                if (primary.isEmpty()) primary = e.getValue();
+            } else {
+                targetExtras.put(e.getKey(), e.getValue());
+            }
+        }
+        return primary;
+    }
+
+    private static void collectValue(Set<String> out, String value) {
+        if (value != null && !value.trim().isEmpty()) out.add(value.trim());
+    }
+
+    private static void putOrRemove(Map<String, String> map, String key, String value) {
+        if (value == null || value.trim().isEmpty()) map.remove(key);
+        else map.put(key, value);
+    }
+
     /** Serialise the current state to a {@link ProjectFile} ready for IO. */
     public ProjectFile toProjectFile(String name, String outputRoot, String writerId) {
         ProjectFile project = new ProjectFile();
@@ -382,6 +505,9 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         project.outputRoot = outputRoot == null ? "" : outputRoot;
         project.writerId = writerId == null ? "" : writerId;
         project.writtenAtMillis = System.currentTimeMillis();
+        if (conditionAxes.size() >= 2) {
+            project.conditionAxes = conditionAxes();
+        }
         for (Row row : rows) {
             ProjectFile.Item item = new ProjectFile.Item();
             item.path = row.source == null ? "" : row.source.getAbsolutePath();
@@ -391,6 +517,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 item.hemisphere = row.hemisphere;
                 item.region = row.region;
                 item.condition = row.condition;
+                item.conditions = fullConditions(row.condition, row.conditions);
             } else {
                 item.animalId = "";
                 item.hemisphere = "";
@@ -412,6 +539,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                     meta.hemisphere = s.hemisphere;
                     meta.region = s.region;
                     meta.condition = s.condition;
+                    meta.conditions = fullConditions(s.condition, s.conditions);
                     meta.notes = s.notes;
                     item.seriesMeta.add(meta);
                     if (s.include) included.add(Integer.valueOf(s.index));
@@ -470,6 +598,12 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     /** Populate the model from a previously saved {@link ProjectFile}. */
     public void loadFromProjectFile(ProjectFile project) {
         rows.clear();
+        conditionAxes.clear();
+        if (project != null && project.conditionAxes != null) {
+            for (ConditionAxis axis : project.conditionAxes) {
+                if (axis != null) conditionAxes.add(axis);
+            }
+        }
         if (project != null && project.items != null) {
             for (ProjectFile.Item item : project.items) {
                 if (item == null || item.path == null || item.path.isEmpty()) continue;
@@ -480,6 +614,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                     row.hemisphere = nullToEmpty(item.hemisphere);
                     row.region = nullToEmpty(item.region);
                     row.condition = nullToEmpty(item.condition);
+                    row.condition = applyLoadedConditions(row.conditions, item.conditions, row.condition);
                 }
                 row.notes = nullToEmpty(item.notes);
                 if (item.series != null) {
@@ -499,6 +634,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                         series.hemisphere = nullToEmpty(meta.hemisphere);
                         series.region = nullToEmpty(meta.region);
                         series.condition = nullToEmpty(meta.condition);
+                        series.condition = applyLoadedConditions(series.conditions, meta.conditions, series.condition);
                         series.notes = nullToEmpty(meta.notes);
                         repairLoadedSeriesMetadata(row, series, loadedFileCondition);
                         row.series.add(series);

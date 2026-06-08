@@ -405,6 +405,7 @@ public class IntensityAnalysisV2Test {
                 totalTables,
                 1,
                 null,
+                1,
                 5,
                 intensityConfig("DAPI", "default"),
                 filterSources,
@@ -692,6 +693,74 @@ public class IntensityAnalysisV2Test {
         assertTrue(csv.contains("NaN"));
         assertTrue(log.contains("granularity skipped"));
         assertTrue(log.contains("missing dependency IMGLIB2_ALGORITHM_RUNTIME"));
+    }
+
+    @Test
+    public void intensitySpatialProgressLogIdentifiesImageChannelSliceAndPair() throws Exception {
+        File dir = temp.newFolder("intensity-spatial-progress-log");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesIntensityWriteDir();
+        assertTrue(outputRoot.mkdirs());
+
+        String[] channelNames = {"DAPI", "GFAP"};
+        boolean[] binarization = {false, false};
+        String[] thresholds = {"0", "0"};
+        String[] filterSources = {
+                "Basic background and noise removal",
+                "Basic background and noise removal"
+        };
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI)
+                .build();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, spatial, 2, false);
+        Object totalTables = newOutputTables(plan);
+
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        setIntensitySpatialConfigForTest(analysis, spatial);
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() throws Exception {
+                invokeRunIntensityMeasurementsForThisImage(
+                        analysis,
+                        new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                        new ImagePlus[]{
+                                syntheticStackImage(12, 12, 2),
+                                syntheticStackImage(12, 12, 2)
+                        },
+                        2,
+                        binarization,
+                        thresholds,
+                        channelNames,
+                        -1,
+                        plan,
+                        totalTables,
+                        2,
+                        null,
+                        5,
+                        intensityConfig("DAPI", "0"),
+                        filterSources,
+                        binDir,
+                        "",
+                        null);
+            }
+        });
+
+        String context = "image 2/5 SyntheticMouse_LH_SCN ROI SCN2";
+        assertTrue(log, log.contains(context + ": starting intensity measurements (2 channels)"));
+        assertTrue(log, log.contains(context + ": channel 1/2 DAPI started"));
+        assertTrue(log, log.contains(context + ": intensity-spatial same-channel [DAPI]"));
+        assertTrue(log, log.contains("Intensity-spatial patchiness running: image 2/5 "
+                + "SyntheticMouse_LH_SCN channel DAPI ROI SCN2 base slice 1"));
+        assertTrue(log, log.contains(context + ": intensity-spatial cross-channel"));
+        assertTrue(log, log.contains(context + ": pair [1/2] DAPI -> GFAP base slice 1/2"));
+        assertTrue(log, log.contains("Intensity-spatial mi running: image 2/5 "
+                + "SyntheticMouse_LH_SCN source DAPI -> partner GFAP ROI SCN2 base slice 1"));
     }
 
     @Test
@@ -1038,6 +1107,32 @@ public class IntensityAnalysisV2Test {
             Object totalTables,
             int scnIndex1Based,
             String roiSetName,
+            int totalImages,
+            BinConfig cfg,
+            String[] filterSources,
+            File binDir,
+            String basicFilterMacro,
+            Roi roi) throws Exception {
+        invokeRunIntensityMeasurementsForThisImage(analysis, parts, chans, n,
+                binarization, thresholds, channelNames, roiChannelIndex1Based,
+                outputPlan, totalTables, scnIndex1Based, roiSetName, totalImages, 1,
+                cfg, filterSources, binDir, basicFilterMacro, roi);
+    }
+
+    private static void invokeRunIntensityMeasurementsForThisImage(
+            IntensityAnalysisV2 analysis,
+            NameParts parts,
+            ImagePlus[] chans,
+            int n,
+            boolean[] binarization,
+            String[] thresholds,
+            String[] channelNames,
+            int roiChannelIndex1Based,
+            IntensityAnalysisV2.IntensityOutputPlan outputPlan,
+            Object totalTables,
+            int scnIndex1Based,
+            String roiSetName,
+            int totalImages,
             int firstZSlice,
             BinConfig cfg,
             String[] filterSources,
@@ -1060,6 +1155,7 @@ public class IntensityAnalysisV2Test {
                 int.class,
                 String.class,
                 int.class,
+                int.class,
                 BinConfig.class,
                 String[].class,
                 File.class,
@@ -1069,7 +1165,8 @@ public class IntensityAnalysisV2Test {
         method.invoke(analysis, parts, chans, Integer.valueOf(n), binarization,
                 thresholds, channelNames, Integer.valueOf(roiChannelIndex1Based),
                 outputPlan, totalTables, Integer.valueOf(scnIndex1Based), roiSetName,
-                Integer.valueOf(firstZSlice), cfg, filterSources, binDir, basicFilterMacro, roi);
+                Integer.valueOf(totalImages), Integer.valueOf(firstZSlice),
+                cfg, filterSources, binDir, basicFilterMacro, roi);
     }
 
     private static void writeChannelNamesOnlyConfig(File dir, String... names) throws Exception {

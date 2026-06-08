@@ -1186,7 +1186,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                 binarization, thresholds,
                                 channelNames, roiChannelIndex1Based,
                                 outputPlan, totalTables, idx + 1, roiZipNames[rSet],
-                                firstZSlice,
+                                totalImages, firstZSlice,
                                 cfg, filterSources, binDir,
                                 basicFilterMacro, activeRoi);
                     }
@@ -1196,7 +1196,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                             binarization, thresholds,
                             channelNames, -1,
                             outputPlan, totalTables, idx + 1, null,
-                            firstZSlice,
+                            totalImages, firstZSlice,
                             cfg, filterSources, binDir,
                             basicFilterMacro, null);
                 }
@@ -1336,7 +1336,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                                 binarization, thresholds,
                                                 channelNames, roiChannelIndex1Based,
                                                 outputPlan, localTables, idx + 1, roiZipNames[rSet],
-                                                firstZSlice,
+                                                total, firstZSlice,
                                                 cfg, filterSources, binDir,
                                                 basicFilterMacro, activeRoi);
                                     }
@@ -1346,7 +1346,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                             binarization, thresholds,
                                             channelNames, -1,
                                             outputPlan, localTables, idx + 1, null,
-                                            firstZSlice,
+                                            total, firstZSlice,
                                             cfg, filterSources, binDir,
                                             basicFilterMacro, null);
                                 }
@@ -1484,6 +1484,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             IntensityOutputTables totalTables,
             int scnIndex1Based,
             String roiSetName,
+            int totalImages,
             int firstZSlice,
             final BinConfig cfg,
             final String[] filterSources,
@@ -1491,6 +1492,17 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             String basicFilterMacro,
             Roi roi
     ) {
+        String roiBase = roiSetName == null ? "" : roiSetName;
+        final String roiLabel = parts == null
+                ? (scnIndex1Based > 0 && !endsWithDigit(roiBase) ? roiBase + scnIndex1Based : roiBase)
+                : parts.analysisRegionLabel(roiBase, scnIndex1Based);
+        final String imageProgressLabel = imageProgressLabel(scnIndex1Based, totalImages);
+        final String imageIdWithProgress = imageIdWithProgress(parts, imageProgressLabel);
+        final String imageStepContext = imageIdWithProgress + roiLogSuffix(roiLabel);
+
+        logProgressStep(imageStepContext, "starting intensity measurements ("
+                + n + " " + plural(n, "channel") + ")");
+
         // Optional ROI-channel mask stack creation. The mask is built from
         // the chosen channel's resolved filter (bin or basic) and the user's
         // explicit threshold for that channel - never an auto-threshold.
@@ -1508,6 +1520,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
         if (roiChannelIndex1Based > 0 && roiChannelIndex1Based <= n) {
             int mc = roiChannelIndex1Based - 1;
+            logProgressStep(imageStepContext, "building ROI channel mask from " + channelNames[mc]);
             if (!compactLog) IJ.log("    Creating ROI channel mask from: " + channelNames[mc]);
             boolean useBinFilterForMask = filterSources != null
                     && mc < filterSources.length
@@ -1557,18 +1570,14 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         final ImagePlus[] allBinarizedSpatialImages = new ImagePlus[channelCount];
         final ImagePlus[] allBinarySpatialMasks = new ImagePlus[channelCount];
 
-        // scnIndex is folded into roiLabel (e.g. "SCN5") -- no separate SCN column.
-        String roiBase = roiSetName == null ? "" : roiSetName;
-        final String roiLabel = parts == null
-                ? (scnIndex1Based > 0 && !endsWithDigit(roiBase) ? roiBase + scnIndex1Based : roiBase)
-                : parts.analysisRegionLabel(roiBase, scnIndex1Based);
-
         // Capture effectively-final references for inner class access
         final ImagePlus finalMaskStack = maskStack;
         final Roi finalRoi = roi;
         final NameParts finalParts = parts;
         final boolean finalVerboseLogging = verboseLogging;
         final String finalRoiLabel = roiLabel;
+        final String finalImageProgressLabel = imageProgressLabel;
+        final String finalImageStepContext = imageStepContext;
 
         try {
             if (channelThreads > 1) {
@@ -1588,6 +1597,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                         binarization, thresholds,
                                         cfg, filterSources, binDir, basicFilterMacro,
                                         finalMaskStack, finalRoi, finalParts, finalRoiLabel,
+                                        finalImageProgressLabel, finalImageStepContext,
                                         outputPlan, intensitySpatialConfig, finalVerboseLogging,
                                         allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
                                         allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
@@ -1629,6 +1639,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                             binarization, thresholds,
                             cfg, filterSources, binDir, basicFilterMacro,
                             finalMaskStack, finalRoi, finalParts, finalRoiLabel,
+                            finalImageProgressLabel, finalImageStepContext,
                             outputPlan, intensitySpatialConfig, finalVerboseLogging,
                             allIntDenFilteredFullRoi, allAreaFractionFilteredFullRoi,
                             allIntDenUnfilteredFullRoi, allIntDenBinarizedRawInMask,
@@ -1641,7 +1652,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
             try {
                 measureCrossChannelSpatial(channelNames, channelCount, finalRoi, finalRoiLabel,
-                        finalParts, outputPlan, intensitySpatialConfig,
+                        finalParts, finalImageProgressLabel, finalImageStepContext,
+                        outputPlan, intensitySpatialConfig,
                         allRawSpatialImages, allBinarizedSpatialImages, allBinarySpatialMasks,
                         allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults);
             } catch (Throwable t) {
@@ -1714,6 +1726,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             String basicFilterMacro,
             ImagePlus maskStack, Roi roi,
             NameParts parts, String roiLabel,
+            String imageProgressLabel,
+            String imageStepContext,
             IntensityOutputPlan outputPlan,
             IntensitySpatialConfig spatialConfig,
             boolean verbose,
@@ -1730,6 +1744,13 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             ImagePlus[] outBinarySpatialMasks
     ) {
         long chStart = verbose ? System.currentTimeMillis() : 0;
+        String channelProgress = "channel " + (c + 1) + "/" + n + " " + channelNames[c];
+        boolean logChannelProgress = !compactLog || isSpatialEnabled(spatialConfig);
+        if (logChannelProgress) {
+            logProgressStep(imageStepContext, channelProgress + " started");
+        } else {
+            showProgressStep(imageStepContext, channelProgress + " started");
+        }
         if (!compactLog) IJ.log("  > Channel " + (c + 1) + "/" + n + ": " + channelNames[c]);
 
         ImagePlus raw = null;
@@ -1738,6 +1759,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         ImagePlus binarizedRawInMask = null;
 
         try {
+        showProgressStep(imageStepContext, channelProgress + " filtering");
         raw = ImageOps.duplicateThreadSafe(chans[c]);
         raw.setTitle(channelNames[c] + "_raw");
 
@@ -1816,6 +1838,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
 
         // Thread-safe measurement using ThreadSafeMeasure
+        showProgressStep(imageStepContext, channelProgress + " measuring intensity");
         Roi measureRoi = roi != null ? (Roi) roi.clone() : null;
         ThreadSafeMeasure.SliceResult[] sliceResults = ThreadSafeMeasure.measureAllSlices(
                 filteredMeasurement, raw, binarizedRawInMask, measureRoi);
@@ -1850,12 +1873,20 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             }
         }
 
+        if (isSpatialEnabled(spatialConfig)) {
+            logProgressStep(imageStepContext, channelProgress
+                    + " starting same-channel intensity-spatial");
+        }
         ChannelSpatialResults spatialResults = measureChannelSpatial(
                 raw, binarizedRawInMask, channelNames[c], roi, roiLabel,
-                parts, outputPlan, spatialConfig);
+                parts, imageProgressLabel, imageStepContext, outputPlan, spatialConfig);
         outBaseSpatialResults[c] = spatialResults.baseResults;
         outMipSpatialResults[c] = spatialResults.mipResult;
         outNativeSpatialResults[c] = spatialResults.nativeResult;
+        if (isSpatialEnabled(spatialConfig)) {
+            logProgressStep(imageStepContext, channelProgress
+                    + " same-channel intensity-spatial complete");
+        }
 
         if (verbose) {
             IJ.log("    [DEBUG] Channel " + channelNames[c] + " processing time: "
@@ -1863,6 +1894,11 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             IJ.log("    [DEBUG] Binarization applied: " + binarization[c]
                     + (binarization[c] ? " (threshold=" + thresholds[c] + ")" : ""));
             IJ.log("    [DEBUG] ROI mask applied: " + (roi != null));
+        }
+
+        if (logChannelProgress) {
+            logProgressStep(imageStepContext, channelProgress
+                    + " complete (" + sliceResults.length + " " + plural(sliceResults.length, "slice") + ")");
         }
 
         } finally {
@@ -1878,6 +1914,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                             Roi roi,
                                             String roiLabel,
                                             NameParts parts,
+                                            String imageProgressLabel,
+                                            String imageStepContext,
                                             IntensityOutputPlan outputPlan,
                                             IntensitySpatialConfig spatialConfig,
                                             ImagePlus[] rawImages,
@@ -1895,9 +1933,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
 
         IntensitySpatialRunner runner = IntensitySpatialRunner.standardWithProgress();
-        String imageId = parts == null ? "unknown" : parts.displayLabel();
-        IJ.log("    - Intensity-spatial cross-channel: " + crossChannelPlanSummary(spatialConfig)
-                + " for " + imageId + roiLogSuffix(roiLabel));
+        String imageId = imageIdWithProgress(parts, imageProgressLabel);
+        logProgressStep(imageStepContext, "intensity-spatial cross-channel: "
+                + crossChannelPlanSummary(spatialConfig));
         for (int c = 0; c < channelCount; c++) {
             ImagePlus sourceRaw = rawImages[c];
             if (sourceRaw == null) continue;
@@ -1914,11 +1952,13 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 for (int p = 0; p < channelCount; p++) {
                     if (p == c || rawImages[p] == null) continue;
                     int pairSlices = Math.min(slices, Math.max(1, rawImages[p].getStackSize()));
-                    IJ.log("      Pair " + orderedPairProgress(c, p, channelCount)
-                            + " " + sourceName + " -> " + channelNames[p]
-                            + " base: " + pairSlices + " slices");
+                    String pairProgress = "pair " + orderedPairProgress(c, p, channelCount)
+                            + " " + sourceName + " -> " + channelNames[p];
+                    logProgressStep(imageStepContext, pairProgress
+                            + " base: " + pairSlices + " " + plural(pairSlices, "slice"));
                     for (int s = 1; s <= pairSlices; s++) {
-                        IJ.log("        Base slice [" + s + "/" + pairSlices + "]");
+                        logProgressStep(imageStepContext, pairProgress
+                                + " base slice " + s + "/" + pairSlices);
                         IntensitySpatialResult result = runner.measurePair(new IntensitySpatialPairContext(
                                 spatialConfig,
                                 sourceRaw, imageAt(binarizedImages, c), imageAt(binaryMasks, c),
@@ -1935,8 +1975,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             if (has2d && outputPlan.shouldPopulate(mipKey)) {
                 for (int p = 0; p < channelCount; p++) {
                     if (p == c || rawImages[p] == null) continue;
-                    IJ.log("      Pair " + orderedPairProgress(c, p, channelCount)
-                            + " " + sourceName + " MIP -> " + channelNames[p] + " MIP");
+                    String pairProgress = "pair " + orderedPairProgress(c, p, channelCount)
+                            + " " + sourceName + " MIP -> " + channelNames[p] + " MIP";
+                    logProgressStep(imageStepContext, pairProgress);
                     ImagePlus sourceMip = null;
                     ImagePlus sourceBinMip = null;
                     ImagePlus sourceMaskMip = null;
@@ -1992,9 +2033,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 for (int p = 0; p < channelCount; p++) {
                     if (p == c || rawImages[p] == null) continue;
                     int pairDepth = Math.min(sourceDepth, Math.max(1, rawImages[p].getStackSize()));
-                    IJ.log("      Pair " + orderedPairProgress(c, p, channelCount)
-                            + " " + sourceName + " -> " + channelNames[p]
-                            + " native 3D: " + pairDepth + " slices");
+                    String pairProgress = "pair " + orderedPairProgress(c, p, channelCount)
+                            + " " + sourceName + " -> " + channelNames[p];
+                    logProgressStep(imageStepContext, pairProgress
+                            + " native 3D: " + pairDepth + " " + plural(pairDepth, "slice"));
                     if (pairDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
                         IJ.log("[FLASH] Intensity-spatial native 3D skipped for "
                                 + imageId + " source " + sourceName
@@ -2003,6 +2045,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                 + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
                         continue;
                     }
+                    showProgressStep(imageStepContext, pairProgress + " native 3D");
                     IntensitySpatialResult result = runner.measurePair(new IntensitySpatialPairContext(
                             spatialConfig,
                             sourceRaw, imageAt(binarizedImages, c), imageAt(binaryMasks, c),
@@ -2016,8 +2059,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     }
 
     private static boolean shouldRetainCrossChannelSpatialImages(IntensityOutputPlan outputPlan,
-                                                                 IntensitySpatialConfig spatialConfig,
-                                                                 String channelName) {
+                                                                  IntensitySpatialConfig spatialConfig,
+                                                                  String channelName) {
         boolean needs2d = hasSelected2dCrossChannelAnalysis(spatialConfig);
         boolean needsNative3d = hasSelectedNative3dCrossChannelAnalysis(spatialConfig);
         if ((!needs2d && !needsNative3d) || outputPlan == null) {
@@ -2042,6 +2085,13 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             }
         }
         return false;
+    }
+
+    private static boolean isSpatialEnabled(IntensitySpatialConfig spatialConfig) {
+        return spatialConfig != null
+                && spatialConfig.isEnabled()
+                && spatialConfig.getEnabledAnalyses() != null
+                && !spatialConfig.getEnabledAnalyses().isEmpty();
     }
 
     private static boolean hasSelected2dCrossChannelAnalysis(IntensitySpatialConfig spatialConfig) {
@@ -2139,6 +2189,35 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 : " ROI " + roiLabel.trim();
     }
 
+    private static String imageProgressLabel(int imageIndex1Based, int totalImages) {
+        int safeIndex = Math.max(1, imageIndex1Based);
+        if (totalImages > 0) {
+            return "image " + safeIndex + "/" + Math.max(safeIndex, totalImages);
+        }
+        return "image " + safeIndex;
+    }
+
+    private static String imageIdWithProgress(NameParts parts, String imageProgressLabel) {
+        String imageId = parts == null ? "unknown" : parts.displayLabel();
+        String progress = imageProgressLabel == null || imageProgressLabel.trim().isEmpty()
+                ? "image"
+                : imageProgressLabel.trim();
+        return progress + " " + imageId;
+    }
+
+    private static void logProgressStep(String imageStepContext, String step) {
+        IJ.log("    - " + imageStepContext + ": " + step);
+        showProgressStep(imageStepContext, step);
+    }
+
+    private static void showProgressStep(String imageStepContext, String step) {
+        IJ.showStatus("Intensity " + imageStepContext + ": " + step);
+    }
+
+    private static String plural(int count, String singular) {
+        return count == 1 ? singular : singular + "s";
+    }
+
     private static String orderedPairProgress(int sourceIndex,
                                               int partnerIndex,
                                               int channelCount) {
@@ -2176,6 +2255,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                                         Roi roi,
                                                         String roiLabel,
                                                         NameParts parts,
+                                                        String imageProgressLabel,
+                                                        String imageStepContext,
                                                         IntensityOutputPlan outputPlan,
                                                         IntensitySpatialConfig spatialConfig) {
         if (raw == null || spatialConfig == null || !spatialConfig.isEnabled()
@@ -2191,7 +2272,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
         try {
             IntensitySpatialRunner runner = IntensitySpatialRunner.standardWithProgress();
-            String imageId = parts == null ? "unknown" : parts.displayLabel();
+            String imageId = imageIdWithProgress(parts, imageProgressLabel);
             IntensitySpatialResult[] baseResults = null;
             IntensitySpatialResult mipResult = null;
             IntensitySpatialResult nativeResult = null;
@@ -2209,17 +2290,18 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     IntensitySpatialOutputMode.NATIVE_3D);
             boolean nativeAllowed = outputPlan.shouldPopulate(nativeKey);
 
-            IJ.log("    - Intensity-spatial same-channel [" + channelName + "]: "
+            logProgressStep(imageStepContext, "intensity-spatial same-channel [" + channelName + "]: "
                     + sameChannelPlanSummary(spatialConfig, hasSame2d && (baseAllowed || mipAllowed),
-                    hasSameNative3d && nativeAllowed)
-                    + " for " + imageId + roiLogSuffix(roiLabel));
+                    hasSameNative3d && nativeAllowed));
 
             if (baseAllowed && hasSame2d) {
                 int slices = Math.max(1, raw.getStackSize());
                 baseResults = new IntensitySpatialResult[slices];
-                IJ.log("      Base output: " + slices + " slices");
+                logProgressStep(imageStepContext, "same-channel " + channelName
+                        + " base output: " + slices + " " + plural(slices, "slice"));
                 for (int s = 1; s <= slices; s++) {
-                    IJ.log("        Base slice [" + s + "/" + slices + "]");
+                    logProgressStep(imageStepContext, "same-channel " + channelName
+                            + " base slice " + s + "/" + slices);
                     baseResults[s - 1] = runner.measure(new IntensitySpatialContext(
                             spatialConfig, raw, binarizedRawInMask, s, roi,
                             IntensitySpatialOutputMode.BASE, imageId, channelName, roiLabel, null));
@@ -2230,7 +2312,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 ImagePlus rawMip = null;
                 ImagePlus binarizedMip = null;
                 try {
-                    IJ.log("      MIP output: building max-intensity projection");
+                    logProgressStep(imageStepContext, "same-channel " + channelName
+                            + " MIP: building max-intensity projection");
                     rawMip = IntensitySpatialRunner.maxIntensityProjection(raw,
                             channelName + "_raw_MIP");
                     if (binarizedRawInMask != null) {
@@ -2251,12 +2334,14 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
             if (nativeAllowed && hasSameNative3d) {
                 int stackDepth = Math.max(1, raw.getStackSize());
-                IJ.log("      Native 3D output: " + stackDepth + " slices");
+                logProgressStep(imageStepContext, "same-channel " + channelName
+                        + " native 3D output: " + stackDepth + " " + plural(stackDepth, "slice"));
                 if (stackDepth < IntensitySpatialConfig.MIN_NATIVE_3D_SLICES) {
                     IJ.log("[FLASH] Intensity-spatial native 3D skipped for " + imageId
                             + " channel " + channelName + ": stack has fewer than "
                             + IntensitySpatialConfig.MIN_NATIVE_3D_SLICES + " slices");
                 } else {
+                    showProgressStep(imageStepContext, "same-channel " + channelName + " native 3D");
                     nativeResult = runner.measure(new IntensitySpatialContext(
                             spatialConfig, raw, binarizedRawInMask, 1, roi,
                             IntensitySpatialOutputMode.NATIVE_3D, imageId, channelName, roiLabel, null));

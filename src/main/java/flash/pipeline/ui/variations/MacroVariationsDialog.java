@@ -22,11 +22,9 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
-import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
-import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -34,8 +32,6 @@ import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.ListSelectionModel;
-import javax.swing.JSpinner;
-import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingWorker;
 import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
@@ -49,7 +45,6 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.EventQueue;
-import java.awt.FlowLayout;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 import java.awt.Window;
@@ -884,17 +879,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 channelName, sourceImageHash, cacheNamespace);
     }
 
-    static ParameterSweep buildPresetsSweepForTest(List<String> presetNames,
-                                                   String xParamKey,
-                                                   List<Object> xValues,
-                                                   CropSpec cropSpec,
-                                                   String channelName,
-                                                   String sourceImageHash,
-                                                   String cacheNamespace) {
-        return buildPresetsSweep(presetNames, xParamKey, xValues, cropSpec,
-                channelName, sourceImageHash, cacheNamespace);
-    }
-
     private static ParameterSweep buildPresetsSweep(List<String> presetNames,
                                                     CropSpec cropSpec,
                                                     String channelName,
@@ -916,46 +900,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 new LinkedHashMap<ParameterKey, ParameterValueList>();
         values.put(PresetSweepKey.presetName(),
                 new ParameterValueList(names));
-        return new ParameterSweep(ParameterSweep.Method.FILTER,
-                values,
-                cropSpec,
-                channelName,
-                sourceImageHash,
-                cacheNamespace);
-    }
-
-    private static ParameterSweep buildPresetsSweep(List<String> presetNames,
-                                                    String xParamKey,
-                                                    List<Object> xValues,
-                                                    CropSpec cropSpec,
-                                                    String channelName,
-                                                    String sourceImageHash,
-                                                    String cacheNamespace) {
-        List<String> names = new ArrayList<String>();
-        if (presetNames != null) {
-            for (int i = 0; i < presetNames.size(); i++) {
-                String name = presetNames.get(i);
-                if (name != null && name.trim().length() > 0) {
-                    names.add(name.trim());
-                }
-            }
-        }
-        String param = xParamKey == null ? "" : xParamKey.trim();
-        if (names.isEmpty()) {
-            throw new IllegalStateException("Choose at least one readable preset.");
-        }
-        if (param.length() == 0) {
-            throw new IllegalStateException("Choose a numeric preset parameter.");
-        }
-        if (xValues == null || xValues.isEmpty()) {
-            throw new IllegalStateException("Choose at least one X-axis value.");
-        }
-        LinkedHashMap<ParameterKey, ParameterValueList> values =
-                new LinkedHashMap<ParameterKey, ParameterValueList>();
-        values.put(PresetSweepKey.xValue(param), new ParameterValueList(xValues));
-        values.put(PresetSweepKey.presetName(), new ParameterValueList(names));
-        values.put(PresetSweepKey.xParamKey(),
-                new ParameterValueList(Collections.singletonList(param)));
         return new ParameterSweep(ParameterSweep.Method.FILTER,
                 values,
                 cropSpec,
@@ -1132,22 +1076,9 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 new DefaultListModel<PresetListItem>();
         private final JList<PresetListItem> presetList =
                 new JList<PresetListItem>(presetModel);
-        private final JComboBox<PresetParamChoice> xParamCombo =
-                new JComboBox<PresetParamChoice>();
-        private final SpinnerNumberModel minModel =
-                new SpinnerNumberModel(0.0, -1.0e9, 1.0e9, 0.1);
-        private final SpinnerNumberModel maxModel =
-                new SpinnerNumberModel(0.0, -1.0e9, 1.0e9, 0.1);
-        private final SpinnerNumberModel stepsModel =
-                new SpinnerNumberModel(3, 1, SweepRangeEditor.MAX_STEPS, 1);
-        private final JSpinner minSpinner = new JSpinner(minModel);
-        private final JSpinner maxSpinner = new JSpinner(maxModel);
-        private final JSpinner stepsSpinner = new JSpinner(stepsModel);
-        private final JLabel rangePreview = new JLabel(" ");
         private final List<ChangeListener> listeners =
                 new ArrayList<ChangeListener>();
         private boolean suppressSelectionEvents;
-        private boolean updatingParamChoices;
 
         PresetPickerPanel(FilterVariationEngineContext context) {
             super(new BorderLayout(8, 6));
@@ -1161,7 +1092,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             buildPresetModel();
             buildUi();
             selectAllReadable();
-            rebuildXParamChoices();
             installListeners();
         }
 
@@ -1179,14 +1109,7 @@ public final class MacroVariationsDialog extends PipelineDialog {
             if (selected.isEmpty()) {
                 throw new IllegalStateException(statusMessage());
             }
-            PresetParamChoice param = selectedParamChoice();
-            if (param == null) {
-                throw new IllegalStateException(statusMessage());
-            }
-            List<Object> values = xValues(param);
             return buildPresetsSweep(namesFor(selected),
-                    param.key,
-                    values,
                     cropSpec,
                     channelName,
                     sourceImageHash,
@@ -1226,7 +1149,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 selected[i] = indexes.get(i).intValue();
             }
             presetList.setSelectedIndices(selected);
-            rebuildXParamChoices();
             fireChanged();
         }
 
@@ -1240,39 +1162,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             scroller.setPreferredSize(new Dimension(420, 96));
 
             add(scroller, BorderLayout.CENTER);
-            add(xAxisPanel(), BorderLayout.SOUTH);
-        }
-
-        private JPanel xAxisPanel() {
-            JPanel panel = new JPanel();
-            panel.setOpaque(false);
-            panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-            panel.setBorder(BorderFactory.createEmptyBorder(0, 8, 8, 8));
-
-            JPanel paramRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-            paramRow.setOpaque(false);
-            paramRow.add(new JLabel("X parameter:"));
-            Dimension comboSize = xParamCombo.getPreferredSize();
-            xParamCombo.setPreferredSize(new Dimension(
-                    Math.max(180, comboSize.width), comboSize.height));
-            paramRow.add(xParamCombo);
-            panel.add(paramRow);
-
-            JPanel rangeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-            rangeRow.setOpaque(false);
-            rangeRow.add(new JLabel("Min:"));
-            minSpinner.setPreferredSize(new Dimension(90, 24));
-            rangeRow.add(minSpinner);
-            rangeRow.add(new JLabel("Max:"));
-            maxSpinner.setPreferredSize(new Dimension(90, 24));
-            rangeRow.add(maxSpinner);
-            rangeRow.add(new JLabel("Steps:"));
-            stepsSpinner.setPreferredSize(new Dimension(60, 24));
-            rangeRow.add(stepsSpinner);
-            rangeRow.add(rangePreview);
-            panel.add(rangeRow);
-
-            return panel;
         }
 
         private void installListeners() {
@@ -1280,30 +1169,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
                 @Override public void valueChanged(ListSelectionEvent e) {
                     if (!e.getValueIsAdjusting()) {
                         removeSkippedSelections();
-                        rebuildXParamChoices();
                         fireChanged();
                     }
                 }
             });
-            xParamCombo.addActionListener(new ActionListener() {
-                @Override public void actionPerformed(ActionEvent e) {
-                    if (updatingParamChoices) {
-                        return;
-                    }
-                    applyDefaultsForParam();
-                    refreshRangePreview();
-                    fireChanged();
-                }
-            });
-            ChangeListener rangeListener = new ChangeListener() {
-                @Override public void stateChanged(ChangeEvent e) {
-                    refreshRangePreview();
-                    fireChanged();
-                }
-            };
-            minSpinner.addChangeListener(rangeListener);
-            maxSpinner.addChangeListener(rangeListener);
-            stepsSpinner.addChangeListener(rangeListener);
         }
 
         private void buildPresetModel() {
@@ -1362,212 +1231,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             }
         }
 
-        private void rebuildXParamChoices() {
-            Object previous = xParamCombo.getSelectedItem();
-            String previousKey = previous instanceof PresetParamChoice
-                    ? ((PresetParamChoice) previous).key
-                    : "";
-            List<PresetEnumerator.PresetInfo> selected = selectedReadablePresets();
-            List<PresetParamChoice> choices = paramChoicesFor(selected);
-            updatingParamChoices = true;
-            try {
-                DefaultComboBoxModel<PresetParamChoice> model =
-                        new DefaultComboBoxModel<PresetParamChoice>();
-                for (int i = 0; i < choices.size(); i++) {
-                    model.addElement(choices.get(i));
-                }
-                xParamCombo.setModel(model);
-                int selectedIndex = preferredParamIndex(choices, previousKey);
-                if (selectedIndex >= 0) {
-                    xParamCombo.setSelectedIndex(selectedIndex);
-                }
-            } finally {
-                updatingParamChoices = false;
-            }
-            applyDefaultsForParam();
-            refreshRangePreview();
-        }
-
-        private int preferredParamIndex(List<PresetParamChoice> choices,
-                                        String previousKey) {
-            if (choices == null || choices.isEmpty()) {
-                return -1;
-            }
-            if (previousKey != null && previousKey.trim().length() > 0) {
-                for (int i = 0; i < choices.size(); i++) {
-                    if (choices.get(i).key.equalsIgnoreCase(previousKey.trim())) {
-                        return i;
-                    }
-                }
-            }
-            for (int i = 0; i < choices.size(); i++) {
-                PresetParamChoice choice = choices.get(i);
-                if (choice.common && "sigma".equalsIgnoreCase(choice.key)) {
-                    return i;
-                }
-            }
-            for (int i = 0; i < choices.size(); i++) {
-                if (choices.get(i).common) {
-                    return i;
-                }
-            }
-            return 0;
-        }
-
-        private List<PresetParamChoice> paramChoicesFor(
-                List<PresetEnumerator.PresetInfo> presets) {
-            LinkedHashMap<String, PresetParamChoice> byKey =
-                    new LinkedHashMap<String, PresetParamChoice>();
-            int presetCount = presets == null ? 0 : presets.size();
-            if (presets != null) {
-                for (int i = 0; i < presets.size(); i++) {
-                    List<PresetParamChoice> choices =
-                            numericParamsForPreset(presets.get(i));
-                    Set<String> seenInPreset = new LinkedHashSet<String>();
-                    for (int j = 0; j < choices.size(); j++) {
-                        PresetParamChoice choice = choices.get(j);
-                        String normalized =
-                                choice.key.toLowerCase(java.util.Locale.ROOT);
-                        if (!seenInPreset.add(normalized)) {
-                            continue;
-                        }
-                        PresetParamChoice previous = byKey.get(normalized);
-                        if (previous == null) {
-                            byKey.put(normalized, choice.withPresence(1, presetCount));
-                        } else {
-                            byKey.put(normalized, previous.merge(choice, presetCount));
-                        }
-                    }
-                }
-            }
-            return new ArrayList<PresetParamChoice>(byKey.values());
-        }
-
-        private List<PresetParamChoice> numericParamsForPreset(
-                PresetEnumerator.PresetInfo preset) {
-            if (preset == null || preset.macroDefinition() == null) {
-                return Collections.emptyList();
-            }
-            List<PresetParamChoice> out = new ArrayList<PresetParamChoice>();
-            List<FilterMacroEditorModel.Section> sections =
-                    preset.macroDefinition().getSections();
-            for (int i = 0; i < sections.size(); i++) {
-                FilterMacroEditorModel.Section section = sections.get(i);
-                for (int j = 0; j < section.entries.size(); j++) {
-                    FilterMacroEditorModel.Entry entry = section.entries.get(j);
-                    for (int k = 0; k < entry.parameters.size(); k++) {
-                        FilterMacroEditorModel.Parameter parameter =
-                                entry.parameters.get(k);
-                        if (parameter == null || parameter.key == null
-                                || parameter.key.trim().isEmpty()) {
-                            continue;
-                        }
-                        Double base = parseFiniteDouble(parameter.getValue());
-                        if (base == null) {
-                            base = parseFiniteDouble(parameter.defaultValue);
-                        }
-                        if (base == null) {
-                            continue;
-                        }
-                        out.add(new PresetParamChoice(parameter.key.trim(),
-                                base.doubleValue(),
-                                looksLikeInteger(parameter.key,
-                                        parameter.getValue(),
-                                        base.doubleValue()),
-                                1,
-                                1));
-                    }
-                }
-            }
-            return out;
-        }
-
-        private PresetParamChoice selectedParamChoice() {
-            Object item = xParamCombo.getSelectedItem();
-            return item instanceof PresetParamChoice
-                    ? (PresetParamChoice) item
-                    : null;
-        }
-
-        private void applyDefaultsForParam() {
-            PresetParamChoice choice = selectedParamChoice();
-            if (choice == null) {
-                rangePreview.setText("No numeric preset parameter.");
-                return;
-            }
-            double base = choice.baseValue;
-            double min;
-            double max;
-            if (Math.abs(base) < 1e-9) {
-                min = 0.0d;
-                max = 1.0d;
-            } else if (base > 0.0d) {
-                min = base / 2.0d;
-                max = base * 2.0d;
-            } else {
-                min = base * 2.0d;
-                max = base / 2.0d;
-            }
-            if (choice.integerValued) {
-                min = Math.rint(min);
-                max = Math.rint(max);
-            }
-            minModel.setValue(Double.valueOf(min));
-            maxModel.setValue(Double.valueOf(max));
-            stepsModel.setValue(Integer.valueOf(3));
-        }
-
-        private List<Object> xValues(PresetParamChoice choice) {
-            double min = ((Number) minModel.getValue()).doubleValue();
-            double max = ((Number) maxModel.getValue()).doubleValue();
-            int steps = ((Number) stepsModel.getValue()).intValue();
-            if (max < min) {
-                double tmp = min;
-                min = max;
-                max = tmp;
-            }
-            return arithmeticValues(min, max, Math.max(1, steps),
-                    choice != null && choice.integerValued);
-        }
-
-        private void refreshRangePreview() {
-            PresetParamChoice choice = selectedParamChoice();
-            if (choice == null) {
-                rangePreview.setText("No numeric preset parameter.");
-                return;
-            }
-            List<Object> values = xValues(choice);
-            StringBuilder sb = new StringBuilder("Values: ");
-            for (int i = 0; i < values.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(formatValue(values.get(i)));
-            }
-            rangePreview.setText(sb.toString());
-        }
-
-        boolean selectXParamForTest(String key) {
-            if (key == null) {
-                return false;
-            }
-            for (int i = 0; i < xParamCombo.getItemCount(); i++) {
-                PresetParamChoice choice = xParamCombo.getItemAt(i);
-                if (choice != null && key.equalsIgnoreCase(choice.key)) {
-                    xParamCombo.setSelectedIndex(i);
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        void setRangeForTest(double min, double max, int steps) {
-            minModel.setValue(Double.valueOf(min));
-            maxModel.setValue(Double.valueOf(max));
-            stepsModel.setValue(Integer.valueOf(Math.max(1,
-                    Math.min(SweepRangeEditor.MAX_STEPS, steps))));
-            refreshRangePreview();
-            fireChanged();
-        }
-
         private List<PresetEnumerator.PresetInfo> selectedReadablePresets() {
             int[] selected = presetList.getSelectedIndices();
             List<PresetEnumerator.PresetInfo> out =
@@ -1591,9 +1254,6 @@ public final class MacroVariationsDialog extends PipelineDialog {
             if (selected.isEmpty()) {
                 return "Choose at least one readable preset.";
             }
-            if (selectedParamChoice() == null) {
-                return "No numeric preset parameter available.";
-            }
             return "";
         }
 
@@ -1605,116 +1265,10 @@ public final class MacroVariationsDialog extends PipelineDialog {
             return out;
         }
 
-        private static List<Object> arithmeticValues(double min,
-                                                     double max,
-                                                     int steps,
-                                                     boolean asInteger) {
-            if (steps < 1) {
-                return Collections.emptyList();
-            }
-            List<Object> out = new ArrayList<Object>(steps);
-            if (steps == 1) {
-                out.add(boxValue(min, asInteger));
-                return out;
-            }
-            double stride = (max - min) / (steps - 1);
-            for (int i = 0; i < steps; i++) {
-                out.add(boxValue(min + i * stride, asInteger));
-            }
-            return out;
-        }
-
-        private static Object boxValue(double value, boolean asInteger) {
-            if (asInteger) {
-                return Integer.valueOf((int) Math.rint(value));
-            }
-            return Double.valueOf(value);
-        }
-
-        private static Double parseFiniteDouble(String value) {
-            try {
-                double parsed = Double.parseDouble(value == null ? "" : value.trim());
-                return Double.isNaN(parsed) || Double.isInfinite(parsed)
-                        ? null
-                        : Double.valueOf(parsed);
-            } catch (RuntimeException e) {
-                return null;
-            }
-        }
-
-        private static boolean looksLikeInteger(String key,
-                                                String rawValue,
-                                                double parsed) {
-            if (Math.rint(parsed) != parsed
-                    || parsed < Integer.MIN_VALUE
-                    || parsed > Integer.MAX_VALUE) {
-                return false;
-            }
-            String lowerKey = key == null ? "" : key.trim().toLowerCase(java.util.Locale.ROOT);
-            if (lowerKey.equals("sigma") || lowerKey.equals("x")
-                    || lowerKey.equals("y") || lowerKey.equals("z")) {
-                return false;
-            }
-            if (lowerKey.equals("radius") || lowerKey.equals("rolling")
-                    || lowerKey.equals("threshold") || lowerKey.equals("iterations")
-                    || lowerKey.equals("count") || lowerKey.equals("frame")
-                    || lowerKey.endsWith("_min") || lowerKey.endsWith("_max")
-                    || lowerKey.indexOf("size") >= 0) {
-                return true;
-            }
-            String text = rawValue == null ? "" : rawValue.trim();
-            return text.matches("-?\\d+");
-        }
-
         private void fireChanged() {
             ChangeEvent event = new ChangeEvent(this);
             for (int i = 0; i < listeners.size(); i++) {
                 listeners.get(i).stateChanged(event);
-            }
-        }
-
-        private static final class PresetParamChoice {
-            final String key;
-            final double baseValue;
-            final boolean integerValued;
-            final int presentCount;
-            final int presetCount;
-            final boolean common;
-
-            PresetParamChoice(String key,
-                              double baseValue,
-                              boolean integerValued,
-                              int presentCount,
-                              int presetCount) {
-                this.key = key == null ? "" : key.trim();
-                this.baseValue = baseValue;
-                this.integerValued = integerValued;
-                this.presentCount = Math.max(0, presentCount);
-                this.presetCount = Math.max(0, presetCount);
-                this.common = this.presetCount > 0
-                        && this.presentCount >= this.presetCount;
-            }
-
-            PresetParamChoice withPresence(int present, int total) {
-                return new PresetParamChoice(key, baseValue, integerValued,
-                        present, total);
-            }
-
-            PresetParamChoice merge(PresetParamChoice other, int total) {
-                if (other == null) {
-                    return this;
-                }
-                return new PresetParamChoice(key,
-                        baseValue,
-                        integerValued && other.integerValued,
-                        presentCount + 1,
-                        total);
-            }
-
-            @Override public String toString() {
-                String base = formatValue(Double.valueOf(baseValue));
-                String suffix = common ? "common" : presentCount + "/" + presetCount;
-                return key + " (base " + base + ", " + suffix + ")";
             }
         }
 

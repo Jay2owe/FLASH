@@ -35,6 +35,9 @@ public final class SplitAndMergeImageChannelsAnalysisCommand implements Command 
     private Boolean useDeconvolvedInput;
 
     @Parameter(required = false)
+    private Boolean applyOrientationTransforms;
+
+    @Parameter(required = false)
     private Boolean headless;
 
     @Parameter(required = false)
@@ -113,6 +116,10 @@ public final class SplitAndMergeImageChannelsAnalysisCommand implements Command 
         if (useDeconvolvedInput != null) {
             appendValue(options, "splitmerge.useDeconv", String.valueOf(useDeconvolvedInput.booleanValue()));
         }
+        if (applyOrientationTransforms != null) {
+            appendValue(options, "splitmerge.applyOrientationTransforms",
+                    String.valueOf(applyOrientationTransforms.booleanValue()));
+        }
         CLIConfig parsed = CLIArgumentParser.parse(options.toString());
         if (parsed == null) {
             throw new IllegalArgumentException("Could not parse FLASH Make Presentation Images command parameters.");
@@ -131,6 +138,7 @@ public final class SplitAndMergeImageChannelsAnalysisCommand implements Command 
         put(common, "skip_existing", skipExisting);
         put(common, "use_tif_cache", useTifCache);
         put(common, "use_deconvolved_input", useDeconvolvedInput);
+        put(common, "apply_orientation_transforms", applyOrientationTransforms);
         put(common, "preset_json_supplied", Boolean.valueOf(hasText(presetJson)));
 
         BinConfig config = BinConfigIO.readPartialFromDirectory(projectDir.getAbsolutePath());

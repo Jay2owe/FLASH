@@ -20,6 +20,7 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -262,6 +263,35 @@ public class RepresentativePreviewRendererTest {
         assertTrue("materialized container source should be cached as a TIFF",
                 cached != null && cached.isFile());
         assertEquals(sourcePath, rendered.sourcePath());
+    }
+
+    @Test
+    public void finalRenderRefreshesStaleContainerOriginalCacheForExport() throws Exception {
+        File project = temp.newFolder("final-container-stale-cache-project");
+        File sourcePath = new File(project, "source.lif");
+        File cacheDir = TifCache.getCacheDir(project.getAbsolutePath());
+        assertTrue(cacheDir.mkdirs());
+        File stale = new File(cacheDir, "0000_stale.tif");
+        byte[] staleBytes = new byte[]{9, 9, 9, 9};
+        Files.write(stale.toPath(), staleBytes);
+        BinConfig cfg = configuredOneChannelBinConfig("0-255");
+        RepresentativeFigureConfig config = new RepresentativeFigureConfig();
+        config.setCustomDisplayRangeForChannel(0, "0-255");
+
+        RepresentativePreviewRenderer.renderFinalSeriesForTests(
+                project.getAbsolutePath(),
+                cfg,
+                config,
+                oneChannelRepresentativeSeries(0, "Control", sourcePath),
+                oneChannelGradientImage(4, 2),
+                sourcePath);
+
+        File cached = TifCache.cachedFileForSeries(project.getAbsolutePath(), 0);
+        assertFalse("stale same-index cache entry should be removed", stale.exists());
+        assertTrue("current materialized source should be cached as a TIFF",
+                cached != null && cached.isFile());
+        assertTrue("refreshed TIFF should not be the stale placeholder",
+                cached.length() > staleBytes.length);
     }
 
     @Test
