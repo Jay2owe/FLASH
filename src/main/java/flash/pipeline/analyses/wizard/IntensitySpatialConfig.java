@@ -1,5 +1,6 @@
 package flash.pipeline.analyses.wizard;
 
+import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
 import flash.pipeline.ui.wizard.JsonIO;
 
 import java.io.IOException;
@@ -149,9 +150,10 @@ public final class IntensitySpatialConfig implements Serializable {
     }
 
     private final boolean enabled;
-    private final Set<AnalysisKey> enabledAnalyses;
-    private final SpatialSourceMode spatialSourceMode;
-    private final boolean native3dEnabled;
+    private final Set<AnalysisKey> enabledPerSlice;
+    private final Set<AnalysisKey> enabledMip;
+    private final Set<AnalysisKey> enabled3D;
+    private final Set<AnalysisKey> enabledAnalyses; // derived union, kept for back-compat consumers
     private final boolean overlaysEnabled;
     private final double shellWidthUm;
     private final int shellCount;
@@ -166,11 +168,15 @@ public final class IntensitySpatialConfig implements Serializable {
 
     private IntensitySpatialConfig(Builder builder) {
         this.enabled = builder.enabled;
-        this.enabledAnalyses = immutableCopy(builder.enabledAnalyses);
-        this.spatialSourceMode = builder.spatialSourceMode == null
-                ? SpatialSourceMode.FULL_STACK
-                : builder.spatialSourceMode;
-        this.native3dEnabled = builder.native3dEnabled;
+        ResolvedSelections resolved = builder.resolveSelections();
+        this.enabledPerSlice = immutableCopy(resolved.perSlice);
+        this.enabledMip = immutableCopy(resolved.mip);
+        this.enabled3D = immutableCopy(resolved.native3d);
+        EnumSet<AnalysisKey> union = EnumSet.noneOf(AnalysisKey.class);
+        union.addAll(resolved.perSlice);
+        union.addAll(resolved.mip);
+        union.addAll(resolved.native3d);
+        this.enabledAnalyses = immutableCopy(union);
         this.overlaysEnabled = builder.overlaysEnabled;
         this.shellWidthUm = positive(builder.shellWidthUm, DEFAULT_SHELL_WIDTH_UM);
         this.shellCount = positive(builder.shellCount, DEFAULT_SHELL_COUNT);
@@ -200,10 +206,35 @@ public final class IntensitySpatialConfig implements Serializable {
 
     public boolean isEnabled() { return enabled; }
     public Set<AnalysisKey> getEnabledAnalyses() { return enabledAnalyses; }
-    public SpatialSourceMode getSpatialSourceMode() { return spatialSourceMode; }
-    public boolean isMipEnabled() { return spatialSourceMode.isMip(); }
-    public boolean isFullStackSpatialSource() { return spatialSourceMode == SpatialSourceMode.FULL_STACK; }
-    public boolean isNative3dEnabled() { return native3dEnabled; }
+    public Set<AnalysisKey> getEnabledPerSlice() { return enabledPerSlice; }
+    public Set<AnalysisKey> getEnabledMip() { return enabledMip; }
+    public Set<AnalysisKey> getEnabled3D() { return enabled3D; }
+
+    /** Analyses enabled for the given output family (per-slice = BASE). */
+    public Set<AnalysisKey> enabledFor(IntensitySpatialOutputMode mode) {
+        if (mode == IntensitySpatialOutputMode.MIP) return enabledMip;
+        if (mode == IntensitySpatialOutputMode.NATIVE_3D) return enabled3D;
+        return enabledPerSlice;
+    }
+
+    public boolean isEnabledIn(AnalysisKey key, IntensitySpatialOutputMode mode) {
+        return key != null && enabledFor(mode).contains(key);
+    }
+
+    /** True when at least one analysis is selected in any of the three modes. */
+    public boolean anyEnabled() {
+        return !enabledPerSlice.isEmpty() || !enabledMip.isEmpty() || !enabled3D.isEmpty();
+    }
+
+    /** Display-only hint; per-mode selections are the source of truth. */
+    public SpatialSourceMode getSpatialSourceMode() {
+        return !enabledMip.isEmpty() && enabledPerSlice.isEmpty()
+                ? SpatialSourceMode.MIP
+                : SpatialSourceMode.FULL_STACK;
+    }
+    public boolean isMipEnabled() { return !enabledMip.isEmpty(); }
+    public boolean isFullStackSpatialSource() { return !enabledPerSlice.isEmpty(); }
+    public boolean isNative3dEnabled() { return !enabled3D.isEmpty(); }
     public boolean isOverlaysEnabled() { return overlaysEnabled; }
     public double getShellWidthUm() { return shellWidthUm; }
     public int getShellCount() { return shellCount; }
@@ -218,9 +249,7 @@ public final class IntensitySpatialConfig implements Serializable {
 
     public boolean hasConfiguration() {
         return enabled
-                || !enabledAnalyses.isEmpty()
-                || spatialSourceMode != SpatialSourceMode.FULL_STACK
-                || native3dEnabled
+                || anyEnabled()
                 || overlaysEnabled
                 || Double.compare(shellWidthUm, DEFAULT_SHELL_WIDTH_UM) != 0
                 || shellCount != DEFAULT_SHELL_COUNT
@@ -243,53 +272,56 @@ public final class IntensitySpatialConfig implements Serializable {
                                                           boolean[] channelBinarization,
                                                           Integer actualSliceCount,
                                                           LockLogger logger) {
-        EnumSet<AnalysisKey> adjusted = mutableCopy(enabledAnalyses);
+        EnumSet<AnalysisKey> perSlice = mutableCopy(enabledPerSlice);
+        EnumSet<AnalysisKey> mip = mutableCopy(enabledMip);
+        EnumSet<AnalysisKey> native3d = mutableCopy(enabled3D);
         int safeChannelCount = Math.max(0, channelCount);
-        if (safeChannelCount < 2 && removeCrossChannel(adjusted)) {
+        if (safeChannelCount < 2
+                && (removeCrossChannel(perSlice) | removeCrossChannel(mip) | removeCrossChannel(native3d))) {
             log(logger, "Intensity-spatial cross-channel analyses require at least two channels; selections were cleared.");
         }
 
         if (!hasAnyBinarizedChannel(channelBinarization)
-                && (adjusted.remove(AnalysisKey.DISTANCE_SHELL)
-                | adjusted.remove(AnalysisKey.DISTANCE_SHELL_3D))) {
+                && (perSlice.remove(AnalysisKey.DISTANCE_SHELL)
+                | mip.remove(AnalysisKey.DISTANCE_SHELL)
+                | native3d.remove(AnalysisKey.DISTANCE_SHELL_3D))) {
             log(logger, "Intensity-spatial distance-shell analyses require a binarized partner channel; selections were cleared.");
         }
 
-        SpatialSourceMode sourceMode = spatialSourceMode;
-        if (actualSliceCount != null && actualSliceCount.intValue() <= 1
-                && sourceMode == SpatialSourceMode.MIP) {
-            log(logger, "Intensity-spatial MIP source requires a z-stack with more than one slice; full-stack source will be used.");
-            sourceMode = SpatialSourceMode.FULL_STACK;
-        }
-
-        boolean native3d = native3dEnabled;
-        if (!native3d && removeNative3d(adjusted)) {
-            log(logger, "Intensity-spatial native 3D analyses require native 3D output to be selected; selections were cleared.");
-        }
-        if (actualSliceCount != null && actualSliceCount.intValue() < MIN_NATIVE_3D_SLICES) {
-            boolean removedNative3dAnalyses = removeNative3d(adjusted);
-            if (native3d || removedNative3dAnalyses) {
+        if (actualSliceCount != null && actualSliceCount.intValue() <= 1) {
+            if (!mip.isEmpty() || !native3d.isEmpty()) {
+                log(logger, "Intensity-spatial MIP and native 3D analyses require a z-stack with more than one slice; only per-slice analyses were kept.");
+            }
+            mip.clear();
+            native3d.clear();
+        } else if (actualSliceCount != null && actualSliceCount.intValue() < MIN_NATIVE_3D_SLICES) {
+            if (!native3d.isEmpty()) {
                 log(logger, "Intensity-spatial native 3D analyses require at least "
                         + MIN_NATIVE_3D_SLICES + " slices; selections were cleared.");
+                native3d.clear();
             }
-            native3d = false;
         }
 
+        boolean anySelected = !perSlice.isEmpty() || !mip.isEmpty() || !native3d.isEmpty();
         return builder(this)
-                .enabled(enabled && !adjusted.isEmpty())
-                .enabledAnalyses(adjusted)
-                .spatialSourceMode(sourceMode)
-                .native3dEnabled(native3d)
+                .enabledPerSlice(perSlice)
+                .enabledMip(mip)
+                .enabled3D(native3d)
+                .enabled(enabled && anySelected)
                 .build();
     }
 
     public Map<String, Object> toJsonObject() {
         Map<String, Object> root = new LinkedHashMap<String, Object>();
         root.put("enabled", Boolean.valueOf(enabled));
+        root.put("perSliceAnalyses", analysisTokenList(enabledPerSlice));
+        root.put("mipAnalyses", analysisTokenList(enabledMip));
+        root.put("native3dAnalyses", analysisTokenList(enabled3D));
+        // Legacy projections kept one release for downgrade/back-compat consumers.
         root.put("analyses", analysisTokenList(enabledAnalyses));
-        root.put("sourceMode", spatialSourceMode.token());
+        root.put("sourceMode", getSpatialSourceMode().token());
         root.put("mip", Boolean.valueOf(isMipEnabled()));
-        root.put("native3d", Boolean.valueOf(native3dEnabled));
+        root.put("native3d", Boolean.valueOf(isNative3dEnabled()));
         root.put("overlays", Boolean.valueOf(overlaysEnabled));
         root.put("shellWidthUm", Double.valueOf(shellWidthUm));
         root.put("shellCount", Integer.valueOf(shellCount));
@@ -309,18 +341,32 @@ public final class IntensitySpatialConfig implements Serializable {
         if (root.isEmpty()) {
             return disabled();
         }
-        Set<AnalysisKey> analyses = parseAnalysisSet(root.get("analyses"));
-        boolean enabled = JsonIO.booleanValue(first(root, "enabled", "spatial"), !analyses.isEmpty());
-        SpatialSourceMode sourceMode = SpatialSourceMode.parse(
-                JsonIO.stringValue(first(root, "sourceMode", "source_mode", "spatialSourceMode")),
-                JsonIO.booleanValue(first(root, "mip", "mipEnabled"), false)
-                        ? SpatialSourceMode.MIP
-                        : SpatialSourceMode.FULL_STACK);
-        return builder()
+        Builder builder = builder();
+        boolean anySelected;
+        if (root.containsKey("perSliceAnalyses")
+                || root.containsKey("mipAnalyses")
+                || root.containsKey("native3dAnalyses")) {
+            Set<AnalysisKey> perSlice = parseAnalysisSet(root.get("perSliceAnalyses"));
+            Set<AnalysisKey> mip = parseAnalysisSet(root.get("mipAnalyses"));
+            Set<AnalysisKey> native3d = parseAnalysisSet(root.get("native3dAnalyses"));
+            builder.enabledPerSlice(perSlice).enabledMip(mip).enabled3D(native3d);
+            anySelected = !perSlice.isEmpty() || !mip.isEmpty() || !native3d.isEmpty();
+        } else {
+            Set<AnalysisKey> analyses = parseAnalysisSet(root.get("analyses"));
+            SpatialSourceMode sourceMode = SpatialSourceMode.parse(
+                    JsonIO.stringValue(first(root, "sourceMode", "source_mode", "spatialSourceMode")),
+                    JsonIO.booleanValue(first(root, "mip", "mipEnabled"), false)
+                            ? SpatialSourceMode.MIP
+                            : SpatialSourceMode.FULL_STACK);
+            builder.enabledAnalyses(analyses)
+                    .spatialSourceMode(sourceMode)
+                    .native3dEnabled(JsonIO.booleanValue(
+                            first(root, "native3d", "native3D", "native3dEnabled"), false));
+            anySelected = !analyses.isEmpty();
+        }
+        boolean enabled = JsonIO.booleanValue(first(root, "enabled", "spatial"), anySelected);
+        return builder
                 .enabled(enabled)
-                .enabledAnalyses(analyses)
-                .spatialSourceMode(sourceMode)
-                .native3dEnabled(JsonIO.booleanValue(first(root, "native3d", "native3D", "native3dEnabled"), false))
                 .overlaysEnabled(JsonIO.booleanValue(first(root, "overlays", "overlaysEnabled"), false))
                 .shellWidthUm(doubleValue(first(root, "shellWidthUm", "shell_width_um"), DEFAULT_SHELL_WIDTH_UM))
                 .shellCount(JsonIO.intValue(first(root, "shellCount", "shell_count"), DEFAULT_SHELL_COUNT))
@@ -481,16 +527,6 @@ public final class IntensitySpatialConfig implements Serializable {
         return changed;
     }
 
-    private static boolean removeNative3d(EnumSet<AnalysisKey> analyses) {
-        boolean changed = false;
-        for (AnalysisKey key : AnalysisKey.values()) {
-            if (key.isNative3d()) {
-                changed = analyses.remove(key) || changed;
-            }
-        }
-        return changed;
-    }
-
     private static void log(LockLogger logger, String message) {
         if (logger != null) logger.log(message);
     }
@@ -552,11 +588,52 @@ public final class IntensitySpatialConfig implements Serializable {
         return String.format(Locale.ROOT, "%.6f", value);
     }
 
+    private static final class ResolvedSelections {
+        final EnumSet<AnalysisKey> perSlice;
+        final EnumSet<AnalysisKey> mip;
+        final EnumSet<AnalysisKey> native3d;
+
+        ResolvedSelections(Set<AnalysisKey> perSlice, Set<AnalysisKey> mip, Set<AnalysisKey> native3d) {
+            this.perSlice = mutableCopy(perSlice);
+            this.mip = mutableCopy(mip);
+            this.native3d = mutableCopy(native3d);
+        }
+
+        static ResolvedSelections fromLegacy(Set<AnalysisKey> flat,
+                                             SpatialSourceMode source,
+                                             boolean native3dEnabled) {
+            EnumSet<AnalysisKey> perSlice = EnumSet.noneOf(AnalysisKey.class);
+            EnumSet<AnalysisKey> mip = EnumSet.noneOf(AnalysisKey.class);
+            EnumSet<AnalysisKey> native3d = EnumSet.noneOf(AnalysisKey.class);
+            if (flat != null) {
+                boolean useMip = source == SpatialSourceMode.MIP;
+                for (AnalysisKey key : flat) {
+                    if (key.isNative3d()) {
+                        if (native3dEnabled) native3d.add(key);
+                    } else if (useMip) {
+                        mip.add(key);
+                    } else {
+                        perSlice.add(key);
+                    }
+                }
+            }
+            return new ResolvedSelections(perSlice, mip, native3d);
+        }
+    }
+
     public static final class Builder {
         private boolean enabled = false;
-        private Set<AnalysisKey> enabledAnalyses = EnumSet.noneOf(AnalysisKey.class);
-        private SpatialSourceMode spatialSourceMode = SpatialSourceMode.FULL_STACK;
-        private boolean native3dEnabled = false;
+        // New per-mode selections (canonical when perModeExplicit is true).
+        private EnumSet<AnalysisKey> enabledPerSlice = EnumSet.noneOf(AnalysisKey.class);
+        private EnumSet<AnalysisKey> enabledMip = EnumSet.noneOf(AnalysisKey.class);
+        private EnumSet<AnalysisKey> enabled3D = EnumSet.noneOf(AnalysisKey.class);
+        private boolean perModeExplicit = false;
+        // Legacy flat staging, split into per-mode sets at build() when only the
+        // legacy API was used (old JSON / old CLI macros / old presets).
+        private EnumSet<AnalysisKey> legacyAnalyses = EnumSet.noneOf(AnalysisKey.class);
+        private SpatialSourceMode legacySourceMode = SpatialSourceMode.FULL_STACK;
+        private boolean legacyNative3d = false;
+        private boolean legacyExplicit = false;
         private boolean overlaysEnabled = false;
         private double shellWidthUm = DEFAULT_SHELL_WIDTH_UM;
         private int shellCount = DEFAULT_SHELL_COUNT;
@@ -575,9 +652,13 @@ public final class IntensitySpatialConfig implements Serializable {
         private Builder(IntensitySpatialConfig base) {
             if (base == null) return;
             this.enabled = base.enabled;
-            this.enabledAnalyses = mutableCopy(base.enabledAnalyses);
-            this.spatialSourceMode = base.spatialSourceMode;
-            this.native3dEnabled = base.native3dEnabled;
+            this.enabledPerSlice = mutableCopy(base.enabledPerSlice);
+            this.enabledMip = mutableCopy(base.enabledMip);
+            this.enabled3D = mutableCopy(base.enabled3D);
+            // Legacy staging mirrors the base; only consulted if a legacy setter is called.
+            this.legacyAnalyses = mutableCopy(base.enabledAnalyses);
+            this.legacySourceMode = base.getSpatialSourceMode();
+            this.legacyNative3d = base.isNative3dEnabled();
             this.overlaysEnabled = base.overlaysEnabled;
             this.shellWidthUm = base.shellWidthUm;
             this.shellCount = base.shellCount;
@@ -596,31 +677,81 @@ public final class IntensitySpatialConfig implements Serializable {
             return this;
         }
 
+        // --- New per-mode API (canonical) ---
+
+        public Builder enabledPerSlice(Set<AnalysisKey> keys) {
+            this.enabledPerSlice = mutableCopy(keys);
+            this.perModeExplicit = true;
+            return this;
+        }
+
+        public Builder enabledMip(Set<AnalysisKey> keys) {
+            this.enabledMip = mutableCopy(keys);
+            this.perModeExplicit = true;
+            return this;
+        }
+
+        public Builder enabled3D(Set<AnalysisKey> keys) {
+            this.enabled3D = mutableCopy(keys);
+            this.perModeExplicit = true;
+            return this;
+        }
+
+        public Builder addAnalysis(AnalysisKey key, IntensitySpatialOutputMode mode) {
+            if (key != null && mode != null) {
+                if (mode == IntensitySpatialOutputMode.MIP) {
+                    this.enabledMip.add(key);
+                } else if (mode == IntensitySpatialOutputMode.NATIVE_3D) {
+                    this.enabled3D.add(key);
+                } else {
+                    this.enabledPerSlice.add(key);
+                }
+                this.perModeExplicit = true;
+            }
+            return this;
+        }
+
+        // --- Legacy flat API (back-compat; split into per-mode sets at build()) ---
+
         public Builder enabledAnalyses(Set<AnalysisKey> enabledAnalyses) {
-            this.enabledAnalyses = mutableCopy(enabledAnalyses);
+            this.legacyAnalyses = mutableCopy(enabledAnalyses);
+            this.legacyExplicit = true;
             return this;
         }
 
         public Builder addAnalysis(AnalysisKey key) {
-            if (key != null) this.enabledAnalyses.add(key);
+            if (key != null) {
+                this.legacyAnalyses.add(key);
+                this.legacyExplicit = true;
+            }
             return this;
         }
 
         public Builder mipEnabled(boolean mipEnabled) {
-            this.spatialSourceMode = mipEnabled ? SpatialSourceMode.MIP : SpatialSourceMode.FULL_STACK;
+            this.legacySourceMode = mipEnabled ? SpatialSourceMode.MIP : SpatialSourceMode.FULL_STACK;
+            this.legacyExplicit = true;
             return this;
         }
 
         public Builder spatialSourceMode(SpatialSourceMode spatialSourceMode) {
-            this.spatialSourceMode = spatialSourceMode == null
+            this.legacySourceMode = spatialSourceMode == null
                     ? SpatialSourceMode.FULL_STACK
                     : spatialSourceMode;
+            this.legacyExplicit = true;
             return this;
         }
 
         public Builder native3dEnabled(boolean native3dEnabled) {
-            this.native3dEnabled = native3dEnabled;
+            this.legacyNative3d = native3dEnabled;
+            this.legacyExplicit = true;
             return this;
+        }
+
+        private ResolvedSelections resolveSelections() {
+            if (legacyExplicit && !perModeExplicit) {
+                return ResolvedSelections.fromLegacy(legacyAnalyses, legacySourceMode, legacyNative3d);
+            }
+            return new ResolvedSelections(enabledPerSlice, enabledMip, enabled3D);
         }
 
         public Builder overlaysEnabled(boolean overlaysEnabled) {

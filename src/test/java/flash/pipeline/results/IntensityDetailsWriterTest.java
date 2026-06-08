@@ -64,6 +64,7 @@ public class IntensityDetailsWriterTest {
                 .enabled(true)
                 .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS)
                 .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D)
                 .mipEnabled(true)
                 .native3dEnabled(true)
                 .overlaysEnabled(true)
@@ -91,7 +92,7 @@ public class IntensityDetailsWriterTest {
         String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
 
         assertTrue(text.contains("<Intensity Spatial Analysis>"));
-        assertTrue(text.contains("Selected analyses: patchiness,crossmark"));
+        assertTrue(text.contains("Selected analyses: patchiness,crossmark,anisotropy_3d"));
         assertTrue(text.contains("MIP output: true"));
         assertTrue(text.contains("Native 3D output: true"));
         assertTrue(text.contains("Overlays: true"));
