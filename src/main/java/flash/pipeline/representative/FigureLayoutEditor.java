@@ -117,15 +117,23 @@ public final class FigureLayoutEditor extends JDialog {
 
     // ---- pure, testable helpers -------------------------------------------
 
-    /** Flattened conditions distributed left-to-right, top-to-bottom. */
+    /**
+     * Flattened conditions balanced across {@code rowCount} rows (the first
+     * {@code total % rows} rows get one extra). Every one of the {@code rows}
+     * rows is non-empty when {@code rows <= total}, so requesting N rows yields
+     * exactly N rows after {@link #fromGrid} drops trailing empties.
+     */
     static String[][] distribute(List<String> conditions, int rowCount) {
         int total = conditions.size();
         int rows = Math.max(1, Math.min(rowCount, Math.max(1, total)));
-        int cols = Math.max(1, (int) Math.ceil(total / (double) rows));
+        int base = total / rows;
+        int remainder = total % rows;
+        int cols = Math.max(1, base + (remainder > 0 ? 1 : 0));
         String[][] g = new String[rows][cols];
         int i = 0;
-        for (int r = 0; r < rows && i < total; r++) {
-            for (int c = 0; c < cols && i < total; c++) {
+        for (int r = 0; r < rows; r++) {
+            int size = base + (r < remainder ? 1 : 0);
+            for (int c = 0; c < size && i < total; c++) {
                 g[r][c] = conditions.get(i++);
             }
         }

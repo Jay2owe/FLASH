@@ -11,6 +11,7 @@ import java.util.List;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 public class FigureLayoutEditorTest {
 
@@ -33,6 +34,21 @@ public class FigureLayoutEditorTest {
         assertEquals(4, four.length);
         assertEquals(1, four[0].length);
         assertEquals("D", four[3][0]);
+    }
+
+    @Test
+    public void distributeFillsEveryRequestedRowWhenRowsDoNotDivideEvenly() {
+        // Regression: 5 conditions into 4 rows must yield 4 non-empty rows,
+        // not 3 (the old ceil-cols fill left the last row empty).
+        String[][] grid = FigureLayoutEditor.distribute(
+                Arrays.asList("A", "B", "C", "D", "E"), 4);
+        List<List<String>> rows = FigureLayoutEditor.fromGrid(grid);
+        assertEquals(4, rows.size());
+        for (List<String> row : rows) {
+            assertTrue("no empty rows", !row.isEmpty());
+        }
+        assertEquals(Arrays.asList("A", "B", "C", "D", "E"),
+                FigureLayoutEditor.flatten(grid));
     }
 
     @Test
