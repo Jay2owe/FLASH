@@ -74,6 +74,10 @@ public final class FigureLayoutEditor extends JDialog {
     private int innerGap;
     private int margin;
     private boolean showImages;
+    private JSlider rowGapSlider;
+    private JSlider colGapSlider;
+    private JSlider innerGapSlider;
+    private JSlider marginSlider;
 
     private Result result;
 
@@ -301,22 +305,22 @@ public final class FigureLayoutEditor extends JDialog {
 
         side.add(Box.createVerticalStrut(8));
         side.add(section("Spacing (uniform)"));
-        side.add(slider("Row gap", rowGap, value -> {
+        rowGapSlider = slider(side, "Row gap", rowGap, value -> {
             rowGap = value;
             canvas.repaint();
-        }));
-        side.add(slider("Column gap", colGap, value -> {
+        });
+        colGapSlider = slider(side, "Column gap", colGap, value -> {
             colGap = value;
             canvas.repaint();
-        }));
-        side.add(slider("Inner gap", innerGap, value -> {
+        });
+        innerGapSlider = slider(side, "Inner gap", innerGap, value -> {
             innerGap = value;
             canvas.repaint();
-        }));
-        side.add(slider("Margin", margin, value -> {
+        });
+        marginSlider = slider(side, "Margin", margin, value -> {
             margin = value;
             canvas.repaint();
-        }));
+        });
 
         side.add(Box.createVerticalStrut(8));
         JPanel imagesRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
@@ -335,10 +339,13 @@ public final class FigureLayoutEditor extends JDialog {
         reset.addActionListener(e -> {
             grid = gridFromRows(originalRows);
             rowCount = grid.length;
-            rowGap = baseConfig.rowGapPx();
-            colGap = baseConfig.conditionGapPx();
-            innerGap = baseConfig.innerColGapPx();
-            margin = baseConfig.marginPx();
+            // Driving the sliders cascades through their listeners to the
+            // rowGap/colGap/innerGap/margin fields and keeps the thumbs+labels
+            // in sync (the fields alone would leave the sliders visually stale).
+            rowGapSlider.setValue(baseConfig.rowGapPx());
+            colGapSlider.setValue(baseConfig.conditionGapPx());
+            innerGapSlider.setValue(baseConfig.innerColGapPx());
+            marginSlider.setValue(baseConfig.marginPx());
             updateGridLabel();
             canvas.repaint();
         });
@@ -549,7 +556,7 @@ public final class FigureLayoutEditor extends JDialog {
         void accept(int value);
     }
 
-    private JPanel slider(String label, int value, IntConsumer consumer) {
+    private JSlider slider(JPanel side, String label, int value, IntConsumer consumer) {
         JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 1));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         JLabel name = new JLabel(label);
@@ -569,7 +576,8 @@ public final class FigureLayoutEditor extends JDialog {
         row.add(name);
         row.add(slider);
         row.add(valueLabel);
-        return row;
+        side.add(row);
+        return slider;
     }
 
     private static JLabel section(String text) {
