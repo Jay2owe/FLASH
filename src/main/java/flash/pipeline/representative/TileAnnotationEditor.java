@@ -324,25 +324,46 @@ public final class TileAnnotationEditor extends JDialog {
         return series.mergeThumbnail();
     }
 
+    /**
+     * Mirrors {@code PresentationTileWriter.labelText} so the editor preview
+     * shows the same text the final figure will draw (same templates, same
+     * tokens; note there is no {@code {image}} token in the renderer).
+     */
     private String currentLabelText() {
         String condition = String.valueOf(conditionBox.getSelectedItem());
         String output = String.valueOf(channelBox.getSelectedItem());
         RepresentativeSeries series = selection.seriesForCondition(condition);
-        String image = series == null ? "" : series.seriesName();
+        String animal = series == null ? "" : series.animal();
+        String hemisphere = series == null ? "" : series.hemisphere();
+        String region = series == null ? "" : series.region();
+        String template;
         switch (baseConfig.labelMode()) {
+            case NONE:
+                return "";
             case IMAGE_NAME:
-                return image;
+                template = "{animal} {hemisphere} {region}";
+                break;
             case CONDITION_IMAGE:
-                return (condition + " " + image).trim();
+                template = "{condition} {animal} {hemisphere} {region}";
+                break;
             case CUSTOM:
-                return baseConfig.customLabelTemplate()
-                        .replace("{stain}", output)
-                        .replace("{image}", image)
-                        .replace("{condition}", condition);
+                template = baseConfig.customLabelTemplate().isEmpty()
+                        ? "{stain}" : baseConfig.customLabelTemplate();
+                break;
             case STAIN_NAME:
             default:
-                return output;
+                template = "{stain}";
+                break;
         }
+        String text = template
+                .replace("{animal}", animal)
+                .replace("{condition}", condition)
+                .replace("{hemisphere}", hemisphere)
+                .replace("{region}", region)
+                .replace("{channel}", output)
+                .replace("{stain}", output)
+                .replace("{output}", output);
+        return text.replaceAll("\\s+", " ").trim();
     }
 
     private final class EditorCanvas extends JPanel {

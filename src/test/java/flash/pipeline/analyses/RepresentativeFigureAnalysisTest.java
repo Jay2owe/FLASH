@@ -36,6 +36,7 @@ import java.util.Set;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class RepresentativeFigureAnalysisTest {
@@ -50,6 +51,33 @@ public class RepresentativeFigureAnalysisTest {
         assertFalse(analysis.benefitsFromRois());
         assertTrue(analysis.requiredBinFields().isEmpty());
         assertNotNull(analysis.configForTests());
+    }
+
+    @Test
+    public void reshapeLayoutRowsBalancesAndPreservesAllConditions() {
+        RepresentativeLayout layout = RepresentativeLayout.allInOneRow(
+                Arrays.asList("A", "B", "C", "D", "E"));
+
+        RepresentativeLayout two = RepresentativeFigureAnalysis.reshapeLayoutRows(layout, 2);
+        assertNotNull(two);
+        assertEquals(2, two.rowCount());
+        assertEquals(3, two.rows().get(0).size());
+        assertEquals(2, two.rows().get(1).size());
+        assertEquals(Arrays.asList("A", "B", "C", "D", "E"), two.flattenedConditions());
+
+        RepresentativeLayout four = RepresentativeFigureAnalysis.reshapeLayoutRows(layout, 4);
+        assertNotNull(four);
+        assertEquals(4, four.rowCount());
+        assertEquals(Arrays.asList("A", "B", "C", "D", "E"), four.flattenedConditions());
+
+        // rows beyond the condition count clamp to one row per condition.
+        RepresentativeLayout clamped =
+                RepresentativeFigureAnalysis.reshapeLayoutRows(layout, 99);
+        assertNotNull(clamped);
+        assertEquals(5, clamped.rowCount());
+
+        assertNull(RepresentativeFigureAnalysis.reshapeLayoutRows(layout, 0));
+        assertNull(RepresentativeFigureAnalysis.reshapeLayoutRows(null, 2));
     }
 
     @Test
