@@ -63,6 +63,7 @@ public final class FigureLayoutEditor extends JDialog {
     private final RepresentativeSelection selection;
     private final PresentationTileConfig baseConfig;
     private final List<String> allConditions;
+    private final List<List<String>> originalRows;
 
     private final GridCanvas canvas;
     private final JLabel gridLabel = new JLabel();
@@ -84,8 +85,9 @@ public final class FigureLayoutEditor extends JDialog {
         this.selection = selection;
         this.baseConfig = tileConfig;
         this.allConditions = layout.flattenedConditions();
-        this.rowCount = Math.max(1, layout.rowCount());
-        this.grid = distribute(allConditions, rowCount);
+        this.originalRows = copyRows(layout.rows());
+        this.grid = gridFromRows(originalRows);
+        this.rowCount = grid.length;
         this.rowGap = tileConfig.rowGapPx();
         this.colGap = tileConfig.conditionGapPx();
         this.innerGap = tileConfig.innerColGapPx();
@@ -138,6 +140,36 @@ public final class FigureLayoutEditor extends JDialog {
             }
         }
         return g;
+    }
+
+    /** A ragged grid built directly from layout rows, preserving their shape. */
+    static String[][] gridFromRows(List<List<String>> rows) {
+        int rc = Math.max(1, rows.size());
+        int cols = 1;
+        for (List<String> row : rows) {
+            cols = Math.max(cols, row.size());
+        }
+        String[][] g = new String[rc][cols];
+        for (int r = 0; r < rows.size(); r++) {
+            List<String> row = rows.get(r);
+            for (int c = 0; c < row.size(); c++) {
+                g[r][c] = row.get(c);
+            }
+        }
+        return g;
+    }
+
+    private static List<List<String>> copyRows(List<List<String>> rows) {
+        List<List<String>> out = new ArrayList<List<String>>();
+        if (rows != null) {
+            for (List<String> row : rows) {
+                out.add(new ArrayList<String>(row));
+            }
+        }
+        if (out.isEmpty()) {
+            out.add(new ArrayList<String>());
+        }
+        return out;
     }
 
     /** Non-null cells in row-major order. */
@@ -301,8 +333,8 @@ public final class FigureLayoutEditor extends JDialog {
         JButton reset = new JButton("Reset");
         reset.setAlignmentX(Component.LEFT_ALIGNMENT);
         reset.addActionListener(e -> {
-            rowCount = Math.max(1, baseConfig == null ? 1 : rowCount);
-            grid = distribute(allConditions, rowCount);
+            grid = gridFromRows(originalRows);
+            rowCount = grid.length;
             rowGap = baseConfig.rowGapPx();
             colGap = baseConfig.conditionGapPx();
             innerGap = baseConfig.innerColGapPx();

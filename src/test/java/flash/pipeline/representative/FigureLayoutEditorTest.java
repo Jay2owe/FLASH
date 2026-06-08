@@ -62,6 +62,17 @@ public class FigureLayoutEditorTest {
     }
 
     @Test
+    public void gridFromRowsPreservesRaggedLayoutShape() {
+        // Opening the arranger on a manual ragged layout must NOT rebalance it.
+        String[][] grid = FigureLayoutEditor.gridFromRows(Arrays.asList(
+                Arrays.asList("A"), Arrays.asList("B", "C", "D")));
+        assertEquals(Arrays.asList(Arrays.asList("A"), Arrays.asList("B", "C", "D")),
+                FigureLayoutEditor.fromGrid(grid));
+        assertEquals(Arrays.asList("A", "B", "C", "D"),
+                FigureLayoutEditor.flatten(grid));
+    }
+
+    @Test
     public void fromGridDropsEmptyRowsAndKeepsOrder() {
         String[][] grid = {{"A", "B"}, {null, null}, {"C", null}};
         assertEquals(Arrays.asList(Arrays.asList("A", "B"), Arrays.asList("C")),
