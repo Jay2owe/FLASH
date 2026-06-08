@@ -157,7 +157,8 @@ public final class IntensitySpatialRunner {
 
         LinkedHashMap<String, Double> values = new LinkedHashMap<String, Double>();
         for (IntensitySpatialAnalysis analysis : analyses) {
-            if (analysis == null || !context.config().getEnabledAnalyses().contains(analysis.key())
+            if (analysis == null
+                    || !context.config().isEnabledIn(analysis.key(), context.outputMode())
                     || !analysis.outputModes().contains(context.outputMode())) {
                 continue;
             }
@@ -218,7 +219,7 @@ public final class IntensitySpatialRunner {
         LinkedHashMap<String, Double> values = new LinkedHashMap<String, Double>();
         for (IntensitySpatialPairAnalysis analysis : pairAnalyses) {
             if (analysis == null
-                    || !context.config().getEnabledAnalyses().contains(analysis.key())
+                    || !context.config().isEnabledIn(analysis.key(), context.outputMode())
                     || !analysis.outputModes().contains(context.outputMode())) {
                 continue;
             }

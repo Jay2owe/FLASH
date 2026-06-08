@@ -183,7 +183,8 @@ public class CrossMark2DAnalysisTest {
     private static IntensitySpatialConfig config() {
         return IntensitySpatialConfig.builder()
                 .enabled(true)
-                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK, IntensitySpatialOutputMode.BASE)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK, IntensitySpatialOutputMode.MIP)
                 .permutations(9)
                 .build();
     }

@@ -2785,7 +2785,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 || !sourceAllowsSpatialMode(spatialConfig, key.mode())) {
             return new ArrayList<String>(columns);
         }
-        Set<IntensitySpatialConfig.AnalysisKey> analyses = spatialConfig.getEnabledAnalyses();
+        Set<IntensitySpatialConfig.AnalysisKey> analyses = spatialConfig.enabledFor(key.mode());
         if (analyses == null || analyses.isEmpty()) {
             return new ArrayList<String>(columns);
         }
@@ -2830,10 +2830,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
     private static boolean sourceAllowsSpatialMode(IntensitySpatialConfig spatialConfig,
                                                    IntensitySpatialOutputMode mode) {
-        if (spatialConfig == null || mode == null) return false;
-        if (mode == IntensitySpatialOutputMode.NATIVE_3D) return true;
-        if (mode == IntensitySpatialOutputMode.MIP) return spatialConfig.isMipEnabled();
-        return !spatialConfig.isMipEnabled();
+        return spatialConfig != null && mode != null
+                && !spatialConfig.enabledFor(mode).isEmpty();
     }
 
     private static boolean hasNonNativeSpatialAnalysis(IntensitySpatialConfig spatialConfig) {
