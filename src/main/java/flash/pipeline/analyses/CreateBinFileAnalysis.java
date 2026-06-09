@@ -61,6 +61,7 @@ import flash.pipeline.stardist.StarDistDetector;
 import flash.pipeline.ui.CustomFilterContinueDialog;
 import flash.pipeline.ui.CustomFilterEntryDialog;
 import flash.pipeline.ui.CancelConfirmationDialog;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.config.ConfigQcContext;
@@ -1098,6 +1099,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
 
             PipelineDialog ovr = setupAnalysisDialog("Set Up Configuration");
+            ovr.setPrimaryButtonText(NextStepLabels.SETUP);
             ovr.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             ovr.addSubHeader("Existing Configuration Found");
             ovr.addMessage("A saved configuration was found.");
@@ -1173,6 +1175,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         // ── Fresh creation: confirm ─────────────────────────────────────
         if (!overrideMode) {
             PipelineDialog confirm = setupAnalysisDialog("Set Up Configuration");
+            confirm.setPrimaryButtonText(NextStepLabels.CHANNEL_SETUP);
             confirm.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             confirm.addSubHeader("New Configuration");
             confirm.addMessage("No Configuration folder detected. Click OK to create one.");
@@ -2391,7 +2394,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                                boolean showThreshold, boolean showParticleSize) {
         return showGranularCustomFork(channelNames, segmentationMethods,
                 showFilterParameters, showMinMax, showThreshold, showParticleSize, false, null,
-                settingsStatusReference);
+                settingsStatusReference, false);
     }
 
     private boolean[][] showGranularCustomFork(BinUserConfig cfg,
@@ -2415,7 +2418,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         return showGranularCustomFork(safe.names, safe.segmentationMethods,
                 showFilterParameters, showMinMax, showThreshold, showParticleSize,
                 showSegmentationMethod,
-                initialSettings, settingsStatusReference);
+                initialSettings, settingsStatusReference, cfg.usesZSliceSubset());
     }
 
     private boolean[][] showGranularCustomFork(List<String> channelNames, List<String> segmentationMethods,
@@ -2424,7 +2427,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                                boolean[][] initialSettings) {
         return showGranularCustomFork(channelNames, segmentationMethods,
                 showFilterParameters, showMinMax, showThreshold, showParticleSize, false,
-                initialSettings, settingsStatusReference);
+                initialSettings, settingsStatusReference, false);
     }
 
     private boolean[][] showGranularCustomFork(List<String> channelNames, List<String> segmentationMethods,
@@ -2432,7 +2435,8 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                                                boolean showThreshold, boolean showParticleSize,
                                                boolean showSegmentationMethod,
                                                boolean[][] initialSettings,
-                                               BinConfig statusConfig) {
+                                               BinConfig statusConfig,
+                                               boolean usesZSliceSubset) {
         PipelineDialog fork = new PipelineDialog("Settings Mode");
         installWizardCancelHook(fork);
         fork.enableBackButton();
@@ -2532,6 +2536,19 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                         segmentationMethodGroup, allSettingsGroup);
             }
         }
+
+        // Name the screen this choice actually leads to: z-slice selection when a
+        // subset was requested, else quality-check images when any setting is
+        // toggled on, else straight to review. Recomputes as toggles change.
+        final SettingsModeTickAllGroup nextLabelGroup = allSettingsGroup;
+        Runnable refreshNextStepLabel = new Runnable() {
+            @Override public void run() {
+                fork.setPrimaryButtonText(NextStepLabels.afterSettingsMode(
+                        usesZSliceSubset, nextLabelGroup.anySelected()));
+            }
+        };
+        allSettingsGroup.addSelectionListener(refreshNextStepLabel);
+        refreshNextStepLabel.run();
 
         if (!fork.showDialog()) {
             lastWasBack = fork.wasBackPressed();
@@ -2874,6 +2891,21 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 if (!toggles.get(i).isSelected()) return false;
             }
             return true;
+        }
+
+        boolean anySelected() {
+            for (int i = 0; i < toggles.size(); i++) {
+                if (toggles.get(i).isSelected()) return true;
+            }
+            return false;
+        }
+
+        /** Fires {@code callback} whenever any toggle added so far changes. */
+        void addSelectionListener(final Runnable callback) {
+            if (callback == null) return;
+            for (int i = 0; i < toggles.size(); i++) {
+                toggles.get(i).addChangeListener(callback);
+            }
         }
 
         private void applyTickAllSelection() {
@@ -3256,6 +3288,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         } else {
             PipelineDialog gdCount = setupAnalysisDialog("Set Up Configuration");
             installWizardCancelHook(gdCount);
+            gdCount.setPrimaryButtonText(NextStepLabels.NAME_CHANNELS);
             gdCount.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             gdCount.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
             addSavedStatusMessage(gdCount);
@@ -3308,6 +3341,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Channel Identity");
             installWizardCancelHook(pd);
             pd.setModal(false);
+            pd.setPrimaryButtonText(NextStepLabels.ANALYSIS_SCOPE);
             if (existing == null) pd.enableBackButton();
             pd.addSetupHelpHeader("Channel Identity", SetupHelpCatalog.CHANNEL_IDENTITY);
             addSavedStatusMessage(pd);
@@ -3351,6 +3385,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     // Go back to channel count
                     PipelineDialog gdCount2 = new PipelineDialog("Set Up Configuration");
                     installWizardCancelHook(gdCount2);
+                    gdCount2.setPrimaryButtonText(NextStepLabels.NAME_CHANNELS);
                     gdCount2.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
                     gdCount2.addSetupHelpSubHeader("Channel Setup", SetupHelpCatalog.CHANNEL_IDENTITY);
                     addSavedStatusMessage(gdCount2);
@@ -4561,6 +4596,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         lastWasBack = false;
         PipelineDialog pd = setupAnalysisDialog("Set Up Configuration - Analysis Scope");
         installWizardCancelHook(pd);
+        pd.setPrimaryButtonText(NextStepLabels.SETTINGS_MODE);
         if (allowBack) pd.enableBackButton();
         pd.addSetupHelpHeader("Analysis Scope", SetupHelpCatalog.ANALYSIS_SCOPE);
         addSavedStatusMessage(pd);
@@ -4724,6 +4760,15 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 randomCountField.setEditable(isRandom);
                 setComponentTreeEnabled(recomputeRow, isMinMax);
                 setComponentTreeEnabled(minMaxHelp, isMinMax);
+
+                // Name the screen this mode actually leads to next.
+                String nextLabel = NextStepLabels.QC_STAGES;
+                if (QC_SELECTION_MODE_MANUAL.equals(selectedMode)) {
+                    nextLabel = NextStepLabels.QC_PICK_IMAGES;
+                } else if (isMinMax && requiresMinMaxConditionMetadataReview(selectedMode)) {
+                    nextLabel = NextStepLabels.QC_METADATA;
+                }
+                pd.setPrimaryButtonText(nextLabel);
             }
         };
         modeChoice.addItemListener(new java.awt.event.ItemListener() {
@@ -4888,6 +4933,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         PipelineDialog dialog = new PipelineDialog(
                 "Min/Max QC Metadata Review", PipelineDialog.Phase.SETUP);
         installWizardCancelHook(dialog);
+        dialog.setPrimaryButtonText(NextStepLabels.QC_STAGES);
         dialog.addHeader("Animal and Condition Review");
         dialog.addMessage("Min/max QC uses these labels to describe selected images. "
                 + "Correct any guessed animal names or condition groups before the scan starts.");
@@ -5350,6 +5396,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private List<Integer> showManualQcSeriesSelection(File lifFile, List<SeriesMeta> metas) {
         PipelineDialog pd = new PipelineDialog("Quality Check - Manual Selection");
         installWizardCancelHook(pd);
+        pd.setPrimaryButtonText(NextStepLabels.QC_STAGES);
         pd.addHeader("Manual QC Image Selection");
         pd.addMessage("Select the image series to open for QC.");
         ToggleSwitch[] toggles = new ToggleSwitch[metas.size()];
