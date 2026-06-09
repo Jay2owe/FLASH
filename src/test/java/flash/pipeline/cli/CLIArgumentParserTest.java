@@ -540,6 +540,27 @@ public class CLIArgumentParserTest {
     }
 
     @Test
+    public void intensitySpatialPerModeTokensSurviveMacroRoundTrip() {
+        CLIConfig parsed = CLIArgumentParser.parse("dir=[/tmp/data] intensity.spatial=true "
+                + "intensity.spatial.perslice=nullmodel,glcm "
+                + "intensity.spatial.mip_analyses=patchiness "
+                + "intensity.spatial.native3d_analyses=anisotropy3d");
+
+        CLIConfig reparsed = CLIArgumentParser.parse(parsed.toMacroOptions());
+        IntensitySpatialConfig merged = reparsed.getIntensity().mergeSpatialConfig(
+                IntensitySpatialConfig.disabled(), 1, new boolean[]{false}, null);
+
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.NULLMODEL,
+                IntensitySpatialOutputMode.BASE));
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.GLCM,
+                IntensitySpatialOutputMode.BASE));
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.PATCHINESS,
+                IntensitySpatialOutputMode.MIP));
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D,
+                IntensitySpatialOutputMode.NATIVE_3D));
+    }
+
+    @Test
     public void intensitySpatialCliMergeEnforcesChannelAndBinarizationLocks() {
         CLIConfig crossChannelParsed = CLIArgumentParser.parse("dir=[/tmp/data] "
                 + "intensity.spatial=true "

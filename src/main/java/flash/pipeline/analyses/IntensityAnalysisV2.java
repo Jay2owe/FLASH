@@ -1969,7 +1969,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     && baseKey != null
                     && !baseKey.isChannelRoiMaskOutput()
                     && sourceAllowsSpatialMode(spatialConfig, IntensitySpatialOutputMode.BASE);
-            if (has2d && baseAllowed) {
+            if (baseAllowed && containsCrossChannel2d(
+                    spatialConfig.enabledFor(IntensitySpatialOutputMode.BASE))) {
                 int slices = Math.max(1, sourceRaw.getStackSize());
                 baseResults[c] = ensureResultArray(baseResults[c], slices);
                 for (int p = 0; p < channelCount; p++) {
@@ -1995,7 +1996,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
             IntensitySpatialOutputKey mipKey = outputPlan.keyForChannelMode(sourceName,
                     IntensitySpatialOutputMode.MIP);
-            if (has2d && outputPlan.shouldPopulate(mipKey)) {
+            if (containsCrossChannel2d(spatialConfig.enabledFor(IntensitySpatialOutputMode.MIP))
+                    && outputPlan.shouldPopulate(mipKey)) {
                 for (int p = 0; p < channelCount; p++) {
                     if (p == c || rawImages[p] == null) continue;
                     String pairProgress = "pair " + orderedPairProgress(c, p, channelCount)
@@ -2132,6 +2134,23 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         return analyses != null
                 && (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D)
                 || analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D));
+    }
+
+    /** Same-channel (non-cross, non-native) 2D analyses present in a single mode's selection. */
+    private static boolean containsSameChannel2d(Set<IntensitySpatialConfig.AnalysisKey> analyses) {
+        if (analyses == null) return false;
+        for (IntensitySpatialConfig.AnalysisKey key : analyses) {
+            if (key != null && !key.isCrossChannel() && !key.isNative3d()) return true;
+        }
+        return false;
+    }
+
+    /** Cross-channel 2D analyses present in a single mode's selection. */
+    private static boolean containsCrossChannel2d(Set<IntensitySpatialConfig.AnalysisKey> analyses) {
+        return analyses != null
+                && (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                || analyses.contains(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI)
+                || analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL));
     }
 
     private static boolean hasSelected2dSameChannelAnalysis(IntensitySpatialConfig spatialConfig) {
@@ -2317,7 +2336,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     + sameChannelPlanSummary(spatialConfig, hasSame2d && (baseAllowed || mipAllowed),
                     hasSameNative3d && nativeAllowed));
 
-            if (baseAllowed && hasSame2d) {
+            if (baseAllowed && containsSameChannel2d(
+                    spatialConfig.enabledFor(IntensitySpatialOutputMode.BASE))) {
                 int slices = Math.max(1, raw.getStackSize());
                 baseResults = new IntensitySpatialResult[slices];
                 logProgressStep(imageStepContext, "same-channel " + channelName
@@ -2331,7 +2351,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 }
             }
 
-            if (mipAllowed && hasSame2d) {
+            if (mipAllowed && containsSameChannel2d(
+                    spatialConfig.enabledFor(IntensitySpatialOutputMode.MIP))) {
                 ImagePlus rawMip = null;
                 ImagePlus binarizedMip = null;
                 try {

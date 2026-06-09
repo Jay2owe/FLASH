@@ -261,6 +261,18 @@ public class CLIConfig {
             parts.add("intensity.spatial.analyses="
                     + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialAnalyses));
         }
+        if (intensity.spatialPerSliceAnalyses != null) {
+            parts.add("intensity.spatial.perslice="
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialPerSliceAnalyses));
+        }
+        if (intensity.spatialMipAnalyses != null) {
+            parts.add("intensity.spatial.mip_analyses="
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialMipAnalyses));
+        }
+        if (intensity.spatial3dAnalyses != null) {
+            parts.add("intensity.spatial.native3d_analyses="
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatial3dAnalyses));
+        }
         if (intensity.spatialSourceMode != null) {
             parts.add("intensity.spatial.source=" + intensity.spatialSourceMode.token());
         }
