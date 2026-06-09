@@ -764,6 +764,272 @@ public class IntensityAnalysisV2Test {
     }
 
     @Test
+    public void mipOnlyCrossChannelSpatialDoesNotRunPerSliceCrossChannelWork() throws Exception {
+        File dir = temp.newFolder("mip-only-cross-channel-spatial");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesIntensityWriteDir();
+        assertTrue(outputRoot.mkdirs());
+
+        String[] channelNames = {"DAPI", "GFAP"};
+        boolean[] binarization = {false, false};
+        String[] thresholds = {"0", "0"};
+        String[] filterSources = {
+                "Basic background and noise removal",
+                "Basic background and noise removal"
+        };
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK,
+                        IntensitySpatialOutputMode.MIP)
+                .build();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, spatial, 3, false);
+        Object totalTables = newOutputTables(plan);
+
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        setIntensitySpatialConfigForTest(analysis, spatial);
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() throws Exception {
+                invokeRunIntensityMeasurementsForThisImage(
+                        analysis,
+                        new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                        new ImagePlus[]{
+                                syntheticStackImage(8, 8, 3),
+                                syntheticStackImage(8, 8, 3)
+                        },
+                        2,
+                        binarization,
+                        thresholds,
+                        channelNames,
+                        -1,
+                        plan,
+                        totalTables,
+                        1,
+                        null,
+                        intensityConfig("DAPI", "0"),
+                        filterSources,
+                        binDir,
+                        "",
+                        null);
+            }
+        });
+
+        assertTrue(log, log.contains("intensity-spatial cross-channel: MIP crossmark"));
+        assertTrue(log, log.contains("DAPI MIP -> GFAP MIP"));
+        assertFalse(log, log.contains("starting same-channel intensity-spatial"));
+        assertFalse(log, log.contains("DAPI -> GFAP base"));
+        assertFalse(log, log.contains("crossmark running: image 1/1 "
+                + "SyntheticMouse_LH_SCN source DAPI -> partner GFAP ROI SCN1 base slice"));
+
+        ResultsTable base = tableFor(totalTables, IntensitySpatialOutputKey.base("DAPI"));
+        ResultsTable mip = tableFor(totalTables, IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.MIP));
+        assertEquals(3, base.size());
+        assertEquals(1, mip.size());
+        assertFalse(Arrays.asList(base.getHeadings()).contains("DAPI_Pearson_GFAP"));
+        assertTrue(Arrays.asList(mip.getHeadings()).contains("DAPI_Pearson_GFAP"));
+    }
+
+    @Test
+    public void mipOnlySameChannelSpatialDoesNotRunPerSliceSameChannelWork() throws Exception {
+        File dir = temp.newFolder("mip-only-same-channel-spatial");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesIntensityWriteDir();
+        assertTrue(outputRoot.mkdirs());
+
+        String[] channelNames = {"DAPI"};
+        boolean[] binarization = {false};
+        String[] thresholds = {"0"};
+        String[] filterSources = {"Basic background and noise removal"};
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS,
+                        IntensitySpatialOutputMode.MIP)
+                .build();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, spatial, 4, false);
+        Object totalTables = newOutputTables(plan);
+
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        setIntensitySpatialConfigForTest(analysis, spatial);
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() throws Exception {
+                invokeRunIntensityMeasurementsForThisImage(
+                        analysis,
+                        new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                        new ImagePlus[]{syntheticStackImage(8, 8, 4)},
+                        1,
+                        binarization,
+                        thresholds,
+                        channelNames,
+                        -1,
+                        plan,
+                        totalTables,
+                        1,
+                        null,
+                        intensityConfig("DAPI", "0"),
+                        filterSources,
+                        binDir,
+                        "",
+                        null);
+            }
+        });
+
+        IntensitySpatialOutputKey baseKey = IntensitySpatialOutputKey.base("DAPI");
+        IntensitySpatialOutputKey mipKey = IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.MIP);
+        ResultsTable base = tableFor(totalTables, baseKey);
+        ResultsTable mip = tableFor(totalTables, mipKey);
+        assertEquals(4, base.size());
+        assertEquals(1, mip.size());
+        assertTrue(log, log.contains("intensity-spatial same-channel [DAPI]: MIP patchiness"));
+        assertTrue(log, log.contains("same-channel DAPI MIP: building max-intensity projection"));
+        assertFalse(log, log.contains("same-channel DAPI base output"));
+        assertFalse(Arrays.asList(base.getHeadings()).contains("Intensity_PatchinessCV50"));
+        assertTrue(Arrays.asList(mip.getHeadings()).contains("Intensity_PatchinessCV50"));
+    }
+
+    @Test
+    public void perSliceOnlySpatialDoesNotSelectOrRunMipOrNativeOutputs() throws Exception {
+        File dir = temp.newFolder("per-slice-only-spatial");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesIntensityWriteDir();
+        assertTrue(outputRoot.mkdirs());
+
+        String[] channelNames = {"DAPI"};
+        boolean[] binarization = {false};
+        String[] thresholds = {"0"};
+        String[] filterSources = {"Basic background and noise removal"};
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.PATCHINESS,
+                        IntensitySpatialOutputMode.BASE)
+                .build();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, spatial, 5, false);
+        IntensitySpatialOutputKey baseKey = IntensitySpatialOutputKey.base("DAPI");
+        assertTrue(plan.selectedKeys().contains(baseKey));
+        assertFalse(plan.selectedKeys().contains(IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.MIP)));
+        assertFalse(plan.selectedKeys().contains(IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.NATIVE_3D)));
+        Object totalTables = newOutputTables(plan);
+
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        setIntensitySpatialConfigForTest(analysis, spatial);
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() throws Exception {
+                invokeRunIntensityMeasurementsForThisImage(
+                        analysis,
+                        new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                        new ImagePlus[]{syntheticStackImage(8, 8, 5)},
+                        1,
+                        binarization,
+                        thresholds,
+                        channelNames,
+                        -1,
+                        plan,
+                        totalTables,
+                        1,
+                        null,
+                        intensityConfig("DAPI", "0"),
+                        filterSources,
+                        binDir,
+                        "",
+                        null);
+            }
+        });
+
+        ResultsTable base = tableFor(totalTables, baseKey);
+        assertEquals(5, base.size());
+        assertTrue(log, log.contains("intensity-spatial same-channel [DAPI]: per-slice patchiness"));
+        assertTrue(log, log.contains("same-channel DAPI base output: 5 slices"));
+        assertFalse(log, log.contains("same-channel DAPI MIP:"));
+        assertFalse(log, log.contains("native 3D output"));
+        assertTrue(Arrays.asList(base.getHeadings()).contains("Intensity_PatchinessCV50"));
+    }
+
+    @Test
+    public void native3dOnlySpatialDoesNotRun2dOrMipWork() throws Exception {
+        File dir = temp.newFolder("native-3d-only-spatial");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath())
+                .tablesIntensityWriteDir();
+        assertTrue(outputRoot.mkdirs());
+
+        String[] channelNames = {"DAPI"};
+        boolean[] binarization = {false};
+        String[] thresholds = {"0"};
+        String[] filterSources = {"Basic background and noise removal"};
+        IntensitySpatialConfig spatial = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D,
+                        IntensitySpatialOutputMode.NATIVE_3D)
+                .build();
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, spatial, 5, false);
+        IntensitySpatialOutputKey baseKey = IntensitySpatialOutputKey.base("DAPI");
+        IntensitySpatialOutputKey nativeKey = IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.NATIVE_3D);
+        assertTrue(plan.selectedKeys().contains(baseKey));
+        assertFalse(plan.selectedKeys().contains(IntensitySpatialOutputKey.of("DAPI",
+                IntensitySpatialOutputMode.MIP)));
+        assertTrue(plan.selectedKeys().contains(nativeKey));
+        Object totalTables = newOutputTables(plan);
+
+        IntensityAnalysisV2 analysis = new IntensityAnalysisV2();
+        setIntensitySpatialConfigForTest(analysis, spatial);
+
+        String log = captureImageJLogOutput(new ThrowingRunnable() {
+            @Override
+            public void run() throws Exception {
+                invokeRunIntensityMeasurementsForThisImage(
+                        analysis,
+                        new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                        new ImagePlus[]{syntheticStackImage(8, 8, 5)},
+                        1,
+                        binarization,
+                        thresholds,
+                        channelNames,
+                        -1,
+                        plan,
+                        totalTables,
+                        1,
+                        null,
+                        intensityConfig("DAPI", "0"),
+                        filterSources,
+                        binDir,
+                        "",
+                        null);
+            }
+        });
+
+        ResultsTable base = tableFor(totalTables, baseKey);
+        ResultsTable native3d = tableFor(totalTables, nativeKey);
+        assertEquals(5, base.size());
+        assertEquals(1, native3d.size());
+        assertTrue(log, log.contains("intensity-spatial same-channel [DAPI]: native 3D anisotropy_3d"));
+        assertTrue(log, log.contains("same-channel DAPI native 3D output: 5 slices"));
+        assertFalse(log, log.contains("same-channel DAPI base output"));
+        assertFalse(log, log.contains("same-channel DAPI MIP:"));
+        assertFalse(Arrays.asList(base.getHeadings()).contains("Intensity_Anisotropy3DCoherency"));
+        assertTrue(Arrays.asList(native3d.getHeadings()).contains("Intensity_Anisotropy3DCoherency"));
+    }
+
+    @Test
     public void parallelChannelThresholdFailureAbortsBeforePartialRowsAreMerged() throws Exception {
         File dir = temp.newFolder("parallel-channel-failure");
         File binDir = new File(dir, ".bin");

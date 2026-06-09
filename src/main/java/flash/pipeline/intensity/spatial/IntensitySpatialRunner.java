@@ -143,7 +143,7 @@ public final class IntensitySpatialRunner {
 
     public IntensitySpatialResult measure(IntensitySpatialContext context) {
         if (context == null || !context.config().isEnabled()
-                || context.config().getEnabledAnalyses().isEmpty()) {
+                || context.config().enabledFor(context.outputMode()).isEmpty()) {
             return IntensitySpatialResult.empty();
         }
         if (context.outputMode() == IntensitySpatialOutputMode.NATIVE_3D
@@ -202,7 +202,7 @@ public final class IntensitySpatialRunner {
 
     public IntensitySpatialResult measurePair(IntensitySpatialPairContext context) {
         if (context == null || !context.config().isEnabled()
-                || context.config().getEnabledAnalyses().isEmpty()
+                || context.config().enabledFor(context.outputMode()).isEmpty()
                 || context.sourceChannelName().equals(context.partnerChannelName())) {
             return IntensitySpatialResult.empty();
         }
