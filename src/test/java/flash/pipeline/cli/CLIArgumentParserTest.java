@@ -561,6 +561,27 @@ public class CLIArgumentParserTest {
     }
 
     @Test
+    public void intensitySpatialExplicitEmptyModeClearsBaseAfterMacroRoundTrip() {
+        CLIConfig parsed = CLIArgumentParser.parse("dir=[/tmp/data] intensity.spatial=true "
+                + "intensity.spatial.perslice=nullmodel "
+                + "intensity.spatial.mip_analyses=[]");
+
+        CLIConfig reparsed = CLIArgumentParser.parse(parsed.toMacroOptions());
+
+        IntensitySpatialConfig base = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .enabledMip(java.util.EnumSet.of(IntensitySpatialConfig.AnalysisKey.PATCHINESS))
+                .build();
+        IntensitySpatialConfig merged = reparsed.getIntensity().mergeSpatialConfig(
+                base, 1, new boolean[]{false}, null);
+
+        // The explicitly-emptied MIP set must survive the round-trip and clear the base's MIP.
+        assertTrue(merged.getEnabledMip().isEmpty());
+        assertTrue(merged.isEnabledIn(IntensitySpatialConfig.AnalysisKey.NULLMODEL,
+                IntensitySpatialOutputMode.BASE));
+    }
+
+    @Test
     public void intensitySpatialCliMergeEnforcesChannelAndBinarizationLocks() {
         CLIConfig crossChannelParsed = CLIArgumentParser.parse("dir=[/tmp/data] "
                 + "intensity.spatial=true "

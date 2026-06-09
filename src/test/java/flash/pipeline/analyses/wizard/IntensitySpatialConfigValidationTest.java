@@ -175,4 +175,46 @@ public class IntensitySpatialConfigValidationTest {
         assertTrue(config.getEnabledMip().contains(IntensitySpatialConfig.AnalysisKey.PATCHINESS));
         assertTrue(config.getEnabled3D().isEmpty());
     }
+
+    @Test
+    public void standaloneLegacyFlagDoesNotCollapsePerModeBase() {
+        IntensitySpatialConfig base = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .enabledPerSlice(EnumSet.of(IntensitySpatialConfig.AnalysisKey.NULLMODEL))
+                .enabledMip(EnumSet.of(IntensitySpatialConfig.AnalysisKey.PATCHINESS))
+                .build();
+
+        // Setting only a legacy mode flag must NOT re-split the base union.
+        IntensitySpatialConfig afterNative3d = IntensitySpatialConfig.builder(base)
+                .native3dEnabled(false)
+                .build();
+        assertEquals(EnumSet.of(IntensitySpatialConfig.AnalysisKey.NULLMODEL),
+                afterNative3d.getEnabledPerSlice());
+        assertEquals(EnumSet.of(IntensitySpatialConfig.AnalysisKey.PATCHINESS),
+                afterNative3d.getEnabledMip());
+
+        IntensitySpatialConfig afterSource = IntensitySpatialConfig.builder(base)
+                .spatialSourceMode(IntensitySpatialConfig.SpatialSourceMode.MIP)
+                .build();
+        assertEquals(EnumSet.of(IntensitySpatialConfig.AnalysisKey.NULLMODEL),
+                afterSource.getEnabledPerSlice());
+        assertEquals(EnumSet.of(IntensitySpatialConfig.AnalysisKey.PATCHINESS),
+                afterSource.getEnabledMip());
+    }
+
+    @Test
+    public void standaloneLegacyNative3dFalseStillClearsNative3dOnPerModeBase() {
+        IntensitySpatialConfig base = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .enabledMip(EnumSet.of(IntensitySpatialConfig.AnalysisKey.PATCHINESS))
+                .enabled3D(EnumSet.of(IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D))
+                .build();
+
+        IntensitySpatialConfig merged = IntensitySpatialConfig.builder(base)
+                .native3dEnabled(false)
+                .build();
+        assertEquals(EnumSet.of(IntensitySpatialConfig.AnalysisKey.PATCHINESS),
+                merged.getEnabledMip());
+        assertTrue(merged.getEnabled3D().isEmpty());
+    }
 }

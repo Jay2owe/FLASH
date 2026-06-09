@@ -2097,9 +2097,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
         for (IntensitySpatialOutputKey selected : outputPlan.selectedKeys()) {
             if (selected == null || selected.isChannelRoiMaskOutput()) continue;
-            if (needs2d
-                    && (selected.mode() == IntensitySpatialOutputMode.BASE
+            if ((selected.mode() == IntensitySpatialOutputMode.BASE
                     || selected.mode() == IntensitySpatialOutputMode.MIP)
+                    && containsCrossChannel2d(spatialConfig.enabledFor(selected.mode()))
                     && outputPlan.shouldPopulate(selected)) {
                 return true;
             }

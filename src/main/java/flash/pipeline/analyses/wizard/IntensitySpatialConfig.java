@@ -633,7 +633,11 @@ public final class IntensitySpatialConfig implements Serializable {
         private EnumSet<AnalysisKey> legacyAnalyses = EnumSet.noneOf(AnalysisKey.class);
         private SpatialSourceMode legacySourceMode = SpatialSourceMode.FULL_STACK;
         private boolean legacyNative3d = false;
-        private boolean legacyExplicit = false;
+        // Only an explicitly-supplied flat analysis LIST triggers the legacy union
+        // split. A standalone legacy mode FLAG (mip/source/native3d) must NOT
+        // re-split a per-mode base, or independent per-mode selections collapse.
+        private boolean legacyAnalysesExplicit = false;
+        private boolean legacyNative3dExplicit = false;
         private boolean overlaysEnabled = false;
         private double shellWidthUm = DEFAULT_SHELL_WIDTH_UM;
         private int shellCount = DEFAULT_SHELL_COUNT;
@@ -715,21 +719,20 @@ public final class IntensitySpatialConfig implements Serializable {
 
         public Builder enabledAnalyses(Set<AnalysisKey> enabledAnalyses) {
             this.legacyAnalyses = mutableCopy(enabledAnalyses);
-            this.legacyExplicit = true;
+            this.legacyAnalysesExplicit = true;
             return this;
         }
 
         public Builder addAnalysis(AnalysisKey key) {
             if (key != null) {
                 this.legacyAnalyses.add(key);
-                this.legacyExplicit = true;
+                this.legacyAnalysesExplicit = true;
             }
             return this;
         }
 
         public Builder mipEnabled(boolean mipEnabled) {
             this.legacySourceMode = mipEnabled ? SpatialSourceMode.MIP : SpatialSourceMode.FULL_STACK;
-            this.legacyExplicit = true;
             return this;
         }
 
@@ -737,21 +740,29 @@ public final class IntensitySpatialConfig implements Serializable {
             this.legacySourceMode = spatialSourceMode == null
                     ? SpatialSourceMode.FULL_STACK
                     : spatialSourceMode;
-            this.legacyExplicit = true;
             return this;
         }
 
         public Builder native3dEnabled(boolean native3dEnabled) {
             this.legacyNative3d = native3dEnabled;
-            this.legacyExplicit = true;
+            this.legacyNative3dExplicit = true;
             return this;
         }
 
         private ResolvedSelections resolveSelections() {
-            if (legacyExplicit && !perModeExplicit) {
+            // A genuine legacy flat list (old JSON / old CLI / old preset) is split
+            // by the source/native flags into per-mode sets.
+            if (legacyAnalysesExplicit && !perModeExplicit) {
                 return ResolvedSelections.fromLegacy(legacyAnalyses, legacySourceMode, legacyNative3d);
             }
-            return new ResolvedSelections(enabledPerSlice, enabledMip, enabled3D);
+            // Otherwise the per-mode sets (base copy or per-mode setters) are canonical.
+            // A standalone legacy native3dEnabled(false) still clears native 3D so the
+            // old "turn off 3D" flag keeps working on a per-mode base.
+            EnumSet<AnalysisKey> native3d = mutableCopy(enabled3D);
+            if (!perModeExplicit && legacyNative3dExplicit && !legacyNative3d) {
+                native3d.clear();
+            }
+            return new ResolvedSelections(enabledPerSlice, enabledMip, native3d);
         }
 
         public Builder overlaysEnabled(boolean overlaysEnabled) {

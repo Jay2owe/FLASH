@@ -261,17 +261,19 @@ public class CLIConfig {
             parts.add("intensity.spatial.analyses="
                     + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialAnalyses));
         }
+        // Bracketed so an explicitly-empty set serializes as `key=[]` and survives a
+        // round-trip (a bare trailing `key=` would be parsed back as absent, not empty).
         if (intensity.spatialPerSliceAnalyses != null) {
-            parts.add("intensity.spatial.perslice="
-                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialPerSliceAnalyses));
+            parts.add("intensity.spatial.perslice=["
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialPerSliceAnalyses) + "]");
         }
         if (intensity.spatialMipAnalyses != null) {
-            parts.add("intensity.spatial.mip_analyses="
-                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialMipAnalyses));
+            parts.add("intensity.spatial.mip_analyses=["
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatialMipAnalyses) + "]");
         }
         if (intensity.spatial3dAnalyses != null) {
-            parts.add("intensity.spatial.native3d_analyses="
-                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatial3dAnalyses));
+            parts.add("intensity.spatial.native3d_analyses=["
+                    + IntensitySpatialConfig.joinAnalysisTokens(intensity.spatial3dAnalyses) + "]");
         }
         if (intensity.spatialSourceMode != null) {
             parts.add("intensity.spatial.source=" + intensity.spatialSourceMode.token());
