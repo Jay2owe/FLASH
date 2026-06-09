@@ -7,6 +7,7 @@ import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.HelpButton;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
 
@@ -463,9 +464,7 @@ public final class ConfigQcDialog {
         restartButton.setEnabled(currentStage() != null);
         skipImageButton.setEnabled(context.hasImages());
         skipStageButton.setEnabled(currentStage() != null);
-        lockInButton.setText(isLastApplicableStage() && isLastImage()
-                ? "Lock in & Done"
-                : "Lock in & Next");
+        lockInButton.setText(computeLockInLabel());
         lockInButton.setEnabled(currentStage() != null && primaryButtonValid);
         ConfigQcStage activeStage = currentStage();
         previewPair.setDisplayControlsAvailable(
@@ -855,6 +854,41 @@ public final class ConfigQcDialog {
 
     private boolean isLastImage() {
         return !context.hasImages() || context.getCurrentImageIndex() + 1 >= context.getImageCount();
+    }
+
+    /**
+     * Names the screen the lock-in button leads to next. The QC sequence is
+     * stage-outer / image-inner, so locking in first walks the remaining images
+     * of the current stage, then advances to the next internal stage, then to
+     * the next step in the per-channel breadcrumb, and only then finishes.
+     */
+    private String computeLockInLabel() {
+        if (!isLastImage()) {
+            return NextStepLabels.qcPrimaryLabel(true, null);
+        }
+        String nextLabel;
+        int nextInternal = findNextApplicable(stageIndex + 1);
+        if (nextInternal >= 0) {
+            ConfigQcStage next = stages.get(nextInternal);
+            nextLabel = next == null ? null : next.title();
+        } else {
+            nextLabel = nextOuterBreadcrumbLabel();
+        }
+        return NextStepLabels.qcPrimaryLabel(false, nextLabel);
+    }
+
+    /** Label of the next step after this dialog within the per-channel breadcrumb, or null. */
+    private String nextOuterBreadcrumbLabel() {
+        if (stagePathOverride == null || stagePathOverride.isEmpty()
+                || stagePathCurrentIndexOverride < 0) {
+            return null;
+        }
+        int next = stagePathCurrentIndexOverride + 1;
+        if (next >= stagePathOverride.size()) {
+            return null;
+        }
+        String label = stagePathOverride.get(next);
+        return label == null || label.trim().isEmpty() ? null : label;
     }
 
     private String imageProgressHeaderText(String imageName) {
