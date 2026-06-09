@@ -28,6 +28,9 @@ public class CrossMark2DAnalysisTest {
     public void resetDependencyGate() {
         FeatureDependencyGate.configure(new DependencyService(), null);
         FeatureDependencyGate.setUiMode(false);
+        System.clearProperty(SpatialResourceGuards.MAX_MIP_PIXELS_PROPERTY);
+        System.clearProperty(SpatialResourceGuards.MAX_PAIR_PLANE_PIXELS_PROPERTY);
+        System.clearProperty(SpatialResourceGuards.MAX_COLOC_IMAGE_PIXELS_PROPERTY);
     }
 
     @Test
@@ -85,6 +88,23 @@ public class CrossMark2DAnalysisTest {
         assertTrue(Double.isNaN(result.value("DAPI_CostesP_mCherry")));
         assertTrue(Double.isFinite(result.value("DAPI_Pearson_mCherry")));
         assertTrue(Double.isFinite(result.value("DAPI_MandersM1_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_CCFPeakAmp_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_MarkCorrStrength_mCherry")));
+    }
+
+    @Test
+    public void largeColocPlaneSkipsColocCopiesButKeepsDirectSpatialMetrics() throws Exception {
+        installDependencyStatuses(null);
+        System.setProperty(SpatialResourceGuards.MAX_COLOC_IMAGE_PIXELS_PROPERTY, "4");
+        ImagePlus source = gradientImage(3, 3, false);
+        ImagePlus partner = gradientImage(3, 3, false);
+
+        IntensitySpatialResult result = new CrossMark2DAnalysis().measure(context(
+                source, null, null, partner, null, null));
+
+        assertTrue(result.value("DAPI_Pearson_mCherry") > 0.95);
+        assertTrue(Double.isNaN(result.value("DAPI_CostesP_mCherry")));
+        assertTrue(Double.isNaN(result.value("DAPI_MandersM1_mCherry")));
         assertTrue(Double.isFinite(result.value("DAPI_CCFPeakAmp_mCherry")));
         assertTrue(Double.isFinite(result.value("DAPI_MarkCorrStrength_mCherry")));
     }

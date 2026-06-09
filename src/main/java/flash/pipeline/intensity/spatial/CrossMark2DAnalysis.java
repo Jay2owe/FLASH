@@ -74,31 +74,55 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
     @Override
     public IntensitySpatialResult measure(IntensitySpatialPairContext context) {
         LinkedHashMap<String, Double> values = new LinkedHashMap<String, Double>();
-        PairPlane2D plane = PairPlane2D.raw(context);
         boolean sourceBinarized = context.hasSourceBinarizedImage();
         boolean partnerBinarized = context.hasPartnerBinarizedImage();
+        List<String> resultColumns = columns(context.config(), context.sourceChannelName(),
+                context.partnerChannelName(), sourceBinarized, partnerBinarized);
+        PairPlane2D plane;
+        try {
+            plane = PairPlane2D.raw(context);
+        } catch (IllegalArgumentException ex) {
+            context.warn("cross-channel metrics skipped before allocation: " + safeMessage(ex));
+            return IntensitySpatialResult.nanFor(resultColumns);
+        }
         if (plane.count < 3) {
             context.warn("cross-channel metrics have insufficient valid ROI pixels; returning NaN.");
-            return IntensitySpatialResult.nanFor(columns(context.config(), context.sourceChannelName(),
-                    context.partnerChannelName(), sourceBinarized, partnerBinarized));
+            return IntensitySpatialResult.nanFor(resultColumns);
         }
 
         ColocMetrics coloc = ColocMetrics.nan();
         BinarizedColocMetrics binarized = BinarizedColocMetrics.nan();
         boolean colocAvailable = FeatureDependencyGate.isAvailable(DependencyId.COLOC2_RUNTIME);
         if (colocAvailable) {
+            double directPearson = shiftedPearson(plane, 0, 0, sampleStep(plane.count));
             try {
-                coloc = colocMetrics(plane, context, false);
-                if (sourceBinarized && partnerBinarized) {
-                    PairPlane2D binarizedPlane = PairPlane2D.binarized(context);
-                    if (binarizedPlane.count >= 3) {
-                        binarized = binarizedColocMetrics(binarizedPlane, context);
-                    }
+                if (colocImagesAllowed(plane, context, false)) {
+                    coloc = colocMetrics(plane, context, false);
+                } else {
+                    coloc = ColocMetrics.pearsonOnly(directPearson);
                 }
             } catch (Exception ex) {
-                context.warn("Coloc 2 cross-channel metrics failed: " + safeMessage(ex));
+                context.warn("Coloc 2 cross-channel metrics failed: " + safeMessage(ex)
+                        + "; Pearson is computed directly, Costes and Manders are NaN.");
+                coloc = ColocMetrics.pearsonOnly(directPearson);
             } catch (LinkageError err) {
                 context.warn("Coloc 2 cross-channel metrics failed: " + safeMessage(err));
+            }
+            if (sourceBinarized && partnerBinarized) {
+                try {
+                    PairPlane2D binarizedPlane = PairPlane2D.binarized(context);
+                    if (binarizedPlane.count >= 3) {
+                        if (colocImagesAllowed(binarizedPlane, context, true)) {
+                            binarized = binarizedColocMetrics(binarizedPlane, context);
+                        }
+                    }
+                } catch (Exception ex) {
+                    context.warn("Coloc 2 binarized cross-channel metrics failed: "
+                            + safeMessage(ex));
+                } catch (LinkageError err) {
+                    context.warn("Coloc 2 binarized cross-channel metrics failed: "
+                            + safeMessage(err));
+                }
             }
         } else {
             context.warn("Coloc 2 runtime is unavailable; Pearson, Costes, and Manders columns are NaN.");
@@ -224,6 +248,21 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
                         randomizations, false);
         costes.execute(container);
         return finiteOrNan(costes.getCostesPValue());
+    }
+
+    private static boolean colocImagesAllowed(PairPlane2D plane,
+                                              IntensitySpatialPairContext context,
+                                              boolean binarized) {
+        if (SpatialResourceGuards.colocImagesAllowed(plane.pixelCount())) {
+            return true;
+        }
+        String suffix = binarized
+                ? "; binarized CostesP and Manders columns are NaN."
+                : "; Pearson is computed directly, CostesP and Manders columns are NaN.";
+        context.warn("Coloc 2 image conversion skipped for large cross-channel plane ("
+                + plane.pixelCount() + " pixels; limit "
+                + SpatialResourceGuards.maxColocImagePixels() + ")" + suffix);
+        return false;
     }
 
     private static Peak ccfPeak(PairPlane2D plane) {
@@ -389,6 +428,11 @@ public final class CrossMark2DAnalysis implements IntensitySpatialPairAnalysis {
 
         static ColocMetrics nan() {
             return new ColocMetrics(Double.NaN, Double.NaN, Double.NaN, Double.NaN,
+                    Double.NaN, Double.NaN);
+        }
+
+        static ColocMetrics pearsonOnly(double pearson) {
+            return new ColocMetrics(finiteOrNan(pearson), Double.NaN, Double.NaN, Double.NaN,
                     Double.NaN, Double.NaN);
         }
     }

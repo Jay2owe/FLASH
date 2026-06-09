@@ -80,35 +80,45 @@ final class PairPlane2D {
         ImageProcessor sourceMaskProcessor = processorOrNull(sourceMaskImage, sliceIndex);
         ImageProcessor partnerMaskProcessor = processorOrNull(partnerMaskImage, sliceIndex);
         Rectangle bounds = clippedBounds(width, height, roi);
+        if (bounds.width <= 0 || bounds.height <= 0) {
+            return empty(sourceImage, partnerImage, 0, 0);
+        }
+        SpatialResourceGuards.checkPairPlanePixels(bounds.width, bounds.height);
 
-        double[] source = new double[width * height];
+        int planeWidth = bounds.width;
+        int planeHeight = bounds.height;
+        int size = planeWidth * planeHeight;
+        double[] source = new double[size];
         double[] partner = new double[source.length];
         boolean[] sourceMask = new boolean[source.length];
         boolean[] partnerMask = new boolean[source.length];
         boolean[] valid = new boolean[source.length];
         int count = 0;
 
-        for (int y = bounds.y; y < bounds.y + bounds.height; y++) {
-            for (int x = bounds.x; x < bounds.x + bounds.width; x++) {
-                if (roi != null && !roi.contains(x, y)) continue;
-                double s = sourceProcessor.getf(x, y);
-                double p = partnerProcessor.getf(x, y);
+        for (int y = 0; y < planeHeight; y++) {
+            int imageY = bounds.y + y;
+            for (int x = 0; x < planeWidth; x++) {
+                int imageX = bounds.x + x;
+                if (roi != null && !roi.contains(imageX, imageY)) continue;
+                double s = sourceProcessor.getf(imageX, imageY);
+                double p = partnerProcessor.getf(imageX, imageY);
                 if (!isFinite(s) || !isFinite(p)) continue;
-                int index = y * width + x;
+                int index = y * planeWidth + x;
                 source[index] = s;
                 partner[index] = p;
-                sourceMask[index] = maskValue(sourceMaskProcessor, x, y);
-                partnerMask[index] = maskValue(partnerMaskProcessor, x, y);
+                sourceMask[index] = maskValue(sourceMaskProcessor, imageX, imageY);
+                partnerMask[index] = maskValue(partnerMaskProcessor, imageX, imageY);
                 valid[index] = true;
                 count++;
             }
         }
 
-        return new PairPlane2D(width, height, source, partner, sourceMask, partnerMask, valid, count,
+        return new PairPlane2D(planeWidth, planeHeight, source, partner, sourceMask, partnerMask, valid, count,
                 pixelSize(sourceImage, true), pixelSize(sourceImage, false));
     }
 
     ColocImages toColocImages() {
+        SpatialResourceGuards.checkColocImagePixels(source.length);
         float[] sourcePixels = new float[source.length];
         float[] partnerPixels = new float[partner.length];
         float[] maskPixels = new float[valid.length];
@@ -188,6 +198,10 @@ final class PairPlane2D {
         return false;
     }
 
+    int pixelCount() {
+        return source.length;
+    }
+
     double meanSource() {
         if (count == 0) return Double.NaN;
         double sum = 0.0;
@@ -247,12 +261,13 @@ final class PairPlane2D {
     }
 
     private static PairPlane2D empty(ImagePlus sourceImage, ImagePlus partnerImage) {
-        int width = sourceImage == null ? 0 : sourceImage.getWidth();
-        int height = sourceImage == null ? 0 : sourceImage.getHeight();
-        if (partnerImage != null) {
-            width = width == 0 ? partnerImage.getWidth() : Math.min(width, partnerImage.getWidth());
-            height = height == 0 ? partnerImage.getHeight() : Math.min(height, partnerImage.getHeight());
-        }
+        return empty(sourceImage, partnerImage, 0, 0);
+    }
+
+    private static PairPlane2D empty(ImagePlus sourceImage,
+                                     ImagePlus partnerImage,
+                                     int width,
+                                     int height) {
         int size = Math.max(0, width * height);
         return new PairPlane2D(width, height, new double[size], new double[size],
                 new boolean[size], new boolean[size], new boolean[size], 0,

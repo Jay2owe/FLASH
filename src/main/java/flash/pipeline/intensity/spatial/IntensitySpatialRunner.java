@@ -390,6 +390,7 @@ public final class IntensitySpatialRunner {
         if (source == null) return null;
         int width = source.getWidth();
         int height = source.getHeight();
+        SpatialResourceGuards.checkMipPixels(width, height);
         int slices = Math.max(1, source.getStackSize());
         float[] out = new float[width * height];
         ImageProcessor first = source.getStack().getProcessor(1);
