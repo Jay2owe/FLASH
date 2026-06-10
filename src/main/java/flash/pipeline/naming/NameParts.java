@@ -1,6 +1,9 @@
 package flash.pipeline.naming;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -23,6 +26,16 @@ public final class NameParts {
      * authoritative per-item condition lives in the project file.
      */
     public final String condition;
+    /**
+     * Multi-axis condition values (axisId&rarr;value) for the N-condition model.
+     * Empty for legacy single-condition parses. Unmodifiable; insertion order
+     * preserved so it matches the axis schema. The single {@link #condition}
+     * field stays as the composite back-compat view of these values.
+     *
+     * @see ConditionAxis
+     * @see ConditionAssignments
+     */
+    public final Map<String, String> conditions;
     /** {@code true} when the filename matched the expected naming convention. */
     public final boolean strictMatch;
     /** The raw input passed to the parser; used as a deterministic seed for empty-suffix fallback. */
@@ -43,13 +56,58 @@ public final class NameParts {
 
     public NameParts(String experiment, String animal, String hemisphere, String region,
                      String condition, boolean strictMatch, String originalInput) {
+        this(experiment, animal, hemisphere, region, condition, null, strictMatch, originalInput);
+    }
+
+    /**
+     * Multi-axis overload: carries an {@code axisId -> value} map alongside the
+     * legacy single {@link #condition} composite. When {@code condition} is
+     * blank it is derived as the composite of {@code conditions} (axis values
+     * joined with {@code _}, blanks skipped) so existing single-condition
+     * readers keep working unchanged.
+     */
+    public NameParts(String experiment, String animal, String hemisphere, String region,
+                     String condition, Map<String, String> conditions,
+                     boolean strictMatch, String originalInput) {
         this.experiment = experiment;
         this.animal = animal;
         this.hemisphere = hemisphere;
         this.region = region;
-        this.condition = condition == null ? "" : condition;
+        this.conditions = copyConditions(conditions);
+        String composite = condition == null ? "" : condition;
+        if (composite.isEmpty() && !this.conditions.isEmpty()) {
+            composite = compositeOf(this.conditions);
+        }
+        this.condition = composite;
         this.strictMatch = strictMatch;
         this.originalInput = originalInput;
+    }
+
+    /** Defensive, unmodifiable copy keeping insertion order and dropping blank keys/values. */
+    private static Map<String, String> copyConditions(Map<String, String> source) {
+        if (source == null || source.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> copy = new LinkedHashMap<String, String>();
+        for (Map.Entry<String, String> e : source.entrySet()) {
+            if (e.getKey() == null) continue;
+            String key = e.getKey().trim();
+            String value = e.getValue() == null ? "" : e.getValue();
+            if (key.isEmpty()) continue;
+            copy.put(key, value);
+        }
+        return Collections.unmodifiableMap(copy);
+    }
+
+    /** Composite of axis values in map order, joined with {@code _}, skipping blanks. */
+    private static String compositeOf(Map<String, String> conditions) {
+        StringBuilder sb = new StringBuilder();
+        for (String value : conditions.values()) {
+            if (value == null || value.trim().isEmpty()) continue;
+            if (sb.length() > 0) sb.append('_');
+            sb.append(value.trim());
+        }
+        return sb.toString();
     }
 
     /** Whether the hemisphere value is a known orientation tag. */
