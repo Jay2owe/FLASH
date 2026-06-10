@@ -5,6 +5,7 @@ import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.LifIO;
+import flash.pipeline.io.RosterIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ConditionAssignments;
 import flash.pipeline.naming.ConditionAxis;
@@ -324,6 +325,17 @@ public final class ProjectBuilderDialog {
         reviewSummary = new JLabel("");
         reviewSummary.setForeground(FlashTheme.TEXT_MUTED);
 
+        JButton importRoster = new JButton("Import roster…");
+        importRoster.setToolTipText("Merge a colony-roster CSV/TSV by AnimalName (validated first).");
+        importRoster.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { importRosterAction(); }
+        });
+        JButton exportRoster = new JButton("Export roster…");
+        exportRoster.setToolTipText("Write a roster template (AnimalName, Condition_<axis>…) pre-filled with current values.");
+        exportRoster.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { exportRosterAction(); }
+        });
+
         bar.add(addFolder);
         bar.add(addFiles);
         bar.add(openProject);
@@ -331,9 +343,57 @@ public final class ProjectBuilderDialog {
         bar.add(Box.createHorizontalStrut(12));
         bar.add(remove);
         bar.add(Box.createHorizontalStrut(12));
+        bar.add(importRoster);
+        bar.add(exportRoster);
+        bar.add(Box.createHorizontalStrut(12));
         bar.add(reviewNext);
         bar.add(reviewSummary);
         return bar;
+    }
+
+    private void exportRosterAction() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setSelectedFile(new File("roster.csv"));
+        if (chooser.showSaveDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
+        File f = chooser.getSelectedFile();
+        boolean tsv = f.getName().toLowerCase(Locale.ROOT).endsWith(".tsv");
+        String text = RosterIO.export(model.toConditionAssignments(), tsv);
+        try {
+            java.nio.file.Files.write(f.toPath(), text.getBytes("UTF-8"));
+            IJ.log("[FLASH] Roster exported: " + f.getAbsolutePath());
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(dialog, "Could not write roster: " + ex.getMessage(),
+                    "Export roster", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    private void importRosterAction() {
+        JFileChooser chooser = new JFileChooser();
+        if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
+        File f = chooser.getSelectedFile();
+        String text;
+        try {
+            text = new String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8");
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(dialog, "Could not read roster: " + ex.getMessage(),
+                    "Import roster", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        RosterIO.Roster roster = RosterIO.parse(text);
+        RosterIO.Validation v = RosterIO.validate(roster, model.toConditionAssignments());
+        StringBuilder summary = new StringBuilder();
+        summary.append("Roster: ").append(roster.byAnimal.size()).append(" animal(s), ")
+                .append(roster.axes.size()).append(" condition column(s).\n")
+                .append("Unmatched (not in project): ").append(v.unmatched.size()).append('\n')
+                .append("Duplicate rows in roster: ").append(v.duplicates.size()).append('\n')
+                .append("Conflicts with confirmed values: ").append(v.conflicts.size()).append("\n\n")
+                .append("Apply roster values to matching animals? Confirmed cells are preserved.");
+        int choice = JOptionPane.showConfirmDialog(dialog, summary.toString(), "Import roster",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) return;
+        int n = model.importRoster(roster.axes, roster.byAnimal, false);
+        applyColumnPreferences();
+        IJ.log("[FLASH] Roster import updated " + n + " cell(s) across " + roster.byAnimal.size() + " animal(s).");
     }
 
     private JLabel buildHintRow() {

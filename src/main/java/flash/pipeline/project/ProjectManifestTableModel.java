@@ -888,6 +888,73 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     }
 
     /**
+     * Collapse the table into an {@code animal -> axis -> value} model (file +
+     * series rows), for roster export and validation. Uses the condition-axis
+     * schema (or a single {@code Condition} axis for legacy projects).
+     */
+    public flash.pipeline.naming.ConditionAssignments toConditionAssignments() {
+        flash.pipeline.naming.ConditionAssignments ca = new flash.pipeline.naming.ConditionAssignments();
+        if (conditionAxes.isEmpty()) {
+            ca.addAxis(DEFAULT_CONDITION_AXIS);
+        } else {
+            for (ConditionAxis a : conditionAxes) ca.addAxis(a);
+        }
+        String primaryId = ca.axes().isEmpty() ? "condition" : ca.axes().get(0).id;
+        for (Row row : rows) {
+            collectAnimalConditions(ca, primaryId, row.animalId, row.condition, row.conditions);
+            for (SeriesRow s : row.series) {
+                collectAnimalConditions(ca, primaryId, s.animalId, s.condition, s.conditions);
+            }
+        }
+        return ca;
+    }
+
+    private static void collectAnimalConditions(flash.pipeline.naming.ConditionAssignments ca,
+                                                String primaryId, String animal,
+                                                String primaryValue, Map<String, String> extras) {
+        if (animal == null || animal.trim().isEmpty()) return;
+        String a = animal.trim();
+        if (primaryValue != null && !primaryValue.trim().isEmpty()) {
+            ca.put(a, primaryId, primaryValue.trim());
+        }
+        if (extras != null) {
+            for (Map.Entry<String, String> e : extras.entrySet()) {
+                if (e.getValue() != null && !e.getValue().trim().isEmpty()) {
+                    ca.put(a, e.getKey(), e.getValue().trim());
+                }
+            }
+        }
+    }
+
+    /**
+     * Merge roster values (animal -&gt; axisId -&gt; value) into the table by
+     * AnimalName. New axes are added to the schema. User-confirmed cells are
+     * preserved unless {@code overwriteConfirmed} is true. Returns rows changed.
+     */
+    public int importRoster(List<ConditionAxis> rosterAxes,
+                            Map<String, Map<String, String>> byAnimal,
+                            boolean overwriteConfirmed) {
+        if (byAnimal == null) return 0;
+        if (rosterAxes != null) {
+            for (ConditionAxis axis : rosterAxes) addConditionAxis(axis);
+        }
+        int changed = 0;
+        for (int idx = 0; idx < visible.size(); idx++) {
+            String animal = stringValue(getValueAt(idx, COL_ANIMAL)).trim();
+            Map<String, String> values = animal.isEmpty() ? null : byAnimal.get(animal);
+            if (values == null) continue;
+            for (Map.Entry<String, String> e : values.entrySet()) {
+                int col = conditionColumnForAxis(e.getKey());
+                if (col < 0) continue;
+                if (!overwriteConfirmed && isUserSet(idx, col)) continue;
+                setValueAt(e.getValue(), idx, col);
+                changed++;
+            }
+        }
+        return changed;
+    }
+
+    /**
      * Groups of similar values for an axis (case-insensitive Levenshtein distance
      * &le; {@code maxDistance}) — fuzzy "these look alike, merge?" suggestions.
      * Only groups of 2+ values are returned, in first-seen order.
