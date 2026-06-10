@@ -14,6 +14,11 @@ import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.orientation.OrientationBatchController;
 import flash.pipeline.orientation.OrientationImageIdentity;
+import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectFileIO;
+import flash.pipeline.project.ProjectMetadataSeeder;
+import flash.pipeline.project.ProjectRegionEditor;
 import flash.pipeline.orientation.OrientationPresetStore;
 import flash.pipeline.orientation.OrientationTransformState;
 import flash.pipeline.orientation.RoiOrientationManifestService;
@@ -368,21 +373,35 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         }
 
         // Image picker (Dialog 2): one matrix with a checkbox column per region. Returns the
-        // images each region's ROI set is drawn on (zero-based series indices). Shown once for
-        // all regions; runs for new AND append.
+        // images each region's ROI set is drawn on (zero-based series indices) plus any edit to
+        // the per-image Region label. Shown once for all regions; runs for new AND append.
         java.util.LinkedHashMap<String, java.util.LinkedHashSet<Integer>> perRegionSelection;
         {
+            // Seed the picker's Region column from the project's authoritative region where set,
+            // falling back to the filename-parsed region.
+            java.util.Map<Integer, String> currentRegions =
+                    loadProjectRegions(directory, supplier, totalImages);
             List<RegionImageSelectionDialog.Row> pickerRows =
-                    RegionImageSelectionDialog.buildRows(supplier, totalImages);
+                    RegionImageSelectionDialog.buildRows(supplier, totalImages, currentRegions);
             List<String> regionNames = new ArrayList<String>();
             for (RegionDrawSpec s : regionSpecs) regionNames.add(s.regionName);
             boolean autoSelectOnly = headless || GraphicsEnvironment.isHeadless();
-            perRegionSelection =
+            RegionImageSelectionDialog.Result picked =
                     RegionImageSelectionDialog.choose(pickerRows, regionNames, autoSelectOnly);
-            if (perRegionSelection == null) {
+            if (picked == null) {
                 IJ.log("[FLASH] Draw ROIs cancelled at image selection.");
                 return;
             }
+            perRegionSelection = picked.perRegion;
+
+            // Persist any corrected region labels back to project.json. The baseline is exactly
+            // what each row displayed (override-or-parsed), so only genuine edits are written.
+            java.util.Map<Integer, String> shownByIndex =
+                    new java.util.LinkedHashMap<Integer, String>();
+            for (RegionImageSelectionDialog.Row row : pickerRows) {
+                shownByIndex.put(Integer.valueOf(row.seriesIndex), row.parsedRegion);
+            }
+            persistRegionEdits(directory, supplier, picked.editedRegions, shownByIndex);
         }
 
         // Draw each region in turn (region-by-region): each opens its picked images, draws with
@@ -792,6 +811,83 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
         closeAllNoPrompt();
         return DrawRegionResult.CONTINUE;
+    }
+
+    /**
+     * Read the authoritative per-series region from {@code project.json} (keyed by zero-based
+     * series index) so the picker shows the project's region where one is set rather than the
+     * filename-parsed value. Empty map when there is no project file or identity is unresolved.
+     */
+    private java.util.Map<Integer, String> loadProjectRegions(
+            String directory, DeferredImageSupplier supplier, int totalImages) {
+        java.util.Map<Integer, String> out = new java.util.LinkedHashMap<Integer, String>();
+        File settingsDir = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
+        ProjectFile project = ProjectFileIO.read(settingsDir);
+        if (project == null) return out;
+        for (int i = 0; i < totalImages; i++) {
+            try {
+                OrientationImageIdentity id = OrientationImageIdentity.fromProjectSeries(
+                        directory, i, supplier.getSeriesName(i));
+                ProjectRegionEditor.Target target =
+                        ProjectRegionEditor.locate(project, id.sourceFile, id.seriesIndex);
+                if (target != null && target.region() != null && !target.region().trim().isEmpty()) {
+                    out.put(Integer.valueOf(i), target.region().trim());
+                }
+            } catch (Exception ignore) {
+                // identity unresolved (e.g. multi-container) -> fall back to parsed region
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Write region labels the user changed in the picker back to {@code project.json}
+     * (SeriesItem.region for expanded containers, Item.region otherwise) and re-seed the
+     * orientation manifest so downstream analyses honour the correction. No-op when there is no
+     * project file or nothing changed. {@code shownByIndex} is the baseline each row displayed,
+     * so only genuine edits are written (never the parsed fallback as if it were an edit).
+     */
+    private void persistRegionEdits(String directory, DeferredImageSupplier supplier,
+                                    java.util.Map<Integer, String> editedByIndex,
+                                    java.util.Map<Integer, String> shownByIndex) {
+        if (editedByIndex == null || editedByIndex.isEmpty()) return;
+        File settingsDir = FlashProjectLayout.forDirectory(directory).configurationWriteDir();
+        if (!ProjectFileIO.exists(settingsDir)) return;
+        ProjectFile project = ProjectFileIO.read(settingsDir);
+        if (project == null) return;
+
+        boolean changed = false;
+        for (java.util.Map.Entry<Integer, String> e : editedByIndex.entrySet()) {
+            if (e.getKey() == null) continue;
+            int i = e.getKey().intValue();
+            String edited = e.getValue() == null ? "" : e.getValue().trim();
+            String shown = shownByIndex == null ? null : shownByIndex.get(Integer.valueOf(i));
+            if (ProjectRegionEditor.sameRegion(edited, shown)) continue; // unchanged
+            try {
+                OrientationImageIdentity id = OrientationImageIdentity.fromProjectSeries(
+                        directory, i, supplier.getSeriesName(i));
+                ProjectRegionEditor.Target target =
+                        ProjectRegionEditor.locate(project, id.sourceFile, id.seriesIndex);
+                if (target == null) {
+                    IJ.log("[FLASH] Region edit for image " + (i + 1)
+                            + " could not be matched to the project file; not persisted.");
+                    continue;
+                }
+                target.setRegion(edited);
+                changed = true;
+            } catch (Exception ex) {
+                IJ.log("[FLASH] Region write-back skipped for image " + (i + 1)
+                        + ": " + ex.getMessage());
+            }
+        }
+        if (!changed) return;
+        try {
+            ProjectFileIO.write(settingsDir, project);
+            ProjectMetadataSeeder.seedOrientationManifest(new File(directory), project);
+            IJ.log("[FLASH] Saved corrected region label(s) to project.json.");
+        } catch (Exception ex) {
+            IJ.log("[FLASH] Could not save region edits to project.json: " + ex.getMessage());
+        }
     }
 
     BinConfig loadBinConfig(String directory) {

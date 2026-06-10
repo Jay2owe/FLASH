@@ -102,7 +102,7 @@ public final class ProjectMetadataSeeder {
         return rows;
     }
 
-    private static List<ProjectFile.SeriesItem> includedSeriesInProjectOrder(ProjectFile.Item item) {
+    static List<ProjectFile.SeriesItem> includedSeriesInProjectOrder(ProjectFile.Item item) {
         List<ProjectFile.SeriesItem> ordered = new ArrayList<ProjectFile.SeriesItem>();
         if (item == null || item.seriesMeta == null || item.seriesMeta.isEmpty()) {
             return ordered;
