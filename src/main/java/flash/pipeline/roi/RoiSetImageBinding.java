@@ -86,6 +86,21 @@ public final class RoiSetImageBinding {
     }
 
     /**
+     * True when {@code candidate} is a generated binding token ({@code 'k'} + lowercase hex).
+     * Used to reject legacy / imported ROI names (e.g. {@code "SCN"}) that are not identity
+     * tokens, so they are not mistaken for image-bound ROIs.
+     */
+    public static boolean isToken(String candidate) {
+        if (candidate == null || candidate.length() < 2 || candidate.charAt(0) != 'k') return false;
+        for (int i = 1; i < candidate.length(); i++) {
+            char c = candidate.charAt(i);
+            boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+            if (!hex) return false;
+        }
+        return true;
+    }
+
+    /**
      * The binding token stored in an ROI name, stripping the cropped suffix if present.
      * Returns {@code null} for a {@code null} name.
      */
@@ -126,6 +141,10 @@ public final class RoiSetImageBinding {
             String token = tokenOf(name);
             if (token == null || token.isEmpty()) {
                 IJ.log("[FLASH] ROI with no binding name skipped: " + name);
+                continue;
+            }
+            if (!isToken(token)) {
+                IJ.log("[FLASH] ROI name is not an identity token, skipped (legacy/import?): " + name);
                 continue;
             }
             RoiPair pair = byToken.get(token);

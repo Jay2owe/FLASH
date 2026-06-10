@@ -296,11 +296,6 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         JTextField newNameField = pd.addStringField("New ROI Set Name", "SCN", 15);
         RegionTextFieldSupport.Handle newNameRegionSupport =
                 RegionTextFieldSupport.install(newNameField, null);
-        JTextField additionalRegionsField = pd.addStringField(
-                "Additional regions (comma-separated, optional)", "", 15);
-        pd.addHelpText("Draw more than one region this session. Each region is saved to its own "
-                + "\"<name> ROIs.zip\" covering only the images you pick for it. Leave blank for a "
-                + "single region.");
         final int totalImagesForLabel = totalImages;
 
         if (hasExisting && createNewToggle != null && appendChoice != null) {
@@ -310,7 +305,6 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 boolean createNewSelected = finalCreateNewToggle.isSelected();
                 setFieldEnabled(finalAppendChoice, !createNewSelected);
                 setFieldEnabled(newNameField, createNewSelected);
-                setFieldEnabled(additionalRegionsField, createNewSelected);
                 pd.setPrimaryButtonText(NextStepLabels.afterRoiSetup(
                         createNewSelected,
                         existingRoiCountForSelection(finalAppendChoice, roiNames, roiFiles),
@@ -344,7 +338,6 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         boolean drawOnSubset = showZSliceSourceChoice
                 && CONFIGURED_SUBSET_SOURCE.equals(pd.getNextChoice());
         String ignoredRawNewName = pd.getNextString();
-        String additionalRegionsRaw = pd.getNextString();
         String newName = newNameRegionSupport.canonicalText().trim();
         String chosen = createNew ? newName : existingSelection;
         if (chosen == null || chosen.trim().isEmpty()) {
@@ -352,26 +345,16 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             return;
         }
 
-        // Region list for this session. Stage 04 draws every region image-subset; until
-        // then the loop below draws the primary region only (regionSpecs.get(0)).
+        // One region per Draw ROIs pass. The RegionDrawSpec list is kept so multi-region in a
+        // single pass can be added later without reworking the loop.
         List<RegionDrawSpec> regionSpecs = new ArrayList<RegionDrawSpec>();
-        if (createNew) {
-            regionSpecs.add(new RegionDrawSpec(newName, roiChannel, imageProcessing));
-            for (String extra : additionalRegionsRaw.split(",")) {
-                String extraName = extra == null ? "" : extra.trim();
-                if (!extraName.isEmpty()) {
-                    regionSpecs.add(new RegionDrawSpec(extraName, roiChannel, imageProcessing));
-                }
-            }
-        } else {
-            regionSpecs.add(new RegionDrawSpec(chosen, roiChannel, imageProcessing));
-        }
+        regionSpecs.add(new RegionDrawSpec(chosen, roiChannel, imageProcessing));
 
-        // Region-scoped image selection (stage 04): which images this region's ROIs cover.
-        // The draw loop below only draws images in selectedSeries (zero-based indices), and
-        // names each ROI by its durable image-identity token so the zip can cover a subset.
+        // Region-scoped image selection: which images this region's ROIs cover. The draw loop
+        // draws only images in selectedSeries (zero-based) and names each ROI by its durable
+        // image-identity token, so the zip can cover any subset. Runs for new AND append.
         java.util.LinkedHashSet<Integer> selectedSeries = new java.util.LinkedHashSet<Integer>();
-        if (createNew) {
+        {
             List<RegionImageSelectionDialog.Row> pickerRows =
                     RegionImageSelectionDialog.buildRows(supplier, totalImages);
             List<String> regionNames = new ArrayList<String>();
@@ -383,10 +366,6 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 IJ.log("[FLASH] Draw ROIs cancelled at image selection.");
                 return;
             }
-            if (regionSpecs.size() > 1) {
-                IJ.log("[FLASH] Multiple regions entered; this build draws the primary region \""
-                        + chosen + "\" on its selected images. Re-run Draw ROIs for each other region.");
-            }
             java.util.LinkedHashSet<Integer> sel = perRegionSelection.get(chosen);
             if (sel != null) selectedSeries.addAll(sel);
             if (selectedSeries.isEmpty()) {
@@ -394,9 +373,6 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                         "No images selected for region \"" + chosen + "\".");
                 return;
             }
-        } else {
-            // Append mode keeps the existing full-range behaviour (draw all remaining images).
-            for (int s = 0; s < totalImages; s++) selectedSeries.add(Integer.valueOf(s));
         }
 
         File roiZip = new File(roiDir, chosen + " ROIs.zip");
@@ -413,6 +389,14 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         rm.reset();
         if (!createNew && sourceRoiZip.exists()) {
             rm.runCommand("Open", sourceRoiZip.getAbsolutePath());
+        }
+
+        // Images already covered by the existing region zip (append): skip them by token so we
+        // neither redraw covered images nor duplicate/skip by position.
+        java.util.Set<String> coveredTokens = new java.util.HashSet<String>();
+        if (!createNew) {
+            coveredTokens.addAll(RoiSetImageBinding.indexByToken(
+                    java.util.Arrays.asList(rm.getRoisAsArray())).keySet());
         }
 
         ResultsTable roiProps = new ResultsTable();
@@ -445,18 +429,32 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         });
         ConcurrentHashMap<Integer, Future<PreparedImage>> prepCache =
                 new ConcurrentHashMap<Integer, Future<PreparedImage>>();
-        for (int k = range.firstSeriesIndexInclusive;
-             k < Math.min(range.firstSeriesIndexInclusive + lookahead, totalImages); k++) {
+        for (int k = 0; k < Math.min(lookahead, totalImages); k++) {
             final int idx = k;
             prepCache.put(k, prepPool.submit(() ->
                     prepareImage(directory, supplier, idx, roiChannel, imageProcessing,
                             finalDrawOnSubset, finalRoiBinCfg)));
         }
 
-        for (int i = range.firstSeriesIndexInclusive; i < totalImages; i++) {
+        for (int i = 0; i < totalImages; i++) {
             int processingIndex = range.processingIndexFor(i);
             if (!selectedSeries.contains(Integer.valueOf(i))) {
                 continue; // not selected for this region
+            }
+            if (!createNew && !coveredTokens.isEmpty()) {
+                String covTok = null;
+                try {
+                    String ik = OrientationImageIdentity.fromProjectSeries(
+                            directory, i, supplier.getSeriesName(i)).imageKey;
+                    if (ik != null && !ik.trim().isEmpty()) covTok = RoiSetImageBinding.token(ik);
+                } catch (Exception ignore) {
+                    // identity unresolved; the draw-time identity check will handle it
+                }
+                if (covTok != null && coveredTokens.contains(covTok)) {
+                    IJ.log("[FLASH] Image " + (i + 1) + " already in region \"" + chosen
+                            + "\"; skipping (append).");
+                    continue;
+                }
             }
             IJ.log("Loading image " + (i + 1) + "/" + totalImages + "...");
             PreparedImage prep;
@@ -591,7 +589,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             int count = rm.getCount();
             String imageKey;
             try {
-                imageKey = OrientationImageIdentity.fromProjectSeries(directory, i, imgTitle).imageKey;
+                imageKey = OrientationImageIdentity.fromProjectSeries(
+                        directory, i, supplier.getSeriesName(i)).imageKey;
             } catch (Exception identityEx) {
                 imageKey = "";
                 IJ.log("[FLASH] Could not resolve image identity for " + imgTitle + ": "
@@ -623,7 +622,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             String regionLabel = (parts.hemisphere.isEmpty() && parts.region.isEmpty())
                     ? "" : parts.hemisphere + parts.region;
             roiProps.setValue("Region", row, regionLabel);
-            roiProps.setValue(chosen, row, startRoiIndex + processingIndex);
+            roiProps.setValue(chosen, row, i + 1);
             ij.measure.Calibration cal = imp.getCalibration();
             boolean hasCalibration = cal != null
                     && !"pixel".equalsIgnoreCase(cal.getUnit())

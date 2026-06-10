@@ -55,6 +55,7 @@ import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.orientation.OrientationImageIdentity;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.roi.RoiSetImageBinding;
+import flash.pipeline.roi.RoiSetValidator;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
@@ -1004,14 +1005,20 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             IJ.log("Validating ROI sets (identity-based, subset coverage allowed)...");
             for (int rSet = 0; rSet < roiZips.size(); rSet++) {
                 if (!roiZipSelected[rSet] || preloadedRoiSets[rSet] == null) continue;
-                int pairs = RoiSetImageBinding.indexByToken(
-                        java.util.Arrays.asList(preloadedRoiSets[rSet])).size();
+                java.util.List<Roi> roiList = java.util.Arrays.asList(preloadedRoiSets[rSet]);
+                try {
+                    RoiSetValidator.validateStructural(roiList);
+                } catch (Exception ve) {
+                    IJ.log("  WARNING: ROI set '" + roiZipNames[rSet]
+                            + "' failed structural validation (" + ve.getMessage()
+                            + "); deselecting it. Redraw it with Draw ROIs.");
+                    recordWarn("ROI set '" + roiZipNames[rSet] + "' invalid: " + ve.getMessage());
+                    roiZipSelected[rSet] = false;
+                    continue;
+                }
+                int pairs = RoiSetImageBinding.indexByToken(roiList).size();
                 IJ.log("  ROI set '" + roiZipNames[rSet] + "': " + preloadedRoiSets[rSet].length
                         + " ROIs covering " + pairs + " image(s).");
-                if (pairs == 0) {
-                    IJ.log("  WARNING: ROI set '" + roiZipNames[rSet]
-                            + "' has no recognisable image-bound ROIs.");
-                }
             }
             IJ.log("  ROI sets validated.");
         }
