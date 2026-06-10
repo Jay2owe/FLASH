@@ -28,6 +28,7 @@ import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceMode;
@@ -35,19 +36,41 @@ import flash.pipeline.zslice.ZSliceOps;
 
 import ij.IJ;
 import ij.ImagePlus;
+import ij.WindowManager;
+import ij.gui.ImageWindow;
 import ij.gui.Roi;
-import ij.gui.Toolbar;
-import ij.gui.WaitForUserDialog;
 import ij.plugin.ZProjector;
 import ij.plugin.frame.RoiManager;
 
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JDialog;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
+import javax.swing.WindowConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import java.awt.Dialog;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Frame;
+import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsEnvironment;
+import java.awt.Insets;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.SecondaryLoop;
+import java.awt.Toolkit;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -283,6 +306,18 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
                 @Override public void changedUpdate(DocumentEvent e) { selectMatching.actionPerformed(null); }
             });
         }
+
+        final Runnable syncPrimaryLabel = new Runnable() {
+            @Override public void run() {
+                boolean drawingNewSet = !hasExisting
+                        || (drawNewToggle != null && drawNewToggle.isSelected());
+                pd.setPrimaryButtonText(NextStepLabels.afterLineSetSelection(drawingNewSet));
+            }
+        };
+        if (drawNewToggle != null) {
+            drawNewToggle.addChangeListener(syncPrimaryLabel);
+        }
+        syncPrimaryLabel.run();
 
         LoadFromRunButton.install(pd, "LineDistanceAnalysis", new File(directory),
                 new LoadedRunParameterApplier() {
@@ -671,15 +706,17 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
             // Set polyline tool (allows multi-segment lines; distance code already handles them)
             IJ.setTool("polyline");
 
-            // Wait for user to draw line
-            WaitForUserDialog wfud = new WaitForUserDialog(
-                    "Draw Polyline",
-                    "Image " + (i + 1) + "/" + totalImages + "\n"
-                    + "Draw a polyline on the image for '" + safeLineName + "'.\n"
-                    + "(Click to add vertices, double-click to finish)\n"
-                    + "Image: " + imgTitle + "\n\n"
-                    + "Click OK when done.");
-            wfud.show();
+            if (!showLineDrawingPrompt(maxProj, i, totalImages, safeLineName, imgTitle)) {
+                String message = "Line drawing cancelled at image " + (i + 1) + ".";
+                IJ.log("  " + message);
+                recordWarn(message);
+                maxProj.changes = false;
+                maxProj.close();
+                imp.changes = false;
+                imp.close();
+                rm.close();
+                return false;
+            }
 
             Roi roi = maxProj.getRoi();
             if (roi == null) {
@@ -719,11 +756,226 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
         return true;
     }
 
+    private boolean showLineDrawingPrompt(ImagePlus image,
+                                          int imageIndexZeroBased,
+                                          int totalImages,
+                                          String lineName,
+                                          String imageTitle) {
+        if (GraphicsEnvironment.isHeadless()) {
+            return false;
+        }
+        LineDrawingPrompt prompt = new LineDrawingPrompt(
+                NextStepLabels.lineDrawingPrimaryLabel(imageIndexZeroBased, totalImages),
+                imageIndexZeroBased,
+                totalImages,
+                lineName,
+                imageTitle);
+        return prompt.showNearAndWait(image);
+    }
+
     private static void logOrientationResolution(ResolvedImageMetadata metadata) {
         IJ.log("  Orientation source: " + metadata.sourceLabel());
         IJ.log(metadata.hasTransform()
                 ? "  Orientation transform applied."
                 : "  Orientation transform skipped.");
+    }
+
+    private static final class LineDrawingPrompt {
+        private final JDialog dialog;
+        private final Object resultLock = new Object();
+        private Boolean confirmed;
+        private SecondaryLoop waitLoop;
+
+        LineDrawingPrompt(String primaryButtonText,
+                          int imageIndexZeroBased,
+                          int totalImages,
+                          String lineName,
+                          String imageTitle) {
+            Window owner = WindowManager.getFrontWindow();
+            this.dialog = owner == null
+                    ? new JDialog((Frame) null, "Draw Polyline", false)
+                    : new JDialog(owner, "Draw Polyline", Dialog.ModalityType.MODELESS);
+            this.dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+            this.dialog.addWindowListener(new WindowAdapter() {
+                @Override public void windowClosing(WindowEvent e) {
+                    finish(false);
+                }
+            });
+
+            String safePrimary = primaryButtonText == null || primaryButtonText.trim().isEmpty()
+                    ? NextStepLabels.SAVE_LINE_SET
+                    : primaryButtonText.trim();
+            JPanel body = new JPanel();
+            body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+            body.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+
+            JLabel instructions = new JLabel(instructionHtml(
+                    imageIndexZeroBased, totalImages, lineName, imageTitle, safePrimary));
+            instructions.setAlignmentX(JLabel.LEFT_ALIGNMENT);
+            body.add(instructions);
+            body.add(Box.createVerticalStrut(10));
+
+            JButton primaryButton = new JButton(safePrimary);
+            primaryButton.setFocusPainted(false);
+            primaryButton.addActionListener(e -> finish(true));
+
+            JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+            buttonRow.setAlignmentX(JPanel.LEFT_ALIGNMENT);
+            buttonRow.add(primaryButton);
+            body.add(buttonRow);
+
+            this.dialog.getContentPane().add(body);
+            this.dialog.getRootPane().setDefaultButton(primaryButton);
+        }
+
+        boolean showNearAndWait(ImagePlus image) {
+            showNear(image);
+            waitForResult();
+            synchronized (resultLock) {
+                return Boolean.TRUE.equals(confirmed);
+            }
+        }
+
+        private void showNear(ImagePlus image) {
+            dialog.pack();
+            Dimension packed = dialog.getSize();
+            Dimension size = new Dimension(Math.max(380, packed.width), packed.height);
+            dialog.setMinimumSize(size);
+            dialog.setSize(size);
+
+            ImageWindow window = image == null ? null : image.getWindow();
+            if (window != null) {
+                Rectangle imageBounds = window.getBounds();
+                Rectangle screenBounds = usableScreenBounds(window.getGraphicsConfiguration());
+                dialog.setLocation(dialogLocationNearImage(imageBounds, size, screenBounds));
+            } else if (dialog.getOwner() != null) {
+                dialog.setLocationRelativeTo(dialog.getOwner());
+            } else {
+                dialog.setLocationByPlatform(true);
+            }
+            dialog.setVisible(true);
+            dialog.toFront();
+        }
+
+        private void waitForResult() {
+            synchronized (resultLock) {
+                if (confirmed != null) return;
+            }
+
+            if (SwingUtilities.isEventDispatchThread()) {
+                SecondaryLoop loop =
+                        Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+                synchronized (resultLock) {
+                    if (confirmed != null) return;
+                    waitLoop = loop;
+                }
+                loop.enter();
+                return;
+            }
+
+            synchronized (resultLock) {
+                while (confirmed == null) {
+                    try {
+                        resultLock.wait();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        finish(false);
+                        return;
+                    }
+                }
+            }
+        }
+
+        private void finish(boolean nextConfirmed) {
+            SecondaryLoop loopToExit;
+            synchronized (resultLock) {
+                if (confirmed != null) return;
+                confirmed = Boolean.valueOf(nextConfirmed);
+                loopToExit = waitLoop;
+                resultLock.notifyAll();
+            }
+            disposeDialog();
+            if (loopToExit != null) {
+                loopToExit.exit();
+            }
+        }
+
+        private void disposeDialog() {
+            if (SwingUtilities.isEventDispatchThread()) {
+                dialog.dispose();
+            } else {
+                SwingUtilities.invokeLater(new Runnable() {
+                    @Override public void run() {
+                        dialog.dispose();
+                    }
+                });
+            }
+        }
+
+        private static String instructionHtml(int imageIndexZeroBased,
+                                              int totalImages,
+                                              String lineName,
+                                              String imageTitle,
+                                              String primaryButtonText) {
+            StringBuilder html = new StringBuilder("<html><body style='width:320px'>");
+            html.append("<b>Image ")
+                    .append(imageIndexZeroBased + 1)
+                    .append("/")
+                    .append(Math.max(totalImages, 1))
+                    .append("</b><br>");
+            html.append("Draw a polyline for <b>")
+                    .append(htmlEscape(lineName))
+                    .append("</b>.");
+            if (imageTitle != null && !imageTitle.trim().isEmpty()) {
+                html.append("<br>Image: ")
+                        .append(htmlEscape(imageTitle.trim()));
+            }
+            html.append("<br><br>Click to add vertices and double-click to finish, then click <b>")
+                    .append(htmlEscape(primaryButtonText))
+                    .append("</b>.");
+            html.append("</body></html>");
+            return html.toString();
+        }
+
+        private static Point dialogLocationNearImage(Rectangle imageBounds,
+                                                     Dimension dialogSize,
+                                                     Rectangle screenBounds) {
+            int gap = 12;
+            int x = imageBounds.x + imageBounds.width + gap;
+            if (x + dialogSize.width > screenBounds.x + screenBounds.width) {
+                x = imageBounds.x - dialogSize.width - gap;
+            }
+            int y = imageBounds.y;
+            x = Math.max(screenBounds.x, Math.min(x,
+                    screenBounds.x + screenBounds.width - dialogSize.width));
+            y = Math.max(screenBounds.y, Math.min(y,
+                    screenBounds.y + screenBounds.height - dialogSize.height));
+            return new Point(x, y);
+        }
+
+        private static Rectangle usableScreenBounds(GraphicsConfiguration gc) {
+            Rectangle bounds = gc == null
+                    ? new Rectangle(Toolkit.getDefaultToolkit().getScreenSize())
+                    : gc.getBounds();
+            Insets insets = new Insets(0, 0, 0, 0);
+            if (gc != null) {
+                insets = Toolkit.getDefaultToolkit().getScreenInsets(gc);
+            }
+            return new Rectangle(
+                    bounds.x + insets.left,
+                    bounds.y + insets.top,
+                    bounds.width - insets.left - insets.right,
+                    bounds.height - insets.top - insets.bottom);
+        }
+
+        private static String htmlEscape(String value) {
+            if (value == null) return "";
+            return value.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace("\"", "&quot;")
+                    .replace("'", "&#39;");
+        }
     }
 
     // ================================================================
