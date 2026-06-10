@@ -426,6 +426,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         ConcurrentHashMap<Integer, Future<PreparedImage>> prepCache =
                 new ConcurrentHashMap<Integer, Future<PreparedImage>>();
         for (int k = 0; k < Math.min(lookahead, totalImages); k++) {
+            if (!selectedSeries.contains(Integer.valueOf(k))) continue;
             final int idx = k;
             prepCache.put(k, prepPool.submit(() ->
                     prepareImage(directory, supplier, idx, roiChannel, imageProcessing,
@@ -447,6 +448,10 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                     // identity unresolved; the draw-time identity check will handle it
                 }
                 if (covTok != null && coveredTokens.contains(covTok)) {
+                    Future<PreparedImage> coveredFuture = prepCache.remove(i);
+                    if (coveredFuture != null) {
+                        try { closePreparedImages(coveredFuture.get()); } catch (Exception ignore) { }
+                    }
                     IJ.log("[FLASH] Image " + (i + 1) + " already in region \"" + chosen
                             + "\"; skipping (append).");
                     continue;
@@ -475,9 +480,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             orientationController.bindCurrent(currentImageFor(prep), i);
             orientationController.applyActiveRuleOnOpen();
 
-            // Queue next images for preparation
+            // Queue next selected images for preparation
             for (int k = i + 1; k < Math.min(i + 1 + lookahead, totalImages); k++) {
-                if (!prepCache.containsKey(k)) {
+                if (selectedSeries.contains(Integer.valueOf(k)) && !prepCache.containsKey(k)) {
                     final int idx = k;
                     prepCache.put(k, prepPool.submit(() ->
                             prepareImage(directory, supplier, idx, roiChannel, imageProcessing,
@@ -901,8 +906,20 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                         }
                     }
 
+                    String importImageKey;
+                    try {
+                        importImageKey = OrientationImageIdentity.fromProjectSeries(
+                                directory, i, supplier.getSeriesName(i)).imageKey;
+                    } catch (Exception idEx) {
+                        importImageKey = "";
+                    }
+                    if (importImageKey == null || importImageKey.trim().isEmpty()) {
+                        IJ.log("[FLASH] Import: no durable identity for image " + (i + 1)
+                                + "; skipping (cannot bind ROI to image).");
+                        continue;
+                    }
                     addImportedFlashRoiPair(rm, roiProps, options.roiSetName,
-                            prep, imported, i, imageOutputDir);
+                            prep, imported, i, imageOutputDir, importImageKey);
                     saveOrientationDecision(orientationManifestService, prep,
                             "Saved during ROI zip import");
                 } finally {
@@ -915,7 +932,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             roiProps.save(roiPropsOut.getAbsolutePath());
             recordOutput(roiPropsOut, "csv");
 
-            if (!RoiSetValidator.validateStrictWithDialog(rm, 0, totalImages, null)) {
+            if (!RoiSetValidator.validateStructuralWithDialog(rm, null)) {
                 return false;
             }
 
@@ -1098,18 +1115,18 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                                          PreparedImage prep,
                                          Roi imported,
                                          int imageIndex,
-                                         File imageOutputDir) {
+                                         File imageOutputDir,
+                                         String imageKey) {
         if (rm == null) throw new IllegalStateException("ROI Manager is not available.");
         if (prep == null || prep.maxProjection == null) {
             throw new IllegalStateException("Prepared ROI image is not available.");
         }
 
         NameParts parts = prep.parts;
-        String animal = parts == null ? "" : parts.animal;
-        String hemisphere = parts == null ? "" : parts.hemisphere;
-        String region = parts == null ? "" : parts.region;
-        String base = RoiNaming.baseName(animal, hemisphere, region);
-        String croppedName = RoiNaming.croppedName(animal, hemisphere, region);
+        // Bind imported ROIs to the image by durable identity token (region-scoped format),
+        // so imported sets are consumable by the token-based analyses.
+        String base = RoiSetImageBinding.drawnRoiName(imageKey);
+        String croppedName = RoiSetImageBinding.croppedRoiName(imageKey);
 
         Roi uncropped = duplicateRoi(imported);
         uncropped.setName(base);
