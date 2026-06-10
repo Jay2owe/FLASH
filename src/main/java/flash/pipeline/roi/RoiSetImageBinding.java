@@ -91,7 +91,8 @@ public final class RoiSetImageBinding {
      * tokens, so they are not mistaken for image-bound ROIs.
      */
     public static boolean isToken(String candidate) {
-        if (candidate == null || candidate.length() < 2 || candidate.charAt(0) != 'k') return false;
+        if (candidate == null || candidate.length() != 1 + TOKEN_HEX_LENGTH
+                || candidate.charAt(0) != 'k') return false;
         for (int i = 1; i < candidate.length(); i++) {
             char c = candidate.charAt(i);
             boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');

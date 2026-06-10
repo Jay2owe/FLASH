@@ -1021,6 +1021,41 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                         + " ROIs covering " + pairs + " image(s).");
             }
             IJ.log("  ROI sets validated.");
+
+            boolean anySelected = false;
+            for (int rSet = 0; rSet < roiZips.size(); rSet++) {
+                if (roiZipSelected[rSet]) { anySelected = true; break; }
+            }
+            if (!anySelected) {
+                String message = "No valid ROI sets remain after validation; nothing to analyse.";
+                IJ.log("ERROR: " + message);
+                if (canShowGuiDialog(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
+                    IJ.error("Intensity Analysis", message);
+                }
+                recordWarn(message);
+                return;
+            }
+            // Warn when a selected zip overlaps none of the current images (likely an identity
+            // mismatch): otherwise it would produce no measurements with no explanation.
+            java.util.Set<String> currentTokens = new java.util.HashSet<String>();
+            for (String tk : imageBindTokens) {
+                if (tk != null) currentTokens.add(tk);
+            }
+            for (int rSet = 0; rSet < roiZips.size(); rSet++) {
+                if (!roiZipSelected[rSet] || preloadedRoiSets[rSet] == null) continue;
+                boolean overlaps = false;
+                for (String tk : RoiSetImageBinding.indexByToken(
+                        java.util.Arrays.asList(preloadedRoiSets[rSet])).keySet()) {
+                    if (currentTokens.contains(tk)) { overlaps = true; break; }
+                }
+                if (!overlaps) {
+                    IJ.log("  WARNING: ROI set '" + roiZipNames[rSet]
+                            + "' covers none of the current images (no token overlap); it will "
+                            + "produce no measurements.");
+                    recordWarn("ROI set '" + roiZipNames[rSet]
+                            + "' has no token overlap with the current images.");
+                }
+            }
         }
 
         // Accumulate output tables (one per channel)

@@ -407,13 +407,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 new OrientationBatchController(presetStore, totalImages);
 
         RoiSeriesRange range = RoiSeriesRange.forMode(createNew, rm.getCount(), totalImages);
-        if (range.imageCountToProcess == 0) {
+        if (createNew && totalImages == 0) {
             rm.close();
-            String message = createNew
-                    ? "No images were found to draw ROIs."
-                    : "Selected ROI set already contains ROI pairs for all "
-                    + totalImages + " images. No new images to append.";
-            showOrLog("Draw ROIs and Orientate Images", message);
+            showOrLog("Draw ROIs and Orientate Images", "No images were found to draw ROIs.");
             return;
         }
         int startRoiIndex = range.firstSeriesIndexInclusive + 1;
