@@ -26,6 +26,8 @@ import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.roi.RegionDrawSpec;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.roi.RoiNaming;
+import flash.pipeline.roi.RegionImageSelectionDialog;
+import flash.pipeline.roi.RoiSetImageBinding;
 import flash.pipeline.roi.RoiSetValidator;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.ImageSourceDispatcher;
@@ -365,6 +367,38 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             regionSpecs.add(new RegionDrawSpec(chosen, roiChannel, imageProcessing));
         }
 
+        // Region-scoped image selection (stage 04): which images this region's ROIs cover.
+        // The draw loop below only draws images in selectedSeries (zero-based indices), and
+        // names each ROI by its durable image-identity token so the zip can cover a subset.
+        java.util.LinkedHashSet<Integer> selectedSeries = new java.util.LinkedHashSet<Integer>();
+        if (createNew) {
+            List<RegionImageSelectionDialog.Row> pickerRows =
+                    RegionImageSelectionDialog.buildRows(supplier, totalImages);
+            List<String> regionNames = new ArrayList<String>();
+            for (RegionDrawSpec s : regionSpecs) regionNames.add(s.regionName);
+            boolean autoSelectOnly = headless || GraphicsEnvironment.isHeadless();
+            java.util.LinkedHashMap<String, java.util.LinkedHashSet<Integer>> perRegionSelection =
+                    RegionImageSelectionDialog.choose(pickerRows, regionNames, autoSelectOnly);
+            if (perRegionSelection == null) {
+                IJ.log("[FLASH] Draw ROIs cancelled at image selection.");
+                return;
+            }
+            if (regionSpecs.size() > 1) {
+                IJ.log("[FLASH] Multiple regions entered; this build draws the primary region \""
+                        + chosen + "\" on its selected images. Re-run Draw ROIs for each other region.");
+            }
+            java.util.LinkedHashSet<Integer> sel = perRegionSelection.get(chosen);
+            if (sel != null) selectedSeries.addAll(sel);
+            if (selectedSeries.isEmpty()) {
+                showOrLog("Draw ROIs and Orientate Images",
+                        "No images selected for region \"" + chosen + "\".");
+                return;
+            }
+        } else {
+            // Append mode keeps the existing full-range behaviour (draw all remaining images).
+            for (int s = 0; s < totalImages; s++) selectedSeries.add(Integer.valueOf(s));
+        }
+
         File roiZip = new File(roiDir, chosen + " ROIs.zip");
         File sourceRoiZip = roiZip;
         if (!createNew) {
@@ -421,6 +455,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
         for (int i = range.firstSeriesIndexInclusive; i < totalImages; i++) {
             int processingIndex = range.processingIndexFor(i);
+            if (!selectedSeries.contains(Integer.valueOf(i))) {
+                continue; // not selected for this region
+            }
             IJ.log("Loading image " + (i + 1) + "/" + totalImages + "...");
             PreparedImage prep;
             try {
@@ -497,41 +534,27 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             ImagePlus max = prep.maxProjection;
             Roi roi = max.getRoi();
             if (roi == null) {
-                int width = max.getWidth();
-                int height = max.getHeight();
-
-                String message = "No ROI drawn for " + imgTitle + " in ROI set \"" + chosen + "\"";
+                String message = "No ROI drawn for " + imgTitle + " in region \"" + chosen + "\"";
                 IJ.log("Warning: " + message);
                 recordWarn(message);
-
                 closePreparedImages(prep);
 
-                int countAfter = rm.getCount();
-                int expectedAfter = startOffset + (processingIndex + 1) * 2;
-                int missing = expectedAfter - countAfter;
-                if (missing <= 0) {
-                    saveOrientationDecision(orientationManifestService, prep,
-                            "Saved during Draw ROIs and Orientate Images");
-                    continue;
-                }
-
                 if (headless || GraphicsEnvironment.isHeadless()) {
-                    padPlaceholderRois(rm, processingIndex, i, startOffset, width, height);
                     saveOrientationDecision(orientationManifestService, prep,
-                            "Skipped during Draw ROIs and Orientate Images; placeholder ROIs padded");
-                    IJ.log("[DrawROIs] image " + (i + 1) + " missing " + missing
-                            + " ROI(s) — padded with placeholders (headless mode).");
+                            "Skipped during Draw ROIs (no ROI); image left uncovered for this region");
+                    IJ.log("[DrawROIs] image " + (i + 1)
+                            + " has no ROI — left uncovered for region \"" + chosen + "\" (headless).");
                     continue;
                 }
 
-                Object[] options = {"Redo this image", "Skip and continue",
+                Object[] options = {"Redo this image", "Skip image",
                                     "Save partial + abort"};
                 int choice = JOptionPane.showOptionDialog(imageJMainWindow(),
-                        "Image " + (i + 1) + " is missing " + missing + " ROI(s).\n\n"
+                        "Image " + (i + 1) + " has no ROI drawn.\n\n"
                         + "Redo: re-open this image to draw the ROI.\n"
-                        + "Skip: pad with placeholder ROI(s) and continue.\n"
+                        + "Skip image: leave it out of region \"" + chosen + "\".\n"
                         + "Save partial + abort: write what you've drawn and stop.",
-                        "Missing ROIs",
+                        "No ROI drawn",
                         JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE,
                         null, options, options[0]);
 
@@ -539,11 +562,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                     i--;
                     continue;
                 } else if (choice == 1) {
-                    padPlaceholderRois(rm, processingIndex, i, startOffset, width, height);
                     saveOrientationDecision(orientationManifestService, prep,
-                            "Skipped during Draw ROIs and Orientate Images; placeholder ROIs padded");
-                    IJ.log("[DrawROIs] image " + (i + 1)
-                            + " padded with " + missing + " placeholder ROI(s).");
+                            "Skipped during Draw ROIs; image left uncovered for this region");
                     continue;
                 } else {
                     prepPool.shutdownNow();
@@ -566,13 +586,34 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             Roi croppedRoi = cropped.getRoi();
             rm.addRoi(croppedRoi == null ? roi : croppedRoi);
 
-            // Rename ROIs (include hemisphere)
+            // Rename ROIs with the durable image-identity token so a region zip can cover any
+            // subset of images and analyses bind by image identity, not by position in the zip.
             int count = rm.getCount();
-            String base = RoiNaming.baseName(parts.animal, parts.hemisphere, parts.region);
+            String imageKey;
+            try {
+                imageKey = OrientationImageIdentity.fromProjectSeries(directory, i, imgTitle).imageKey;
+            } catch (Exception identityEx) {
+                imageKey = "";
+                IJ.log("[FLASH] Could not resolve image identity for " + imgTitle + ": "
+                        + identityEx.getMessage());
+            }
+            if (imageKey == null || imageKey.trim().isEmpty()) {
+                // Cannot bind this image (e.g. multi-container project, unsupported by the
+                // orientation identity layer); drop the just-added pair and skip so the zip
+                // stays valid for the images that can be bound.
+                rm.setSelectedIndexes(new int[]{count - 2, count - 1});
+                rm.runCommand("Delete");
+                IJ.log("[FLASH] Skipped " + imgTitle + " for region \"" + chosen
+                        + "\": no durable image identity to bind the ROI.");
+                cropped.changes = false;
+                cropped.close();
+                closePreparedImages(prep);
+                continue;
+            }
             rm.setSelectedIndexes(new int[]{count - 2});
-            rm.runCommand("Rename", base);
+            rm.runCommand("Rename", RoiSetImageBinding.drawnRoiName(imageKey));
             rm.setSelectedIndexes(new int[]{count - 1});
-            rm.runCommand("Rename", RoiNaming.croppedName(parts.animal, parts.hemisphere, parts.region));
+            rm.runCommand("Rename", RoiSetImageBinding.croppedRoiName(imageKey));
 
             // Store ROI properties (Area, Volume, Width, Height)
             java.awt.Rectangle b = roi.getBounds();
@@ -680,8 +721,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         }
 
         // ── Validate ROI ordering ───────────────────────────────────────
-        if (!RoiSetValidator.validateStrictWithDialog(rm, startOffset, range.imageCountToProcess,
-                partialZipPath)) {
+        if (!RoiSetValidator.validateStructuralWithDialog(rm, partialZipPath)) {
             rm.close();
             return;
         }
