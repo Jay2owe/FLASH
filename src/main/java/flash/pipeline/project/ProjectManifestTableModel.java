@@ -12,6 +12,7 @@ import flash.pipeline.naming.NameParts;
 import javax.swing.table.AbstractTableModel;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -835,6 +836,85 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         System.arraycopy(values, 0, copy, 0, values.length);
         java.util.Arrays.sort(copy);
         return copy;
+    }
+
+    // ── Stage 14: rename / merge condition groups (per axis) ────────────────
+
+    /** Rename one condition value to another across every row for one axis. Returns rows changed. */
+    public int renameConditionValue(String axisId, String from, String to) {
+        return mergeConditionValues(axisId, Collections.singletonList(from), to);
+    }
+
+    /**
+     * Merge several condition values into one canonical value across every row
+     * (file + series) for ONE axis only — collapses label drift
+     * ({@code ctrl/Control/CTRL -> Control}). Other axes are untouched. Returns
+     * the number of rows rewritten.
+     */
+    public int mergeConditionValues(String axisId, Collection<String> sources, String target) {
+        String norm = ConditionAxis.normaliseId(axisId);
+        if (norm.isEmpty()) norm = primaryAxisId();
+        boolean primary = norm.equals(primaryAxisId());
+        if (target == null) return 0;
+        Set<String> from = new LinkedHashSet<String>();
+        if (sources != null) {
+            for (String s : sources) {
+                if (s != null && !s.trim().isEmpty()) from.add(s.trim());
+            }
+        }
+        if (from.isEmpty()) return 0;
+        String to = target.trim();
+        int changed = 0;
+        for (Row row : rows) {
+            if (rewriteAxisValue(primary ? row.condition : row.conditions.get(norm), from)) {
+                if (primary) row.condition = to;
+                else putOrRemove(row.conditions, norm, to);
+                changed++;
+            }
+            for (SeriesRow s : row.series) {
+                if (rewriteAxisValue(primary ? s.condition : s.conditions.get(norm), from)) {
+                    if (primary) s.condition = to;
+                    else putOrRemove(s.conditions, norm, to);
+                    changed++;
+                }
+            }
+        }
+        if (changed > 0) fireTableDataChanged();
+        return changed;
+    }
+
+    private static boolean rewriteAxisValue(String current, Set<String> from) {
+        return current != null && from.contains(current.trim());
+    }
+
+    /**
+     * Groups of similar values for an axis (case-insensitive Levenshtein distance
+     * &le; {@code maxDistance}) — fuzzy "these look alike, merge?" suggestions.
+     * Only groups of 2+ values are returned, in first-seen order.
+     */
+    public List<List<String>> fuzzyConditionGroups(String axisId, int maxDistance) {
+        List<String> values = new ArrayList<String>(distinctConditionValues(axisId));
+        List<List<String>> groups = new ArrayList<List<String>>();
+        boolean[] used = new boolean[values.size()];
+        org.apache.commons.text.similarity.LevenshteinDistance lev =
+                org.apache.commons.text.similarity.LevenshteinDistance.getDefaultInstance();
+        for (int i = 0; i < values.size(); i++) {
+            if (used[i]) continue;
+            List<String> group = new ArrayList<String>();
+            group.add(values.get(i));
+            used[i] = true;
+            String a = values.get(i).toLowerCase(Locale.ROOT);
+            for (int j = i + 1; j < values.size(); j++) {
+                if (used[j]) continue;
+                int d = lev.apply(a, values.get(j).toLowerCase(Locale.ROOT));
+                if (d >= 0 && d <= maxDistance) {
+                    group.add(values.get(j));
+                    used[j] = true;
+                }
+            }
+            if (group.size() > 1) groups.add(group);
+        }
+        return groups;
     }
 
     /** Complete axis-&gt;value map for persistence; empty for single-axis projects. */

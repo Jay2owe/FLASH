@@ -573,6 +573,8 @@ public final class ProjectBuilderDialog {
         JMenuItem setHemisphere = new JMenuItem("Set hemisphere…");
         JMenuItem setRegion = new JMenuItem("Set region…");
         JMenuItem setCondition = new JMenuItem("Set condition…");
+        final JMenuItem renameCondition = new JMenuItem("Rename condition value…");
+        final JMenuItem mergeSimilar = new JMenuItem("Merge similar values…");
         final JMenuItem fillDown = new JMenuItem("Fill down");
         final JMenuItem fillBlanks = new JMenuItem("Fill blanks (from above)");
         final JMenuItem applySameAnimal = new JMenuItem("Apply cell to same animal");
@@ -598,6 +600,16 @@ public final class ProjectBuilderDialog {
         setCondition.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 bulkSetCondition();
+            }
+        });
+        renameCondition.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                renameConditionValueAction();
+            }
+        });
+        mergeSimilar.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                mergeSimilarConditionsAction();
             }
         });
         fillDown.addActionListener(new ActionListener() {
@@ -636,6 +648,9 @@ public final class ProjectBuilderDialog {
         menu.add(setRegion);
         menu.add(setCondition);
         menu.addSeparator();
+        menu.add(renameCondition);
+        menu.add(mergeSimilar);
+        menu.addSeparator();
         menu.add(fillDown);
         menu.add(fillBlanks);
         menu.add(applySameAnimal);
@@ -658,6 +673,9 @@ public final class ProjectBuilderDialog {
                 fillDown.setEnabled(fillable);
                 fillBlanks.setEnabled(fillable);
                 applySameAnimal.setEnabled(fillable);
+                boolean conditionCol = model.isConditionColumn(popupColumn);
+                renameCondition.setEnabled(conditionCol);
+                mergeSimilar.setEnabled(conditionCol);
                 boolean expandable = row >= 0 && model.isExpandableFileRow(row);
                 toggleSeries.setEnabled(expandable);
                 toggleSeries.setText(expandable && model.isExpanded(row)
@@ -672,6 +690,49 @@ public final class ProjectBuilderDialog {
         if (isDetectableColumn(popupColumn)) return popupColumn;
         int focused = table.getSelectedColumn();
         return isDetectableColumn(focused) ? focused : -1;
+    }
+
+    /** Rename the clicked condition cell's value across every row for that axis. */
+    private void renameConditionValueAction() {
+        int col = popupColumn;
+        if (!model.isConditionColumn(col)) return;
+        int row = table.getSelectedRow();
+        if (row < 0) return;
+        ConditionAxis axis = model.conditionAxisAtColumn(col);
+        if (axis == null) return;
+        Object cur = model.getValueAt(row, col);
+        String current = cur == null ? "" : cur.toString();
+        String to = JOptionPane.showInputDialog(dialog,
+                "Rename \"" + current + "\" (" + axisLabel(axis) + ") on all matching rows to:",
+                current);
+        if (to == null) return;
+        int n = model.renameConditionValue(axis.id, current, to);
+        applyColumnPreferences();
+        IJ.log("[FLASH] Renamed condition value on " + n + " row(s).");
+    }
+
+    /** Offer to merge fuzzy-similar values for the clicked condition axis. */
+    private void mergeSimilarConditionsAction() {
+        int col = popupColumn;
+        if (!model.isConditionColumn(col)) return;
+        ConditionAxis axis = model.conditionAxisAtColumn(col);
+        if (axis == null) return;
+        List<List<String>> groups = model.fuzzyConditionGroups(axis.id, 2);
+        if (groups.isEmpty()) {
+            JOptionPane.showMessageDialog(dialog,
+                    "No similar values found for " + axisLabel(axis) + ".",
+                    "Merge similar values", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        for (List<String> group : groups) {
+            String target = (String) JOptionPane.showInputDialog(dialog,
+                    "These look similar — merge into one?\n" + group + "\nKeep as:",
+                    "Merge similar values", JOptionPane.QUESTION_MESSAGE,
+                    null, group.toArray(new String[group.size()]), group.get(0));
+            if (target == null) continue;   // skip this group
+            model.mergeConditionValues(axis.id, group, target);
+        }
+        applyColumnPreferences();
     }
 
     private void attachExpansionClick() {

@@ -206,6 +206,15 @@
 			<scope>provided</scope>
 		</dependency>
 
+		<!-- commons-text (LevenshteinDistance) for fuzzy condition-label merge
+		     suggestions. On the Fiji classpath at runtime; no jar ships. -->
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-text</artifactId>
+			<version>1.10.0</version>
+			<scope>provided</scope>
+		</dependency>
+
 		<!-- TrackMate: used to run StarDist 2D per-slice for pseudo-3D segmentation -->
 		<dependency>
 			<groupId>sc.fiji</groupId>
