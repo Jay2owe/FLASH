@@ -335,6 +335,14 @@ public final class ProjectBuilderDialog {
         exportRoster.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) { exportRosterAction(); }
         });
+        JButton editGrammar = new JButton("Edit grammar…");
+        editGrammar.setToolTipText("Define a naming grammar to auto-fill identity from filenames (live preview).");
+        editGrammar.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                IdentityGrammarDialog.show(dialog, model, grammarProjectDir());
+                applyColumnPreferences();
+            }
+        });
 
         bar.add(addFolder);
         bar.add(addFiles);
@@ -345,10 +353,18 @@ public final class ProjectBuilderDialog {
         bar.add(Box.createHorizontalStrut(12));
         bar.add(importRoster);
         bar.add(exportRoster);
+        bar.add(editGrammar);
         bar.add(Box.createHorizontalStrut(12));
         bar.add(reviewNext);
         bar.add(reviewSummary);
         return bar;
+    }
+
+    /** Project directory used to store/load naming grammars (output root, else CWD). */
+    private String grammarProjectDir() {
+        String out = outputRootField.getText() == null ? "" : outputRootField.getText().trim();
+        if (!out.isEmpty()) return out;
+        return System.getProperty("user.dir", ".");
     }
 
     private void exportRosterAction() {

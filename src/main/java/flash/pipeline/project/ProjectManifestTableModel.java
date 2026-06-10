@@ -3,6 +3,7 @@ package flash.pipeline.project;
 import flash.pipeline.intelligence.identity.Confidence;
 import flash.pipeline.intelligence.identity.FieldValue;
 import flash.pipeline.intelligence.identity.IdentityCandidate;
+import flash.pipeline.intelligence.identity.SourceRecord;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.naming.ConditionNameParser;
@@ -727,6 +728,53 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     private void applyFieldValue(int rowIndex, int column, FieldValue fv) {
         if (fv == null || fv.isBlank()) return;
         setAutoValue(rowIndex, column, fv.value, fv.confidence, fv.provenance);
+    }
+
+    /**
+     * One {@link SourceRecord} per rendered row, in view order — the batch input
+     * for {@code IdentityResolver}. File rows become loose-file records; series
+     * rows become container-series records keyed by the parent file. Read-only.
+     */
+    public List<SourceRecord> buildSourceRecords() {
+        List<SourceRecord> out = new ArrayList<SourceRecord>();
+        for (int idx = 0; idx < visible.size(); idx++) {
+            out.add(sourceRecordAt(idx));
+        }
+        return out;
+    }
+
+    /** The {@link SourceRecord} for one rendered row (read-only). */
+    public SourceRecord sourceRecordAt(int rowIndex) {
+        Row row = rows.get(fileIndexAt(rowIndex));
+        File src = row.source;
+        String parent = src != null && src.getParentFile() != null
+                ? src.getParentFile().getName() : "";
+        String grandparent = src != null && src.getParentFile() != null
+                && src.getParentFile().getParentFile() != null
+                ? src.getParentFile().getParentFile().getName() : "";
+        SeriesRow series = seriesRowAt(rowIndex);
+        if (series != null) {
+            String container = src == null ? "" : src.getName();
+            return SourceRecord.containerSeries(container, series.index + 1, series.name, parent, grandparent);
+        }
+        String fileName = src == null ? "" : src.getName();
+        return SourceRecord.looseFile(fileName, parent, grandparent);
+    }
+
+    /**
+     * Apply a resolved batch to the rendered rows (auto-fill; never clobbers
+     * user-set cells). {@code records} must be the list from
+     * {@link #buildSourceRecords()} (aligned to view order) so the same
+     * {@link SourceRecord} instances key into {@code resolved}.
+     */
+    public void applyResolvedBatch(List<SourceRecord> records,
+                                   Map<SourceRecord, IdentityCandidate> resolved) {
+        if (records == null || resolved == null) return;
+        int n = Math.min(records.size(), visible.size());
+        for (int idx = 0; idx < n; idx++) {
+            IdentityCandidate candidate = resolved.get(records.get(idx));
+            if (candidate != null) applyResolved(idx, candidate);
+        }
     }
 
     /** Index of the next rendered row (from {@code after}) with a low/none-confidence identity cell, or -1. */
