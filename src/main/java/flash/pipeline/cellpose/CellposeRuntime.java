@@ -650,7 +650,7 @@ public final class CellposeRuntime {
         } else {
             pd.addHelpText("No supported existing install was detected automatically.");
         }
-        pd.addHelpText("Choose one of the buttons below. OK also opens the advanced existing-install path.");
+        pd.addHelpText("Choose one of the buttons below. Next: Existing Cellpose install also opens the advanced existing-install path.");
         if (!pd.showDialog()) {
             String action = pd.getActionCommand();
             if (!action.isEmpty()) return action;
@@ -691,7 +691,7 @@ public final class CellposeRuntime {
             }
             pythonPath = pd.getNextString().trim();
             if (pythonPath.isEmpty()) {
-                IJ.showMessage(dialogTitle, "Enter the path to an existing Cellpose Python executable, then click OK to verify it.");
+                IJ.showMessage(dialogTitle, "Enter the path to an existing Cellpose Python executable, then click Verify Cellpose install.");
                 continue;
             }
             return pythonPath;

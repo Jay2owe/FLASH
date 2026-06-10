@@ -126,9 +126,10 @@ public final class ConditionManifestPanel {
 
     /**
      * Convenience dialog for callers that only need the condition-assignment
-     * step with OK / Cancel. Returns the edited assignments on OK, or
-     * {@code null} if the user cancelled. On OK the assignments are persisted
-     * to the project's condition manifest.
+     * step with a next-action button and Cancel. Returns the edited
+     * assignments when the next action is confirmed, or {@code null} if the
+     * user cancelled. Confirmed assignments are persisted to the project's
+     * condition manifest.
      */
     public static LinkedHashMap<String, String> showDialog(String directory,
                                                            Set<String> animals,

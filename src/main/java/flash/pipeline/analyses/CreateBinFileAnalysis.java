@@ -1178,7 +1178,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             confirm.setPrimaryButtonText(NextStepLabels.CHANNEL_SETUP);
             confirm.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
             confirm.addSubHeader("New Configuration");
-            confirm.addMessage("No Configuration folder detected. Click OK to create one.");
+            confirm.addMessage("No Configuration folder detected. Click Next: Channel setup to create one.");
             if (!confirm.showDialog()) return;
             if (!binFolder.isDirectory() && !binFolder.mkdirs() && !binFolder.isDirectory()) {
                 IJ.error("Set Up Configuration", "Failed to create: " + binFolder.getAbsolutePath());
