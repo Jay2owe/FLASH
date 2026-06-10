@@ -60,8 +60,11 @@ import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
+import flash.pipeline.orientation.OrientationImageIdentity;
 import flash.pipeline.roi.RegionMask;
 import flash.pipeline.roi.RoiIO;
+import flash.pipeline.roi.RoiSetImageBinding;
+import flash.pipeline.roi.RoiSetValidator;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.SegmentationTokenParser;
@@ -367,6 +370,14 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     /** Thread-local image registry for parallel execution. When set, overrides the instance field. */
     private final ThreadLocal<Map<String, ImagePlus>> threadLocalRegistry = new ThreadLocal<Map<String, ImagePlus>>();
 
+    /**
+     * Per-image durable-identity binding token (index = 0-based series index); {@code null}
+     * where identity could not be resolved. Computed once in {@link #run(String)} before
+     * processing and read-only thereafter, so parallel workers may share it safely. Region-scoped
+     * ROI zips cover an image subset and bind by this token rather than by positional index.
+     */
+    private String[] imageBindTokens;
+
     /** One named ROI zip loaded into memory as uncropped/cropped ROI pairs. */
     private static final class RoiSetData {
         final String name;
@@ -385,12 +396,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
         static RoiSetData fullImage() {
             return new RoiSetData(FULL_IMAGE_ROI_SET_NAME, new ij.gui.Roi[0], true);
-        }
-
-        ij.gui.Roi cloneRoi(int index) {
-            if (fullImage) return null;
-            if (index < 0 || index >= rois.length || rois[index] == null) return null;
-            return (ij.gui.Roi) rois[index].clone();
         }
     }
 
@@ -1166,6 +1171,22 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             IJ.showProgress(1.0);
             IJ.showStatus("");
             return;
+        }
+
+        // Region-scoped ROIs cover an image subset and bind by durable image identity, so
+        // precompute each image's binding token (matching the Draw ROIs side, which names ROI
+        // pairs from the same OrientationImageIdentity) rather than relying on positional order.
+        imageBindTokens = new String[totalImages];
+        for (int t = 0; t < totalImages; t++) {
+            try {
+                String ik = OrientationImageIdentity.fromProjectSeries(
+                        directory, t, supplier.getSeriesName(t)).imageKey;
+                imageBindTokens[t] = (ik != null && !ik.trim().isEmpty())
+                        ? RoiSetImageBinding.token(ik) : null;
+            } catch (Exception ex) {
+                imageBindTokens[t] = null;
+                IJ.log("  [FLASH] No durable identity for image " + (t + 1) + ": " + ex.getMessage());
+            }
         }
 
         if (!validateRoiSets(roiSets, totalImages)) {
@@ -2025,26 +2046,116 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     }
 
     private boolean validateRoiSets(RoiSetData[] roiSets, int totalImages) {
-        int expected = totalImages * 2;
-        IJ.log("Validating ROI sets...");
+        IJ.log("Validating ROI sets (identity-based, subset coverage allowed)...");
+
+        // Tokens covered by the current image set, used to warn on zero-overlap zips.
+        java.util.Set<String> currentTokens = new java.util.HashSet<String>();
+        if (imageBindTokens != null) {
+            for (String tk : imageBindTokens) {
+                if (tk != null) currentTokens.add(tk);
+            }
+        }
+
         for (RoiSetData roiSet : roiSets) {
             if (roiSet != null && roiSet.fullImage) {
                 IJ.log("  ROI set '" + FULL_IMAGE_ROI_SET_NAME + "': full-image analysis (no ROI pair validation)");
                 continue;
             }
-            int count = roiSet == null || roiSet.rois == null ? 0 : roiSet.rois.length;
             String roiSetName = roiSet == null ? "" : roiSet.name;
-            IJ.log("  ROI set '" + roiSetName + "': " + count + " ROIs (expected " + expected + ")");
-            if (count != expected) {
+            java.util.List<ij.gui.Roi> roiList = (roiSet == null || roiSet.rois == null)
+                    ? java.util.Collections.<ij.gui.Roi>emptyList()
+                    : java.util.Arrays.asList(roiSet.rois);
+            // Subset coverage is allowed: instead of a fixed 2-per-image count, require that
+            // every binding token in the zip has exactly one drawn + one cropped ROI, with no
+            // duplicates, orphans, or non-token names.
+            try {
+                RoiSetValidator.validateStructural(roiList);
+            } catch (Exception ve) {
                 IJ.error("3D Object Analysis",
-                        "ROI set '" + roiSetName + "' has " + count
-                                + " ROIs but expected " + expected + " (2 per image).\n"
-                                + "3D Object Analysis requires exactly 2 ROIs per image for every ROI set.");
+                        "ROI set '" + roiSetName + "' is not structurally valid: " + ve.getMessage()
+                                + "\nRedraw it with 'Draw ROIs and Orientate Images'.");
                 return false;
             }
+            int pairs = RoiSetImageBinding.indexByToken(roiList).size();
+            IJ.log("  ROI set '" + roiSetName + "': " + roiList.size()
+                    + " ROIs covering " + pairs + " image(s).");
+
+            // Warn (non-fatal) when a zip overlaps none of the current images — a likely
+            // identity mismatch that would otherwise silently produce no measurements.
+            if (!currentTokens.isEmpty()) {
+                boolean overlaps = false;
+                for (String tk : RoiSetImageBinding.indexByToken(roiList).keySet()) {
+                    if (currentTokens.contains(tk)) { overlaps = true; break; }
+                }
+                if (!overlaps) {
+                    String message = "ROI set '" + roiSetName
+                            + "' covers none of the current images (no identity-token overlap); "
+                            + "it will produce no measurements.";
+                    IJ.log("  WARNING: " + message);
+                    recordWarn(message);
+                }
+            }
         }
-        IJ.log("  All ROI sets validated.");
+        IJ.log("  ROI sets validated.");
         return true;
+    }
+
+    /**
+     * Outcome of binding a ROI set to one image by durable identity token.
+     * {@link #skip} true means the (region-scoped) zip does not cover this image and the
+     * caller must skip it entirely — distinct from {@link #region} being {@code null},
+     * which means whole-image analysis (no ROI restriction).
+     */
+    private static final class RegionBinding {
+        static final RegionBinding SKIP = new RegionBinding(true, null);
+        final boolean skip;
+        final RegionMask region;
+
+        private RegionBinding(boolean skip, RegionMask region) {
+            this.skip = skip;
+            this.region = region;
+        }
+
+        static RegionBinding of(RegionMask region) {
+            return new RegionBinding(false, region);
+        }
+    }
+
+    /**
+     * Resolves the {@link RegionMask} for one image within a ROI set by matching the image's
+     * durable identity token against the drawn (uncropped) ROI names in the set. Full-image
+     * sets and a {@code null} set yield no restriction; a region-scoped set that does not
+     * contain this image's token yields {@link RegionBinding#SKIP}.
+     */
+    private RegionBinding resolveRegionForImage(RoiSetData roiSet, int imageIndex) {
+        if (roiSet == null || roiSet.fullImage) {
+            return RegionBinding.of(null); // whole-image analysis (no ROI restriction)
+        }
+        String bindToken = (imageBindTokens != null && imageIndex >= 0 && imageIndex < imageBindTokens.length)
+                ? imageBindTokens[imageIndex] : null;
+        ij.gui.Roi drawn = findDrawnRoiByToken(roiSet.rois, bindToken);
+        if (drawn == null) {
+            if (verboseLogging) {
+                IJ.log("  [DEBUG] ROI set '" + roiSet.name + "' does not cover image "
+                        + (imageIndex + 1) + " (no identity-token match); skipping this region for this image.");
+            }
+            return RegionBinding.SKIP;
+        }
+        return RegionBinding.of(RegionMask.from(drawn)); // RegionMask.from clones internally
+    }
+
+    /** Find the drawn (uncropped) ROI in a set whose binding token matches the image. */
+    private static ij.gui.Roi findDrawnRoiByToken(ij.gui.Roi[] rois, String token) {
+        if (rois == null || token == null) return null;
+        for (ij.gui.Roi r : rois) {
+            if (r == null) continue;
+            String name = r.getName();
+            if (!RoiSetImageBinding.isCropped(name)
+                    && token.equals(RoiSetImageBinding.tokenOf(name))) {
+                return r;
+            }
+        }
+        return null;
     }
 
     private void processRoiSetForImage(
@@ -2063,12 +2174,16 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             boolean[] processChannels,
             RoiSetData roiSet) {
 
-        int roiIdx = imageIndex * 2;
-        // Geometry is driven ONLY by the original-coordinate (index-0) ROI.
-        // The index-1 "cropped" ROI is a top-left-shifted presentation artifact;
-        // feeding it to the centroid filter or crop/mask is the historical bug
-        // this RegionMask seam prevents. See RegionMask / RegionMaskTest.
-        RegionMask region = roiSet == null ? null : RegionMask.from(roiSet.cloneRoi(roiIdx));
+        // Bind ROIs by durable image identity (token), not positional index: region-scoped
+        // zips cover only a subset of images. Geometry is driven ONLY by the original-coordinate
+        // (drawn) ROI; the "_Cropped" ROI is a top-left-shifted presentation artifact that must
+        // never drive geometry (the historical bug this RegionMask seam prevents). See
+        // RegionMask / RegionMaskTest.
+        RegionBinding binding = resolveRegionForImage(roiSet, imageIndex);
+        if (binding.skip) {
+            return; // subset coverage: this zip does not cover this image
+        }
+        RegionMask region = binding.region;
         String roiBase = roiSet == null ? "" : roiSet.name;
         String hemisphere = parts == null ? "" : parts.hemisphere;
         String seriesRegionLabel = parts == null
@@ -2080,9 +2195,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
         if (!compactLog) {
             IJ.log("  > ROI set: " + roiBase);
-        }
-        if (verboseLogging) {
-            IJ.log("  [DEBUG] ROI set '" + roiBase + "' indices: " + roiIdx + " and " + (roiIdx + 1));
         }
 
         try {
@@ -2801,6 +2913,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         keep.add("XM");
         keep.add("YM");
         keep.add("ZM");
+        keep.add("BX");
+        keep.add("BY");
+        keep.add("BZ");
+        keep.add("B-width");
+        keep.add("B-height");
+        keep.add("B-depth");
 
         for (String other : cfg.channelNames) {
             if (other == null || other.equals(channelName)) continue;
@@ -3722,10 +3840,14 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             boolean[] processChannels,
             RoiSetData roiSet) {
 
-        int roiIdx = imageIndex * 2;
-        // Geometry is driven ONLY by the original-coordinate (index-0) ROI; the
-        // index-1 "cropped" ROI is a top-left-shifted presentation artifact. See RegionMask.
-        RegionMask region = roiSet == null ? null : RegionMask.from(roiSet.cloneRoi(roiIdx));
+        // Bind by durable image identity (token), not positional index — region-scoped zips
+        // cover only a subset of images. Geometry is driven ONLY by the original-coordinate
+        // (drawn) ROI; the "_Cropped" ROI is a top-left-shifted presentation artifact. See RegionMask.
+        RegionBinding binding = resolveRegionForImage(roiSet, imageIndex);
+        if (binding.skip) {
+            return; // subset coverage: this zip does not cover this image
+        }
+        RegionMask region = binding.region;
         String roiBase = roiSet == null ? "" : roiSet.name;
         String hemisphere = parts == null ? "" : parts.hemisphere;
         String seriesRegionLabel = parts == null ? "" : parts.csvRegion();
@@ -4456,6 +4578,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             channelTable.setValue("XM", destRow, 0);
             channelTable.setValue("YM", destRow, 0);
             channelTable.setValue("ZM", destRow, 0);
+            channelTable.setValue("BX", destRow, 0);
+            channelTable.setValue("BY", destRow, 0);
+            channelTable.setValue("BZ", destRow, 0);
+            channelTable.setValue("B-width", destRow, 0);
+            channelTable.setValue("B-height", destRow, 0);
+            channelTable.setValue("B-depth", destRow, 0);
             return;
         }
 
