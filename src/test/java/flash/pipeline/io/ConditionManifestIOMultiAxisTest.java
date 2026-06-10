@@ -9,6 +9,9 @@ import org.junit.rules.TemporaryFolder;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.PrintWriter;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Scanner;
 
 import static org.junit.Assert.assertEquals;
@@ -57,6 +60,21 @@ public class ConditionManifestIOMultiAxisTest {
     }
 
     @Test
+    public void legacyReadReturnsCompositeForMultiAxisManifest() throws Exception {
+        ConditionAssignments ca = new ConditionAssignments();
+        ca.addAxis(ConditionAxis.of("Genotype"));
+        ca.addAxis(ConditionAxis.of("Timepoint"));
+        ca.put("M1", "genotype", "hAPP");
+        ca.put("M1", "timepoint", "WeekFour");
+
+        File f = temp.newFile("legacy-view.csv");
+        ConditionManifestIO.writeAssignments(f, ca);
+
+        Map<String, String> back = ConditionManifestIO.read(f);
+        assertEquals("hAPP_WeekFour", back.get("M1"));
+    }
+
+    @Test
     public void legacyFileReadsAsSingleConditionAxis() throws Exception {
         File f = temp.newFile("legacy.csv");
         PrintWriter pw = new PrintWriter(new FileWriter(f));
@@ -86,6 +104,51 @@ public class ConditionManifestIOMultiAxisTest {
 
         ConditionAssignments back = ConditionManifestIO.readAssignments(f);
         assertEquals("WT", back.get("M14", "condition"));
+    }
+
+    @Test
+    public void resolveAssignmentsModel_readsPerAxisAndMatchesCompositeForMissing() throws Exception {
+        File dir = temp.newFolder("project");
+
+        ConditionAssignments persisted = new ConditionAssignments();
+        persisted.addAxis(ConditionAxis.of("Genotype"));
+        persisted.addAxis(ConditionAxis.of("Timepoint"));
+        persisted.put("M14", "genotype", "hAPP");
+        persisted.put("M14", "timepoint", "WeekFour");
+        ConditionManifestIO.writeAssignments(
+                ConditionManifestIO.getFile(dir.getAbsolutePath()), persisted);
+
+        ConditionAssignments model = ConditionManifestIO.resolveAssignmentsModel(
+                dir.getAbsolutePath(),
+                new LinkedHashSet<String>(Arrays.asList("M14", "M15")));
+
+        // per-axis values for the persisted animal
+        assertEquals("hAPP", model.get("M14", "genotype"));
+        assertEquals("WeekFour", model.get("M14", "timepoint"));
+        // missing animal still resolves (fallback stored on the primary axis)
+        assertFalse(model.composite("M15", "_").isEmpty());
+    }
+
+    @Test
+    public void resolveAssignmentsModel_singleAxisMatchesLegacyResolve() throws Exception {
+        File dir = temp.newFolder("legacy-project");
+
+        java.util.LinkedHashMap<String, String> legacy = new java.util.LinkedHashMap<String, String>();
+        legacy.put("Syn1WeekTwo", "SynWeekTwo");
+        ConditionManifestIO.write(ConditionManifestIO.getFile(dir.getAbsolutePath()), legacy);
+
+        LinkedHashSet<String> animals =
+                new LinkedHashSet<String>(Arrays.asList("Syn1WeekTwo", "hAPP2WeekEight"));
+
+        Map<String, String> composite =
+                ConditionManifestIO.resolveAssignments(dir.getAbsolutePath(), animals);
+        ConditionAssignments model =
+                ConditionManifestIO.resolveAssignmentsModel(dir.getAbsolutePath(), animals);
+
+        // single-axis project: model composite reproduces the legacy resolve exactly
+        for (String animal : animals) {
+            assertEquals(composite.get(animal), model.composite(animal, "_"));
+        }
     }
 
     private static String readAll(File f) throws Exception {

@@ -135,6 +135,80 @@ public final class ConditionAssignments {
         return sb.toString();
     }
 
+    /**
+     * Group label for an animal under a chosen axis. When {@code axisId} is
+     * {@code null}/blank the {@link #composite(String, String) composite} of all
+     * axes is returned (the back-compat single label); otherwise the value of
+     * that single axis is returned. This is the one place downstream consumers
+     * pick "group by one axis" vs "group by the full combination" without ever
+     * parsing the composite string themselves.
+     */
+    public String groupLabel(String animal, String axisId) {
+        if (axisId == null || ConditionAxis.normaliseId(axisId).isEmpty()) {
+            return composite(animal, "_");
+        }
+        return get(animal, axisId);
+    }
+
+    /**
+     * Ordered, de-duplicated, non-blank group labels across all animals for the
+     * chosen axis (or the composite when {@code axisId} is blank) — the group
+     * order for per-axis aggregation/statistics/Excel.
+     */
+    public Set<String> distinctLabels(String axisId) {
+        Set<String> out = new LinkedHashSet<String>();
+        for (String animal : byAnimal.keySet()) {
+            String label = groupLabel(animal, axisId);
+            if (label != null && !label.trim().isEmpty()) out.add(label.trim());
+        }
+        return out;
+    }
+
+    /**
+     * {@code label -> animals} for the chosen axis (or composite when blank),
+     * preserving animal insertion order within each group and label first-seen
+     * order across groups. Animals with a blank label are skipped.
+     */
+    public Map<String, List<String>> groupAnimalsByAxis(String axisId) {
+        Map<String, List<String>> out = new LinkedHashMap<String, List<String>>();
+        for (String animal : byAnimal.keySet()) {
+            String label = groupLabel(animal, axisId);
+            if (label == null || label.trim().isEmpty()) continue;
+            String key = label.trim();
+            List<String> members = out.get(key);
+            if (members == null) {
+                members = new ArrayList<String>();
+                out.put(key, members);
+            }
+            members.add(animal);
+        }
+        return out;
+    }
+
+    /**
+     * Axes ordered by descending number of distinct non-blank values (ties keep
+     * schema order) — used to pick the two highest-cardinality axes for the
+     * sample-sheet grid. Axes with no values are dropped.
+     */
+    public List<ConditionAxis> axesByCardinalityDescending() {
+        List<ConditionAxis> ordered = new ArrayList<ConditionAxis>();
+        for (ConditionAxis a : axes) {
+            if (!distinctValues(a.id).isEmpty()) ordered.add(a);
+        }
+        // Stable insertion sort by descending distinct-value count (schema order on ties).
+        for (int i = 1; i < ordered.size(); i++) {
+            ConditionAxis key = ordered.get(i);
+            int keyCard = distinctValues(key.id).size();
+            int j = i - 1;
+            while (j >= 0 && distinctValues(ordered.get(j).id).size() < keyCard) {
+                ordered.set(j + 1, ordered.get(j));
+                j--;
+            }
+            ordered.set(j + 1, key);
+        }
+        return ordered;
+    }
+
     public boolean isEmpty() {
         return byAnimal.isEmpty();
     }

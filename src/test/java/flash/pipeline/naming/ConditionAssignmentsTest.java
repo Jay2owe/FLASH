@@ -4,6 +4,7 @@ import org.junit.Test;
 
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -100,5 +101,76 @@ public class ConditionAssignmentsTest {
         ca.put("M15", "genotype", "Syn");
         assertFalse(ca.isEmpty());
         assertEquals(2, ca.size());
+    }
+
+    // ── Stage 16: per-axis grouping for downstream consumers ────────────────
+
+    @Test
+    public void groupLabel_compositeWhenAxisBlank_perAxisOtherwise() {
+        ConditionAssignments ca = twoAxisSample();
+        // blank/null axis -> composite of all axes
+        assertEquals("hAPP_WeekFour", ca.groupLabel("M14", null));
+        assertEquals("hAPP_WeekFour", ca.groupLabel("M14", ""));
+        // explicit axis -> that single axis value
+        assertEquals("hAPP", ca.groupLabel("M14", "genotype"));
+        assertEquals("WeekFour", ca.groupLabel("M14", "timepoint"));
+    }
+
+    @Test
+    public void distinctLabels_perAxisAndComposite() {
+        ConditionAssignments ca = twoAxisSample();
+        Set<String> genotypes = ca.distinctLabels("genotype");
+        assertEquals(2, genotypes.size());
+        assertTrue(genotypes.contains("hAPP"));
+        assertTrue(genotypes.contains("Syn"));
+
+        Set<String> composites = ca.distinctLabels(null);
+        assertTrue(composites.contains("hAPP_WeekFour"));
+        assertTrue(composites.contains("Syn_WeekTwo"));
+        assertEquals(2, composites.size());
+    }
+
+    @Test
+    public void groupAnimalsByAxis_groupsMembersUnderEachLabel() {
+        ConditionAssignments ca = twoAxisSample();
+        ca.put("M16", "genotype", "hAPP");
+        ca.put("M16", "timepoint", "WeekTwo");
+
+        Map<String, List<String>> byGenotype = ca.groupAnimalsByAxis("genotype");
+        assertEquals(2, byGenotype.get("hAPP").size());   // M14, M16
+        assertEquals(1, byGenotype.get("Syn").size());     // M15
+
+        Map<String, List<String>> byComposite = ca.groupAnimalsByAxis(null);
+        assertEquals(1, byComposite.get("hAPP_WeekFour").size()); // M14
+        assertEquals(1, byComposite.get("hAPP_WeekTwo").size());  // M16
+    }
+
+    @Test
+    public void axesByCardinalityDescending_ordersByDistinctCount() {
+        ConditionAssignments ca = new ConditionAssignments();
+        ca.addAxis(ConditionAxis.of("Genotype"));   // 1 distinct value
+        ca.addAxis(ConditionAxis.of("Timepoint"));  // 3 distinct values
+        ca.put("M1", "genotype", "hAPP");
+        ca.put("M1", "timepoint", "WeekTwo");
+        ca.put("M2", "genotype", "hAPP");
+        ca.put("M2", "timepoint", "WeekFour");
+        ca.put("M3", "genotype", "hAPP");
+        ca.put("M3", "timepoint", "WeekEight");
+
+        List<ConditionAxis> ordered = ca.axesByCardinalityDescending();
+        assertEquals(2, ordered.size());
+        assertEquals("timepoint", ordered.get(0).id);   // highest cardinality first
+        assertEquals("genotype", ordered.get(1).id);
+    }
+
+    private static ConditionAssignments twoAxisSample() {
+        ConditionAssignments ca = new ConditionAssignments();
+        ca.addAxis(ConditionAxis.of("Genotype"));
+        ca.addAxis(ConditionAxis.of("Timepoint"));
+        ca.put("M14", "genotype", "hAPP");
+        ca.put("M14", "timepoint", "WeekFour");
+        ca.put("M15", "genotype", "Syn");
+        ca.put("M15", "timepoint", "WeekTwo");
+        return ca;
     }
 }

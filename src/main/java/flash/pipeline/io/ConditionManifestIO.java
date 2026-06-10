@@ -282,25 +282,16 @@ public final class ConditionManifestIO {
     }
 
     static LinkedHashMap<String, String> read(File manifest) throws IOException {
-        LinkedHashMap<String, String> assignments = new LinkedHashMap<String, String>();
-        CsvSupport.RecordReader csv = CsvSupport.openRecordReader(manifest);
-        try {
-            CsvSupport.Record header = csv.readRecord();
-            if (header == null) return assignments;
-
-            CsvSupport.Record record;
-            while ((record = csv.readRecord()) != null) {
-                if (CsvSupport.isBlankRecord(record.text)) continue;
-                String[] row = CsvSupport.parseRecord(record.text);
-                String animal = row.length > 0 ? row[0].trim() : "";
-                String condition = row.length > 1 ? row[1].trim() : "";
-                if (animal.isEmpty() || condition.isEmpty()) continue;
-                assignments.put(animal, condition);
+        ConditionAssignments model = readAssignments(manifest);
+        LinkedHashMap<String, String> out = new LinkedHashMap<String, String>();
+        for (String animal : model.animals()) {
+            String condition = model.composite(animal, "_");
+            if (animal != null && !animal.trim().isEmpty()
+                    && condition != null && !condition.trim().isEmpty()) {
+                out.put(animal.trim(), condition.trim());
             }
-        } finally {
-            csv.close();
         }
-        return assignments;
+        return out;
     }
 
     static void write(File manifest, Map<String, String> assignments) throws IOException {
@@ -358,6 +349,48 @@ public final class ConditionManifestIO {
             IJ.log("Warning: could not read condition manifest: " + e.getMessage());
             return new ConditionAssignments();
         }
+    }
+
+    /**
+     * N-axis counterpart of {@link #resolveAssignments(String, Set)}: returns the
+     * full {@link ConditionAssignments} model (one axis per manifest column) with
+     * the same resolution semantics — {@code ensureExists}, the legacy
+     * collapsed-suffix upgrade, and auto-detection fallback for animals missing
+     * from the manifest. The fallback value is stored on the primary (first)
+     * axis, which for a legacy file is the single {@code Condition} axis, so a
+     * single-axis project resolves to a model whose {@code composite()} matches
+     * {@link #resolveAssignments(String, Set)} exactly.
+     */
+    public static ConditionAssignments resolveAssignmentsModel(String directory, Set<String> animals) {
+        // Reuse the composite resolver to trigger ensureExists + legacy upgrade
+        // (which may rewrite the file) and to compute the auto-detection fallback.
+        LinkedHashMap<String, String> composite = resolveAssignments(directory, animals);
+
+        ConditionAssignments model = readAssignmentsModel(directory);
+        if (model.axes().isEmpty()) {
+            model.addAxis(ConditionAxis.of("Condition"));
+        }
+        String primaryAxisId = model.axes().get(0).id;
+
+        if (animals != null) {
+            for (String animal : animals) {
+                if (animal == null) continue;
+                boolean hasAny = false;
+                for (ConditionAxis axis : model.axes()) {
+                    if (!model.get(animal, axis.id).trim().isEmpty()) {
+                        hasAny = true;
+                        break;
+                    }
+                }
+                if (!hasAny) {
+                    String fallback = composite.get(animal);
+                    if (fallback != null && !fallback.trim().isEmpty()) {
+                        model.put(animal, primaryAxisId, fallback.trim());
+                    }
+                }
+            }
+        }
+        return model;
     }
 
     /** Persist the N-axis condition model, dropping animals with no values. */
