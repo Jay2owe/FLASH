@@ -31,6 +31,7 @@ import flash.pipeline.ui.wizard.ConditionManifestPanel;
 
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
+import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -335,6 +336,35 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         main.add(conditionPanel.getComponent(), gbc);
         row++;
 
+        final String refreshDirectory = directory;
+        JButton refreshConditionsBtn =
+                new JButton("Apply current conditions to existing master tables (no re-run)");
+        refreshConditionsBtn.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                Map<String, String> edits = conditionPanel.collectAssignments();
+                try {
+                    ConditionManifestIO.saveAssignmentsPreservingMultiAxis(refreshDirectory, edits);
+                } catch (Exception ex) {
+                    IJ.log("Warning: could not save condition assignments: " + ex.getMessage());
+                }
+                AggregationConditionSupport.RefreshSummary summary =
+                        AggregationConditionSupport.refreshAllMasterTables(refreshDirectory);
+                String message = summary.anyUpdated()
+                        ? "Updated condition labels in " + summary.filesUpdated
+                            + " master table" + (summary.filesUpdated == 1 ? "" : "s") + "."
+                            + (summary.rowsUnresolved > 0
+                                ? "\n" + summary.rowsUnresolved
+                                    + " row(s) had no resolvable condition."
+                                : "")
+                        : "No master tables found to refresh. Run aggregation first.";
+                IJ.showMessage("Apply conditions to master tables", message);
+            }
+        });
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 3;
+        main.add(refreshConditionsBtn, gbc);
+        row++;
+
         row = addSectionHeader(main, gbc, row, "Grouping Granularity");
         final String[] granularityLabels = {
                 "Per-animal average (default)",
@@ -604,6 +634,15 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                                     boolean configFromCli,
                                     boolean runtimeHeadless) {
         return !suppressDialogs && !configFromCli && !runtimeHeadless;
+    }
+
+    /**
+     * Reapply the current {@code Conditions.csv} to existing master tables without
+     * re-running aggregation. Exposed for condition review / diagnostics / Excel /
+     * statistics callers that detect stale master-table condition labels.
+     */
+    public AggregationConditionSupport.RefreshSummary refreshExistingMasterConditions(String directory) {
+        return AggregationConditionSupport.refreshAllMasterTables(directory);
     }
 
     // -------------------------------------------------- ROI Properties loading
