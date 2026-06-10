@@ -9,6 +9,7 @@ import ij.WindowManager;
 import ij.measure.Calibration;
 import ij.measure.ResultsTable;
 import ij.process.ImageProcessor;
+import mcib3d.geom2.BoundingBox;
 
 import java.lang.reflect.Field;
 import java.util.HashMap;
@@ -483,6 +484,7 @@ public final class ObjectsCounter3DWrapper {
             rt.setValue("XM", i, comX);
             rt.setValue("YM", i, comY);
             rt.setValue("ZM", i, comZ);
+            writeBoundingBoxValues(rt, i, obj.getBoundingBox());
 
             // Label: pixel value in the label image (used by CPC colocalization)
             rt.setValue("Label", i, (int) obj.getLabel());
@@ -616,6 +618,12 @@ public final class ObjectsCounter3DWrapper {
         setTableHeading(rt, 4, "XM");
         setTableHeading(rt, 5, "YM");
         setTableHeading(rt, 6, "ZM");
+        setTableHeading(rt, 7, "BX");
+        setTableHeading(rt, 8, "BY");
+        setTableHeading(rt, 9, "BZ");
+        setTableHeading(rt, 10, "B-width");
+        setTableHeading(rt, 11, "B-height");
+        setTableHeading(rt, 12, "B-depth");
 
         for (int i = 0; i < objs.size(); i++) {
             Object o = objs.get(i);
@@ -651,6 +659,14 @@ public final class ObjectsCounter3DWrapper {
                 rt.setValue("ZM", i, 0);
             }
 
+            int[] topLeft = getIntArrayField(o, "bound_cube_TL");
+            rt.setValue("BX", i, intAt(topLeft, 0, 0));
+            rt.setValue("BY", i, intAt(topLeft, 1, 0));
+            rt.setValue("BZ", i, intAt(topLeft, 2, 0));
+            rt.setValue("B-width", i, getDoubleField(o, "bound_cube_width", 0));
+            rt.setValue("B-height", i, getDoubleField(o, "bound_cube_height", 0));
+            rt.setValue("B-depth", i, getDoubleField(o, "bound_cube_depth", 0));
+
             // Label: Counter3D uses 1-based sequential labels
             rt.setValue("Label", i, i + 1);
         }
@@ -668,9 +684,44 @@ public final class ObjectsCounter3DWrapper {
         return fallback;
     }
 
+    private static void writeBoundingBoxValues(ResultsTable table, int row, BoundingBox box) {
+        if (table == null) return;
+        if (box == null) {
+            table.setValue("BX", row, 0);
+            table.setValue("BY", row, 0);
+            table.setValue("BZ", row, 0);
+            table.setValue("B-width", row, 0);
+            table.setValue("B-height", row, 0);
+            table.setValue("B-depth", row, 0);
+            return;
+        }
+        table.setValue("BX", row, box.xmin);
+        table.setValue("BY", row, box.ymin);
+        table.setValue("BZ", row, box.zmin);
+        table.setValue("B-width", row, Math.max(0, box.xmax - box.xmin + 1));
+        table.setValue("B-height", row, Math.max(0, box.ymax - box.ymin + 1));
+        table.setValue("B-depth", row, Math.max(0, box.zmax - box.zmin + 1));
+    }
+
     @SuppressWarnings("deprecation")
     private static void setTableHeading(ResultsTable table, int column, String heading) {
         table.setHeading(column, heading);
+    }
+
+    private static int[] getIntArrayField(Object obj, String fieldName) {
+        try {
+            Field f = obj.getClass().getField(fieldName);
+            Object v = f.get(obj);
+            if (v instanceof int[]) {
+                return (int[]) v;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static int intAt(int[] values, int index, int fallback) {
+        return values != null && index >= 0 && index < values.length ? values[index] : fallback;
     }
 
     private static double[] getDoubleArrayField(Object obj, String fieldName) {

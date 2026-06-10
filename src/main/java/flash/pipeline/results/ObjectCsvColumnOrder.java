@@ -41,6 +41,14 @@ public final class ObjectCsvColumnOrder {
             "YM_um",
             "ZM_um"
     );
+    private static final Map<String, Integer> BOUNDING_BOX_ORDER = fixedOrder(
+            "BX",
+            "BY",
+            "BZ",
+            "B-width",
+            "B-height",
+            "B-depth"
+    );
     private static final Map<String, Integer> VORONOI_ORDER = fixedOrder(
             "Voronoi_TerritoryArea_um2",
             "Voronoi_NumNeighbors"
@@ -216,8 +224,11 @@ public final class ObjectCsvColumnOrder {
         exact = CENTROID_ORDER.get(col);
         if (exact != null) return new ColumnKey(3, exact, 0, "", originalIndex);
 
+        exact = BOUNDING_BOX_ORDER.get(col);
+        if (exact != null) return new ColumnKey(4, exact, 0, "", originalIndex);
+
         String lineSet = lineDistanceName(channelName, col);
-        if (lineSet != null) return new ColumnKey(4, 0, 0, lineSet, originalIndex);
+        if (lineSet != null) return new ColumnKey(4, 100, 0, lineSet, originalIndex);
 
         String partner = overlapPartner(col);
         if (partner != null) {

@@ -9,6 +9,7 @@ import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
@@ -203,26 +204,30 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
-    public void prepareQcImageOpen_returnsCancelWhenMultipleLifFilesExist() throws Exception {
+    public void prepareQcImageOpen_usesDispatcherContainerChoiceWhenMultipleContainersExist() throws Exception {
         File dir = temp.newFolder("ambiguous");
         new File(dir, "alpha.lif").createNewFile();
-        new File(dir, "beta.lif").createNewFile();
+        File beta = new File(dir, "beta.lif");
+        beta.createNewFile();
 
-        CreateBinFileAnalysis.QcOpenPreparation result =
-                CreateBinFileAnalysis.prepareQcImageOpen(
-                        dir.getAbsolutePath(),
-                        Collections.singletonList(Integer.valueOf(0)),
-                        false);
+        setContainerChoiceOverrideForTests("beta.lif");
+        try {
+            CreateBinFileAnalysis.QcOpenPreparation result =
+                    CreateBinFileAnalysis.prepareQcImageOpen(
+                            dir.getAbsolutePath(),
+                            Collections.singletonList(Integer.valueOf(0)),
+                            false);
 
-        assertEquals(CreateBinFileAnalysis.QcOpenStatus.CANCEL, result.status);
-        assertEquals(
-                "Cannot run quality check: Multiple .lif files found in directory (expected exactly one): "
-                        + "alpha.lif, beta.lif\nDirectory: " + dir.getAbsolutePath(),
-                result.message);
+            assertEquals(CreateBinFileAnalysis.QcOpenStatus.READY, result.status);
+            assertEquals(beta.getAbsolutePath(), result.sourceFile.getAbsolutePath());
+        } finally {
+            setContainerChoiceOverrideForTests(null);
+            clearContainerChoiceCacheForTests();
+        }
     }
 
     @Test
-    public void prepareQcImageOpen_returnsCancelWhenNoLifFileExists() throws Exception {
+    public void prepareQcImageOpen_returnsCancelWhenNoCompatibleSourceExists() throws Exception {
         File dir = temp.newFolder("missing");
 
         CreateBinFileAnalysis.QcOpenPreparation result =
@@ -232,9 +237,8 @@ public class CreateBinFileAnalysisTest {
                         false);
 
         assertEquals(CreateBinFileAnalysis.QcOpenStatus.CANCEL, result.status);
-        assertEquals(
-                "Cannot run quality check: No .lif file found in: " + dir.getAbsolutePath(),
-                result.message);
+        assertTrue(result.message.contains("No compatible input found"));
+        assertTrue(result.message.contains(dir.getAbsolutePath()));
     }
 
     @Test
@@ -326,7 +330,7 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
-    public void prepareQcImageOpen_tiffProjectDoesNotFallBackToRootLif() throws Exception {
+    public void prepareQcImageOpen_tiffProjectUsesProjectTiffInsteadOfRootLif() throws Exception {
         File outputRoot = temp.newFolder("project-tiff-output");
         assertTrue(new File(outputRoot, "stale-root.lif").createNewFile());
         File sourceRoot = temp.newFolder("project-tiff-sources");
@@ -348,8 +352,27 @@ public class CreateBinFileAnalysisTest {
                         Collections.singletonList(Integer.valueOf(0)),
                         false);
 
-        assertEquals(CreateBinFileAnalysis.QcOpenStatus.CANCEL, result.status);
-        assertTrue(result.message.contains("Project contains TIFF sources"));
+        assertEquals(CreateBinFileAnalysis.QcOpenStatus.READY, result.status);
+        assertEquals(tiff.getAbsolutePath(), result.sourceFile.getAbsolutePath());
+        assertEquals(Collections.singletonList(Integer.valueOf(0)), result.selectedSeriesIndexes);
+        assertTrue(result.message.isEmpty());
+    }
+
+    @Test
+    public void prepareQcImageOpen_returnsReadyForLooseTiffs() throws Exception {
+        File dir = temp.newFolder("loose-tiffs");
+        File tiff = new File(dir, "MouseA_LH_SCN.tif");
+        assertTrue(tiff.createNewFile());
+
+        CreateBinFileAnalysis.QcOpenPreparation result =
+                CreateBinFileAnalysis.prepareQcImageOpen(
+                        dir.getAbsolutePath(),
+                        Collections.singletonList(Integer.valueOf(0)),
+                        false);
+
+        assertEquals(CreateBinFileAnalysis.QcOpenStatus.READY, result.status);
+        assertEquals(tiff.getAbsolutePath(), result.sourceFile.getAbsolutePath());
+        assertEquals("loose-tiffs", result.sourceLabel);
     }
 
     @Test
@@ -368,6 +391,20 @@ public class CreateBinFileAnalysisTest {
         assertEquals(5, images.get(1).getSeriesIndex());
         assertEquals("Experiment_Mouse3.lif :: Series 6", images.get(1).getSeriesName());
         assertEquals(null, images.get(0).getImage());
+    }
+
+    @Test
+    public void zSliceContextImagesUseLooseTiffLabels() {
+        List<SeriesMeta> metas = Arrays.asList(
+                new SeriesMeta(0, "loose-tiffs - Mouse3_LH_CA1", 12, 1.0, 1.0, 1.0, "pixel"),
+                new SeriesMeta(1, "loose-tiffs - Mouse4_RH_SCN", 8, 1.0, 1.0, 1.0, "pixel"));
+
+        List<ConfigQcContext.ConfigQcImage> images =
+                CreateBinFileAnalysis.zSliceContextImages("loose-tiffs", metas);
+
+        assertEquals(2, images.size());
+        assertEquals("loose-tiffs :: Mouse3_LH_CA1", images.get(0).getSeriesName());
+        assertEquals("loose-tiffs :: Mouse4_RH_SCN", images.get(1).getSeriesName());
     }
 
     @Test
@@ -2201,6 +2238,20 @@ public class CreateBinFileAnalysisTest {
                 selectedSeriesIndexes,
                 cfg,
                 Collections.emptyMap());
+    }
+
+    private static void setContainerChoiceOverrideForTests(String name) throws Exception {
+        Method method = ImageSourceDispatcher.class.getDeclaredMethod(
+                "setContainerChoiceOverrideForTests", String.class);
+        method.setAccessible(true);
+        method.invoke(null, name);
+    }
+
+    private static void clearContainerChoiceCacheForTests() throws Exception {
+        Method method = ImageSourceDispatcher.class.getDeclaredMethod(
+                "clearContainerChoiceCacheForTests");
+        method.setAccessible(true);
+        method.invoke(null);
     }
 
     private static Object selectionField(Object selection, String fieldName) throws Exception {

@@ -2,6 +2,7 @@ package flash.pipeline.objects;
 
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.ResultsTable;
 import ij.process.ByteProcessor;
 import ij.process.FloatProcessor;
 import org.junit.Test;
@@ -87,6 +88,37 @@ public class ObjectsCounter3DWrapperTest {
 
         assertEquals(2, result.getStatistics().size());
         assertEquals(2, CpcUtils.extractObjects(result.getObjectsMap()).size());
+    }
+
+    @Test
+    public void fromLabelImageReportsBoundingCubeColumns() {
+        assumeTrue(ObjectsCounter3DWrapper.isMcib3dAvailable());
+
+        ImageStack labels = new ImageStack(5, 5);
+        for (int z = 0; z < 3; z++) {
+            ByteProcessor slice = new ByteProcessor(5, 5);
+            for (int y = 2; y <= 4; y++) {
+                for (int x = 1; x <= 3; x++) {
+                    slice.set(x, y, 7);
+                }
+            }
+            labels.addSlice(slice);
+        }
+        ImagePlus labelImage = new ImagePlus("labels", labels);
+        ImagePlus redirect = new ImagePlus("redirect", labels.duplicate());
+
+        ObjectsCounter3DWrapper.Result result = new ObjectsCounter3DWrapper()
+                .fromLabelImage(labelImage, redirect, 0, Integer.MAX_VALUE, true, false);
+        ResultsTable stats = result.getStatistics();
+
+        assertEquals(1, stats.size());
+        assertEquals(7.0, stats.getValue("Label", 0), 0.0);
+        assertEquals(1.0, stats.getValue("BX", 0), 0.0);
+        assertEquals(2.0, stats.getValue("BY", 0), 0.0);
+        assertEquals(0.0, stats.getValue("BZ", 0), 0.0);
+        assertEquals(3.0, stats.getValue("B-width", 0), 0.0);
+        assertEquals(3.0, stats.getValue("B-height", 0), 0.0);
+        assertEquals(3.0, stats.getValue("B-depth", 0), 0.0);
     }
 
     @Test

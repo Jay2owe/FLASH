@@ -1,5 +1,7 @@
 package flash.pipeline.project;
 
+import flash.pipeline.naming.ConditionAssignments;
+import flash.pipeline.naming.ConditionAxis;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -125,6 +127,26 @@ public class ProjectBuilderConditionAssignmentsTest {
         assertEquals("Z", keys.get(0));
         assertEquals("A", keys.get(1));
         assertEquals("M", keys.get(2));
+    }
+
+    @Test
+    public void derivesMultiAxisConditionAssignmentModel() {
+        ProjectFile project = new ProjectFile();
+        project.conditionAxes.add(ConditionAxis.of("Genotype"));
+        project.conditionAxes.add(ConditionAxis.of("Timepoint"));
+
+        ProjectFile.Item item = item("Mouse3", "hAPP", true);
+        item.conditions.put("genotype", "hAPP");
+        item.conditions.put("timepoint", "WeekFour");
+        project.items.add(item);
+
+        ConditionAssignments out = ProjectBuilderDialog.deriveConditionAssignmentsModel(project);
+
+        assertEquals(2, out.axes().size());
+        assertEquals("hAPP", out.get("Mouse3", "genotype"));
+        assertEquals("WeekFour", out.get("Mouse3", "timepoint"));
+        assertEquals("hAPP_WeekFour",
+                ProjectBuilderDialog.deriveConditionAssignments(project).get("Mouse3"));
     }
 
     @Test

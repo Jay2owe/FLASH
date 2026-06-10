@@ -2,7 +2,6 @@ package flash.pipeline.runrecord;
 
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
-import flash.pipeline.ui.PipelineDialog;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -10,7 +9,6 @@ import org.junit.rules.TemporaryFolder;
 
 import javax.swing.JButton;
 import java.awt.Component;
-import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -62,33 +60,17 @@ public class LoadFromRunButtonHeadlessTest {
                     }
                 });
 
-        JButton button;
-        if (GraphicsEnvironment.isHeadless()) {
-            button = LoadFromRunButton.create("IntensityAnalysisV2", projectRoot,
-                    new LoadedRunParameterApplier() {
-                        @Override public LoadedRunParameters.Result applyLoadedParameters(
-                                Map<String, Object> parameters) {
-                            applied.set(parameters);
-                            LoadedRunParameters.PresetLoad<?> loaded =
-                                    LoadedRunParameters.intensityPreset(parameters);
-                            LoadedRunParameters.rememberLastResult(loaded.result);
-                            return loaded.result;
-                        }
-                    });
-        } else {
-            PipelineDialog dialog = new PipelineDialog("Load test");
-            button = LoadFromRunButton.install(dialog, "IntensityAnalysisV2", projectRoot,
-                    new LoadedRunParameterApplier() {
-                        @Override public LoadedRunParameters.Result applyLoadedParameters(
-                                Map<String, Object> parameters) {
-                            applied.set(parameters);
-                            LoadedRunParameters.PresetLoad<?> loaded =
-                                    LoadedRunParameters.intensityPreset(parameters);
-                            LoadedRunParameters.rememberLastResult(loaded.result);
-                            return loaded.result;
-                        }
-                    });
-        }
+        JButton button = LoadFromRunButton.create("IntensityAnalysisV2", projectRoot,
+                new LoadedRunParameterApplier() {
+                    @Override public LoadedRunParameters.Result applyLoadedParameters(
+                            Map<String, Object> parameters) {
+                        applied.set(parameters);
+                        LoadedRunParameters.PresetLoad<?> loaded =
+                                LoadedRunParameters.intensityPreset(parameters);
+                        LoadedRunParameters.rememberLastResult(loaded.result);
+                        return loaded.result;
+                    }
+                });
 
         button.doClick();
 

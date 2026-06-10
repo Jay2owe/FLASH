@@ -1,11 +1,10 @@
 package flash.pipeline.runrecord.ui;
 
-import org.junit.Assume;
+import flash.pipeline.testutil.UiTestAssumptions;
+
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
-
-import java.awt.GraphicsEnvironment;
 
 import static org.junit.Assert.assertEquals;
 
@@ -16,7 +15,7 @@ public class RunsBrowserDialogSmokeTest {
 
     @Test
     public void constructsWhenGraphicsAreAvailable() {
-        Assume.assumeFalse(GraphicsEnvironment.isHeadless());
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
 
         RunsBrowserDialog dialog = new RunsBrowserDialog(null, temp.getRoot());
         try {

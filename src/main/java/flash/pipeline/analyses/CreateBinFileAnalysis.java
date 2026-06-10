@@ -3155,16 +3155,39 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     enum QcOpenStatus { READY, CANCEL, SKIP }
 
+    static final class QcSourceReference {
+        final File sourceFile;
+        final String sourceLabel;
+
+        private QcSourceReference(File sourceFile, String sourceLabel) {
+            this.sourceFile = sourceFile;
+            this.sourceLabel = hasText(sourceLabel)
+                    ? sourceLabel.trim()
+                    : (sourceFile == null ? "" : sourceFile.getName());
+        }
+
+        static QcSourceReference of(File sourceFile, String sourceLabel) {
+            return new QcSourceReference(sourceFile, sourceLabel);
+        }
+    }
+
     static final class QcOpenPreparation {
         final QcOpenStatus status;
         final File lifFile;
+        final File sourceFile;
+        final String sourceLabel;
         final List<Integer> selectedSeriesIndexes;
         final String message;
 
         private QcOpenPreparation(QcOpenStatus status, File lifFile,
+                                  String sourceLabel,
                                   List<Integer> selectedSeriesIndexes, String message) {
             this.status = status;
             this.lifFile = lifFile;
+            this.sourceFile = lifFile;
+            this.sourceLabel = hasText(sourceLabel)
+                    ? sourceLabel.trim()
+                    : (lifFile == null ? "" : lifFile.getName());
             this.selectedSeriesIndexes = selectedSeriesIndexes == null
                     ? new ArrayList<Integer>()
                     : new ArrayList<Integer>(selectedSeriesIndexes);
@@ -3172,15 +3195,22 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         }
 
         static QcOpenPreparation ready(File lifFile, List<Integer> selectedSeriesIndexes) {
-            return new QcOpenPreparation(QcOpenStatus.READY, lifFile, selectedSeriesIndexes, "");
+            return ready(lifFile, selectedSeriesIndexes,
+                    lifFile == null ? "" : lifFile.getName());
+        }
+
+        static QcOpenPreparation ready(File sourceFile, List<Integer> selectedSeriesIndexes,
+                                       String sourceLabel) {
+            return new QcOpenPreparation(QcOpenStatus.READY, sourceFile, sourceLabel,
+                    selectedSeriesIndexes, "");
         }
 
         static QcOpenPreparation cancel(String message) {
-            return new QcOpenPreparation(QcOpenStatus.CANCEL, null, null, message);
+            return new QcOpenPreparation(QcOpenStatus.CANCEL, null, "", null, message);
         }
 
         static QcOpenPreparation skip(String message) {
-            return new QcOpenPreparation(QcOpenStatus.SKIP, null, null, message);
+            return new QcOpenPreparation(QcOpenStatus.SKIP, null, "", null, message);
         }
 
         boolean isReady() {
@@ -4632,20 +4662,24 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             return QcOpenPreparation.cancel("");
         }
         try {
+            QcSourceReference source = resolveQcSourceReference(directory);
             return QcOpenPreparation.ready(
-                    resolveQcContainerFile(directory),
-                    Collections.<Integer>emptyList());
+                    source.sourceFile,
+                    Collections.<Integer>emptyList(),
+                    source.sourceLabel);
         } catch (IllegalArgumentException e) {
             return QcOpenPreparation.cancel("Cannot run quality check: " + e.getMessage());
         }
     }
 
-    private static File resolveQcContainerFile(String directory) {
+    private static QcSourceReference resolveQcSourceReference(String directory) {
+        File dir = new File(directory);
         boolean hasProjectManifest = ImageSourceDispatcher.hasProjectManifest(directory);
         List<File> projectContainers = ImageSourceDispatcher.projectContainerFiles(directory);
         if (!projectContainers.isEmpty()) {
             if (projectContainers.size() == 1) {
-                return projectContainers.get(0);
+                File source = projectContainers.get(0);
+                return QcSourceReference.of(source, source.getName());
             }
             throw new IllegalArgumentException(
                     "Project contains multiple container files. "
@@ -4653,28 +4687,94 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         }
         List<File> projectTiffs = ImageSourceDispatcher.projectTiffFiles(directory);
         if (!projectTiffs.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Project contains TIFF sources. "
-                            + "Set Up Configuration quality check currently supports container sources.");
+            return QcSourceReference.of(projectTiffs.get(0), sourceLabelForTiffs(dir, projectTiffs));
         }
         if (hasProjectManifest) {
             throw new IllegalArgumentException(
-                    "Project does not contain an included container source for quality check.");
+                    "Project does not contain an included image source for quality check.");
         }
-        return LifIO.requireSingleLifFile(directory);
+
+        ImageSourceDispatcher.SourceMode mode = ImageSourceDispatcher.detectMode(directory);
+        if (mode == ImageSourceDispatcher.SourceMode.CONTAINER) {
+            File source = ImageSourceDispatcher.selectContainer(dir);
+            return QcSourceReference.of(source, source.getName());
+        }
+        if (mode == ImageSourceDispatcher.SourceMode.TIFF_INPUT_SUBFOLDER) {
+            List<File> tiffs = ImageSourceDispatcher.listTiffs(new File(dir, "input"));
+            if (!tiffs.isEmpty()) {
+                return QcSourceReference.of(tiffs.get(0), "input");
+            }
+        }
+        if (mode == ImageSourceDispatcher.SourceMode.TIFF_LOOSE) {
+            List<File> tiffs = ImageSourceDispatcher.listTiffs(dir);
+            if (!tiffs.isEmpty()) {
+                return QcSourceReference.of(tiffs.get(0), sourceLabelForTiffs(dir, tiffs));
+            }
+        }
+        throw new IllegalArgumentException(
+                "No compatible image source found in: " + dir.getAbsolutePath());
+    }
+
+    private static File resolveQcContainerFile(String directory) {
+        QcSourceReference source = resolveQcSourceReference(directory);
+        if (source.sourceFile != null && isContainerSourceName(source.sourceFile.getName())) {
+            return source.sourceFile;
+        }
+        throw new IllegalArgumentException(
+                "Resolved source is not a container file: "
+                        + (source.sourceFile == null ? "(none)" : source.sourceFile.getName()));
+    }
+
+    private static boolean isContainerSourceName(String name) {
+        if (name == null) return false;
+        String lower = name.toLowerCase(Locale.ROOT);
+        for (String ext : ImageSourceDispatcher.CONTAINER_EXTENSIONS) {
+            if (lower.endsWith(ext)) return true;
+        }
+        return false;
+    }
+
+    private static String sourceLabelForTiffs(File dir, List<File> tiffs) {
+        if (dir != null && hasText(dir.getName())) {
+            return dir.getName();
+        }
+        if (tiffs != null && !tiffs.isEmpty() && tiffs.get(0) != null) {
+            File parent = tiffs.get(0).getParentFile();
+            if (parent != null && hasText(parent.getName())) {
+                return parent.getName();
+            }
+            return tiffs.get(0).getName();
+        }
+        return "TIFF input";
+    }
+
+    private static String sourceDisplayLabel(DeferredImageSupplier supplier, String fallback) {
+        if (supplier != null && hasText(supplier.getContainerDisplayName())) {
+            return supplier.getContainerDisplayName();
+        }
+        return hasText(fallback) ? fallback.trim() : "image source";
     }
 
     static QcOpenPreparation prepareQcImageOpen(String directory,
                                                 List<Integer> selectedSeriesIndexes,
                                                 boolean selectionCanceled) {
-        QcOpenPreparation lifResolution = resolveQcLifFile(directory);
-        if (!lifResolution.isReady()) return lifResolution;
-        return prepareQcImageOpen(lifResolution.lifFile, selectedSeriesIndexes, selectionCanceled);
+        QcOpenPreparation sourceResolution = resolveQcLifFile(directory);
+        if (!sourceResolution.isReady()) return sourceResolution;
+        return prepareQcImageOpen(sourceResolution.sourceFile, selectedSeriesIndexes,
+                selectionCanceled, sourceResolution.sourceLabel);
     }
 
     static QcOpenPreparation prepareQcImageOpen(File lifFile,
                                                 List<Integer> selectedSeriesIndexes,
                                                 boolean selectionCanceled) {
+        return prepareQcImageOpen(lifFile, selectedSeriesIndexes, selectionCanceled,
+                lifFile == null ? "" : lifFile.getName());
+    }
+
+    private static QcOpenPreparation prepareQcImageOpen(File sourceFile,
+                                                        List<Integer> selectedSeriesIndexes,
+                                                        boolean selectionCanceled,
+                                                        String sourceLabel) {
         if (!gateBioFormatsFeature("Set Up Configuration quality-check image loading")) {
             return QcOpenPreparation.cancel("");
         }
@@ -4695,49 +4795,54 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     "No images were selected for quality check.\n"
                             + "Settings will be saved without visual verification.");
         }
-        return QcOpenPreparation.ready(lifFile, orderedIndexes);
+        return QcOpenPreparation.ready(sourceFile, orderedIndexes, sourceLabel);
     }
 
     protected QcImageOpenResult openImagesForQC(String directory, File binFolder,
                                                 BinUserConfig cfg, boolean[][] customSettings) {
-        QcOpenPreparation lifResolution = resolveQcLifFile(directory);
-        if (!lifResolution.isReady()) {
-            return QcImageOpenResult.fromPreparation(lifResolution, "");
+        QcOpenPreparation sourceResolution = resolveQcLifFile(directory);
+        if (!sourceResolution.isReady()) {
+            return QcImageOpenResult.fromPreparation(sourceResolution, "");
         }
 
-        File lifFile = lifResolution.lifFile;
-        boolean projectBackedQc = !ImageSourceDispatcher.projectContainerFiles(directory).isEmpty();
+        File sourceFile = sourceResolution.sourceFile;
+        String sourceLabel = sourceResolution.sourceLabel;
+        boolean projectBackedQc = ImageSourceDispatcher.hasProjectManifest(directory);
 
         DeferredImageSupplier qcSupplier;
         List<SeriesMeta> qcSeriesMetas;
         try {
             qcSupplier = ImageSourceDispatcher.createSupplier(directory);
+            sourceLabel = sourceDisplayLabel(qcSupplier, sourceLabel);
             qcSeriesMetas = filterSelectableSeries(
-                    lifFile, ImageSourceDispatcher.readAllMetadata(directory));
+                    sourceLabel, ImageSourceDispatcher.readAllMetadata(directory));
         } catch (Exception e) {
             IJ.log("Warning: could not read series count: " + e.getMessage());
-            if (projectBackedQc) {
+            if (projectBackedQc || sourceFile == null
+                    || !isContainerSourceName(sourceFile.getName())) {
                 return QcImageOpenResult.cancel(
-                        "Cannot run quality check: project source metadata could not be read: "
+                        "Cannot run quality check: source metadata could not be read: "
                                 + e.getMessage());
             }
             try {
-                qcSupplier = new DeferredImageSupplier(lifFile);
-                qcSeriesMetas = filterSelectableSeries(lifFile, LifIO.readAllSeriesMetadata(lifFile));
+                qcSupplier = new DeferredImageSupplier(sourceFile);
+                sourceLabel = sourceDisplayLabel(qcSupplier, sourceLabel);
+                qcSeriesMetas = filterSelectableSeries(
+                        sourceLabel, LifIO.readAllSeriesMetadata(sourceFile));
             } catch (Exception fallback) {
-                IJ.log("Warning: direct .lif metadata fallback also failed: " + fallback.getMessage());
+                IJ.log("Warning: direct container metadata fallback also failed: " + fallback.getMessage());
                 qcSupplier = null;
                 qcSeriesMetas = new ArrayList<SeriesMeta>();
             }
         }
         int totalSeries = qcSeriesMetas.size();
-        IJ.log("Set Up QC image selection: " + lifFile.getName()
+        IJ.log("Set Up QC image selection: " + sourceLabel
                 + " has " + totalSeries + " selectable image series.");
 
         PipelineDialog pd = new PipelineDialog("Quality Check - Image Selection");
         installWizardCancelHook(pd);
         pd.addSetupHelpHeader("Select Images for Quality Check", SetupHelpCatalog.QC_IMAGE_SELECTION);
-        pd.addMessage("File: " + lifFile.getName() + "  (" + totalSeries + " image series found)");
+        pd.addMessage("Source: " + sourceLabel + "  (" + totalSeries + " image series found)");
         JComboBox<String> modeChoice = pd.addChoice("Selection mode",
                 new String[]{QC_SELECTION_MODE_MANUAL, QC_SELECTION_MODE_RANDOM,
                         QC_SELECTION_MODE_MIN_MAX_OVERALL, QC_SELECTION_MODE_MIN_MAX_CONDITION},
@@ -4804,7 +4909,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             boolean selectionCanceled = false;
             String resultMessage = "";
             if (QC_SELECTION_MODE_MANUAL.equals(mode)) {
-                selectedSeriesIndexes = showManualQcSeriesSelection(lifFile, qcSeriesMetas);
+                selectedSeriesIndexes = showManualQcSeriesSelection(sourceLabel, qcSeriesMetas);
                 selectionCanceled = selectedSeriesIndexes == null;
             } else if (isMinMaxSelectionMode(mode)) {
                 List<QcSelectionChannel> qcChannels = buildQcSelectionChannels(cfg, customSettings);
@@ -4820,7 +4925,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 boolean metadataChanged = false;
                 if (requiresMinMaxConditionMetadataReview(mode)) {
                     MetadataReviewResult metadataReview =
-                            showMinMaxConditionMetadataReview(directory, lifFile, qcSeriesMetas);
+                            showMinMaxConditionMetadataReview(directory, sourceLabel, qcSeriesMetas);
                     if (metadataReview == null) {
                         return QcImageOpenResult.cancel("Min/max metadata review cancelled.");
                     }
@@ -4834,14 +4939,14 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 QcMinMaxPerConditionSelector.SelectionResult selection;
                 if (QC_SELECTION_MODE_MIN_MAX_OVERALL.equals(mode)) {
                     selection = QcMinMaxPerConditionSelector.selectMinMaxOverall(
-                            directory, binFolder, lifFile, qcSupplier, qcSeriesMetas,
+                            directory, binFolder, sourceFile, qcSupplier, qcSeriesMetas,
                             qcChannels, cfg.getZSliceConfig(),
                             recomputeMinMax || metadataChanged,
                             selectorThreads,
                             reviewedMetadata);
                 } else {
                     selection = QcMinMaxPerConditionSelector.selectMinMaxPerCondition(
-                            directory, binFolder, lifFile, qcSupplier, qcSeriesMetas,
+                            directory, binFolder, sourceFile, qcSupplier, qcSeriesMetas,
                             qcChannels, cfg.getZSliceConfig(),
                             recomputeMinMax || metadataChanged,
                             selectorThreads,
@@ -4873,16 +4978,17 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
 
             QcOpenPreparation preparation =
-                    prepareQcImageOpen(lifFile, selectedSeriesIndexes, selectionCanceled);
+                    prepareQcImageOpen(sourceFile, selectedSeriesIndexes,
+                            selectionCanceled, sourceLabel);
             if (!preparation.isReady()) {
                 return QcImageOpenResult.fromPreparation(preparation, resultMessage);
             }
 
             IJ.log("Set Up QC opening " + preparation.selectedSeriesIndexes.size()
-                    + " selected image series from " + preparation.lifFile.getName()
+                    + " selected image series from " + preparation.sourceLabel
                     + ": " + summarizeSeriesIndexes(preparation.selectedSeriesIndexes));
             List<QcImageSelection> images =
-                    openQcSelections(qcSupplier, preparation.lifFile,
+                    openQcSelections(qcSupplier, preparation.sourceFile,
                             preparation.selectedSeriesIndexes, cfg,
                             minMaxSelectionBySeries,
                             minMaxSelectionBySeriesAndChannel,
@@ -4891,7 +4997,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 cleanupImages(images);
                 return QcImageOpenResult.cancel(
                         "Cannot run quality check: Failed to open one or more selected image series from "
-                                + lifFile.getName() + ".");
+                                + preparation.sourceLabel + ".");
             }
             IJ.log("Set Up QC selected images ready: " + images.size()
                     + " image" + (images.size() == 1 ? "" : "s") + " opened.");
@@ -4903,9 +5009,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     private MetadataReviewResult showMinMaxConditionMetadataReview(
             String directory,
-            File lifFile,
+            String sourceLabel,
             List<SeriesMeta> metas) throws Exception {
-        List<MetadataReviewRow> rows = buildMetadataReviewRows(directory, lifFile, metas);
+        List<MetadataReviewRow> rows = buildMetadataReviewRows(directory, sourceLabel, metas);
         if (rows.isEmpty()) {
             return new MetadataReviewResult(
                     new LinkedHashMap<Integer, QcMinMaxPerConditionSelector.MetadataAssignment>(),
@@ -4968,7 +5074,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     private List<MetadataReviewRow> buildMetadataReviewRows(
             String directory,
-            File lifFile,
+            String sourceLabel,
             List<SeriesMeta> metas) throws Exception {
         List<MetadataReviewRow> rows = new ArrayList<MetadataReviewRow>();
         if (metas == null || metas.isEmpty()) return rows;
@@ -4978,12 +5084,12 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         LinkedHashMap<String, OrientationManifestRow> savedByKey =
                 OrientationManifestIO.readByImageKeyIfExists(directory);
         Map<Integer, OrientationManifestRow> savedBySeries =
-                savedOrientationRowsBySeries(directory, lifFile);
+                savedOrientationRowsBySeries(directory, source);
         LinkedHashSet<String> animals = new LinkedHashSet<String>();
 
         for (SeriesMeta meta : metas) {
             if (meta == null) continue;
-            String originalName = metadataOriginalName(lifFile, meta);
+            String originalName = metadataOriginalName(sourceLabel, meta);
             OrientationImageIdentity identity = source.identityFor(meta.index, originalName);
             OrientationManifestRow saved = savedByKey.get(identity.imageKey);
             if (saved == null) {
@@ -5001,7 +5107,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
             MetadataReviewRow row = new MetadataReviewRow();
             row.seriesIndex = meta.index;
-            row.seriesLabel = seriesDisplayLabel(lifFile, meta);
+            row.seriesLabel = seriesDisplayLabel(sourceLabel, meta);
             row.imageKey = identity.imageKey;
             row.sourceFile = identity.sourceFile;
             row.oneBasedSeriesIndex = identity.seriesIndex;
@@ -5055,13 +5161,15 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     private Map<Integer, OrientationManifestRow> savedOrientationRowsBySeries(
             String directory,
-            File lifFile) {
+            OrientationImageIdentity.SourceContext source) {
         Map<Integer, OrientationManifestRow> bySeries =
                 new LinkedHashMap<Integer, OrientationManifestRow>();
-        String sourceFile = lifFile == null ? "" : lifFile.getName();
         for (OrientationManifestRow row : OrientationManifestIO.readIfExists(directory)) {
             if (row == null) continue;
-            if (!sourceFile.isEmpty() && !sourceFile.equals(row.sourceFile)) continue;
+            String expectedSource = source == null
+                    ? ""
+                    : source.sourceFileFor(row.seriesIndex - 1, row.originalName);
+            if (!expectedSource.isEmpty() && !expectedSource.equals(row.sourceFile)) continue;
             bySeries.put(Integer.valueOf(row.seriesIndex), row);
         }
         return bySeries;
@@ -5139,16 +5247,20 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     }
 
     private static String metadataOriginalName(File lifFile, SeriesMeta meta) {
+        return metadataOriginalName(lifFile == null ? "" : stringValue(lifFile.getName()), meta);
+    }
+
+    private static String metadataOriginalName(String sourceLabel, SeriesMeta meta) {
         if (meta == null) return "";
         if (meta.name != null && !meta.name.trim().isEmpty()) {
             String name = meta.name.trim();
             if (name.indexOf(" - ") >= 0) {
                 return name;
             }
-            String container = lifFile == null ? "" : stringValue(lifFile.getName());
-            return container.isEmpty() ? name : container + " - " + name;
+            String source = stringValue(sourceLabel);
+            return source.isEmpty() ? name : source + " - " + name;
         }
-        return seriesDisplayLabelText(lifFile, meta);
+        return seriesDisplayLabelText(sourceLabel, meta);
     }
 
     private static String firstNonBlank(String... values) {
@@ -5393,7 +5505,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         return selected;
     }
 
-    private List<Integer> showManualQcSeriesSelection(File lifFile, List<SeriesMeta> metas) {
+    private List<Integer> showManualQcSeriesSelection(String sourceLabel, List<SeriesMeta> metas) {
         PipelineDialog pd = new PipelineDialog("Quality Check - Manual Selection");
         installWizardCancelHook(pd);
         pd.setPrimaryButtonText(NextStepLabels.QC_STAGES);
@@ -5402,7 +5514,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         ToggleSwitch[] toggles = new ToggleSwitch[metas.size()];
         for (int i = 0; i < metas.size(); i++) {
             SeriesMeta meta = metas.get(i);
-            String name = seriesDisplayLabel(lifFile, meta);
+            String name = seriesDisplayLabel(sourceLabel, meta);
             toggles[i] = pd.addToggle((i + 1) + ". " + name + " (" + meta.nSlices + " z)", i == 0);
         }
         if (!pd.showDialog()) return null;
@@ -5414,14 +5526,14 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         return selected;
     }
 
-    private List<SeriesMeta> filterSelectableSeries(File lifFile, List<SeriesMeta> metas) {
+    private List<SeriesMeta> filterSelectableSeries(String sourceLabel, List<SeriesMeta> metas) {
         List<SeriesMeta> filtered = new ArrayList<SeriesMeta>();
         if (metas == null) return filtered;
 
         for (SeriesMeta meta : metas) {
             if (meta == null) continue;
             if (ImageNameParser.isPreviewSeriesName(meta.name)) {
-                IJ.log("Skipping preview/thumbnail series: " + seriesDisplayLabel(lifFile, meta));
+                IJ.log("Skipping preview/thumbnail series: " + seriesDisplayLabel(sourceLabel, meta));
                 continue;
             }
             filtered.add(meta);
@@ -5433,12 +5545,20 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         return seriesDisplayLabelText(lifFile, meta);
     }
 
+    private String seriesDisplayLabel(String sourceLabel, SeriesMeta meta) {
+        return seriesDisplayLabelText(sourceLabel, meta);
+    }
+
     static String seriesDisplayLabelText(File lifFile, SeriesMeta meta) {
+        return seriesDisplayLabelText(lifFile == null ? "" : lifFile.getName(), meta);
+    }
+
+    static String seriesDisplayLabelText(String sourceLabel, SeriesMeta meta) {
         if (meta == null) return "Series";
         String fallback = "Series " + (meta.index + 1);
         String seriesName = (meta.name == null || meta.name.trim().isEmpty()) ? fallback : meta.name.trim();
         return ImageNameParser.buildMultiSeriesDisplayLabel(
-                lifFile == null ? "" : lifFile.getName(),
+                sourceLabel == null ? "" : sourceLabel,
                 seriesName);
     }
 
@@ -5879,9 +5999,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             return "back";
         }
 
-        File lifFile;
+        String sourceLabel;
         try {
-            lifFile = resolveQcContainerFile(directory);
+            sourceLabel = resolveQcSourceReference(directory).sourceLabel;
         } catch (IllegalArgumentException e) {
             IJ.showMessage("Set Up Configuration",
                     "Cannot run z-slice selection: " + e.getMessage());
@@ -5890,8 +6010,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
         try {
             DeferredImageSupplier supplier = ImageSourceDispatcher.createSupplier(directory);
+            sourceLabel = sourceDisplayLabel(supplier, sourceLabel);
             List<SeriesMeta> metas = filterSelectableSeries(
-                    lifFile, ImageSourceDispatcher.readAllMetadata(directory));
+                    sourceLabel, ImageSourceDispatcher.readAllMetadata(directory));
             if (metas.isEmpty()) {
                 cfg.zSliceMode = ZSliceMode.FULL;
                 cfg.zSliceSelections.clear();
@@ -5899,7 +6020,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
 
             if (useEmbeddedZSliceSelectionStage()) {
-                return runEmbeddedZSliceSelection(directory, lifFile, supplier, cfg, metas);
+                return runEmbeddedZSliceSelection(directory, sourceLabel, supplier, cfg, metas);
             }
 
             int totalSeries = metas.size();
@@ -5921,7 +6042,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 ImagePlus imp = supplier.openSeries(meta.index);
                 if (imp == null) {
                     IJ.showMessage("Set Up Configuration",
-                            "Failed to open " + seriesDisplayLabel(lifFile, meta) + " for z-slice selection.");
+                            "Failed to open " + seriesDisplayLabel(sourceLabel, meta) + " for z-slice selection.");
                     return "cancel";
                 }
 
@@ -5940,7 +6061,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                     pd.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
                     pd.addSetupHelpSubHeader("Z-Slice Subset", SetupHelpCatalog.Z_SLICE_SUBSET);
                     pd.addMessage("Image " + (idx + 1) + "/" + totalSeries + ": "
-                            + seriesDisplayLabel(lifFile, meta));
+                            + seriesDisplayLabel(sourceLabel, meta));
                     pd.addMessage("Total z-slices: " + meta.nSlices);
                     pd.addHelpText("Review the stack and enter a contiguous inclusive range such as 11-30.");
                     pd.addHelpText("If no per-image suggestion is available, the previous accepted range is remembered for the next image.");
@@ -6056,7 +6177,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         return true;
     }
 
-    private String runEmbeddedZSliceSelection(String directory, File lifFile,
+    private String runEmbeddedZSliceSelection(String directory, String sourceLabel,
                                               DeferredImageSupplier supplier,
                                               BinUserConfig cfg, List<SeriesMeta> metas) throws Exception {
         if (!embeddedConfigQcUiAvailable()) {
@@ -6066,7 +6187,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
                 new File(directory),
                 null,
                 cfg,
-                zSliceContextImages(lifFile, metas),
+                zSliceContextImages(sourceLabel, metas),
                 cfg.names,
                 0,
                 setupFilteredStackCache);
@@ -6154,13 +6275,17 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     }
 
     static List<ConfigQcContext.ConfigQcImage> zSliceContextImages(File lifFile, List<SeriesMeta> metas) {
+        return zSliceContextImages(lifFile == null ? "" : lifFile.getName(), metas);
+    }
+
+    static List<ConfigQcContext.ConfigQcImage> zSliceContextImages(String sourceLabel, List<SeriesMeta> metas) {
         List<ConfigQcContext.ConfigQcImage> images = new ArrayList<ConfigQcContext.ConfigQcImage>();
         if (metas != null) {
             for (int i = 0; i < metas.size(); i++) {
                 SeriesMeta meta = metas.get(i);
                 if (meta == null) continue;
                 images.add(new ConfigQcContext.ConfigQcImage(
-                        meta.index, seriesDisplayLabelText(lifFile, meta), null));
+                        meta.index, seriesDisplayLabelText(sourceLabel, meta), null));
             }
         }
         return images;
