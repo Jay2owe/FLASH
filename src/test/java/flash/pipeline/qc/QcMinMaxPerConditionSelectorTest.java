@@ -4,6 +4,8 @@ import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.ConditionAssignments;
+import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.naming.OrientationManifestRow;
 import org.junit.Rule;
 import org.junit.Test;
@@ -158,8 +160,29 @@ public class QcMinMaxPerConditionSelectorTest {
         signatureMethod.setAccessible(true);
         String signature = (String) signatureMethod.invoke(null, lif, supplier, metas);
 
-        assertTrue(signature.contains("|0:2:Cas3.All.Time.Points.lif:hAPP1Week2_LH_SCN"));
-        assertTrue(signature.contains("|1:5:Cas3.All.Time.Points.lif:hAPP2Week2_RH_SCN"));
+        assertTrue(signature.contains("|0:2:Cas3.All.Time.Points.lif:0:0:hAPP1Week2_LH_SCN"));
+        assertTrue(signature.contains("|1:5:Cas3.All.Time.Points.lif:0:0:hAPP2Week2_RH_SCN"));
+    }
+
+    @Test
+    public void sourceSeriesSignatureIncludesLooseTiffFileIdentity() throws Exception {
+        File first = temp.newFile("MouseA_LH_SCN.tif");
+        File second = temp.newFile("MouseB_RH_SCN.tif");
+        assertTrue(first.setLastModified(1000L));
+        assertTrue(second.setLastModified(2000L));
+        DeferredImageSupplier supplier = new DeferredImageSupplier(
+                Arrays.asList(first, second), "loose-tiffs");
+        List<SeriesMeta> metas = Arrays.asList(
+                new SeriesMeta(0, "loose-tiffs - MouseA_LH_SCN", 12, 1.0, 1.0, 1.0, "pixel"),
+                new SeriesMeta(1, "loose-tiffs - MouseB_RH_SCN", 12, 1.0, 1.0, 1.0, "pixel"));
+
+        Method signatureMethod = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
+                "sourceSeriesSignature", File.class, DeferredImageSupplier.class, List.class);
+        signatureMethod.setAccessible(true);
+        String signature = (String) signatureMethod.invoke(null, null, supplier, metas);
+
+        assertTrue(signature.contains("|0:0:MouseA_LH_SCN.tif:0:1000:loose-tiffs - MouseA_LH_SCN"));
+        assertTrue(signature.contains("|1:0:MouseB_RH_SCN.tif:0:2000:loose-tiffs - MouseB_RH_SCN"));
     }
 
     @Test
@@ -493,9 +516,9 @@ public class QcMinMaxPerConditionSelectorTest {
         records.add(second);
 
         Method write = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
-                "writeScoresCsv", File.class, List.class, List.class);
+                "writeScoresCsv", File.class, List.class, List.class, ConditionAssignments.class);
         write.setAccessible(true);
-        write.invoke(null, csv, records, qcChannels);
+        write.invoke(null, csv, records, qcChannels, null);
 
         List<QcMinMaxPerConditionSelector.ScoreRecord> read =
                 QcMinMaxPerConditionSelector.readScoresCsv(csv);
@@ -528,9 +551,9 @@ public class QcMinMaxPerConditionSelectorTest {
         records.add(record);
 
         Method write = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
-                "writeScoresCsv", File.class, List.class, List.class);
+                "writeScoresCsv", File.class, List.class, List.class, ConditionAssignments.class);
         write.setAccessible(true);
-        write.invoke(null, csv, records, qcChannels);
+        write.invoke(null, csv, records, qcChannels, null);
 
         List<QcMinMaxPerConditionSelector.ScoreRecord> read =
                 QcMinMaxPerConditionSelector.readScoresCsv(csv);
@@ -540,6 +563,46 @@ public class QcMinMaxPerConditionSelectorTest {
         assertEquals("Animal, \"Alpha\"", read.get(0).candidate.animalName);
         assertEquals("Cond, \"Beta\"", read.get(0).candidate.conditionName);
         assertEquals(12.5, read.get(0).channelScores.get(2), 0.0001);
+    }
+
+    @Test
+    public void scoresCsv_multiAxisAddsHighestCardinalityAxisColumns() throws Exception {
+        File csv = temp.newFile("multiaxis-scores.csv");
+        List<QcSelectionChannel> qcChannels = Arrays.asList(
+                new QcSelectionChannel(0, "DAPI", true, false, false));
+
+        ConditionAssignments model = new ConditionAssignments();
+        model.addAxis(ConditionAxis.of("Genotype"));
+        model.addAxis(ConditionAxis.of("Timepoint"));
+        model.put("M1", "genotype", "hAPP");
+        model.put("M1", "timepoint", "WeekFour");
+        model.put("M2", "genotype", "Syn");
+        model.put("M2", "timepoint", "WeekTwo");
+
+        List<QcMinMaxPerConditionSelector.ScoreRecord> records =
+                new ArrayList<QcMinMaxPerConditionSelector.ScoreRecord>();
+        records.add(new QcMinMaxPerConditionSelector.ScoreRecord(
+                new QcSelectionCandidate(0, "M1_LH_SCN", "M1", "hAPP_WeekFour")));
+        records.add(new QcMinMaxPerConditionSelector.ScoreRecord(
+                new QcSelectionCandidate(1, "M2_LH_SCN", "M2", "Syn_WeekTwo")));
+
+        Method write = QcMinMaxPerConditionSelector.class.getDeclaredMethod(
+                "writeScoresCsv", File.class, List.class, List.class, ConditionAssignments.class);
+        write.setAccessible(true);
+        write.invoke(null, csv, records, qcChannels, model);
+
+        String text = new String(java.nio.file.Files.readAllBytes(csv.toPath()), "UTF-8");
+        assertTrue("per-axis genotype column", text.contains("Condition_Genotype"));
+        assertTrue("per-axis timepoint column", text.contains("Condition_Timepoint"));
+        assertTrue("per-axis value present", text.contains("hAPP"));
+        assertTrue("per-axis value present", text.contains("WeekFour"));
+
+        // readScoresCsv ignores the extra axis columns and still round-trips the core fields.
+        List<QcMinMaxPerConditionSelector.ScoreRecord> read =
+                QcMinMaxPerConditionSelector.readScoresCsv(csv);
+        assertEquals(2, read.size());
+        assertEquals("hAPP_WeekFour", read.get(0).candidate.conditionName);
+        assertEquals("M1", read.get(0).candidate.animalName);
     }
 
     @Test

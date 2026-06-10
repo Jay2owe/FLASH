@@ -7,6 +7,8 @@ import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.OrientationManifestIO;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.ConditionAssignments;
+import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.naming.ConditionNameParser;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.zslice.ZSliceConfig;
@@ -62,6 +64,7 @@ public final class QcMinMaxPerConditionSelector {
     private static final String KEY_LIF_NAME = "lif.name";
     private static final String KEY_LIF_LENGTH = "lif.length";
     private static final String KEY_LIF_MODIFIED = "lif.modified";
+    private static final String KEY_SOURCE_FINGERPRINT = "source.fingerprint";
     private static final String KEY_CONDITIONS_EXISTS = "conditions.exists";
     private static final String KEY_CONDITIONS_LENGTH = "conditions.length";
     private static final String KEY_CONDITIONS_MODIFIED = "conditions.modified";
@@ -323,7 +326,14 @@ public final class QcMinMaxPerConditionSelector {
 
         File scoresFile = new File(binFolder, SCORES_FILE_NAME);
         File cacheFile = new File(binFolder, CACHE_FILE_NAME);
+        if (supplier == null && lifFile != null) {
+            supplier = new DeferredImageSupplier(lifFile);
+        }
         if (metas == null) {
+            if (lifFile == null) {
+                throw new IllegalArgumentException(
+                        "QC min/max selection requires source metadata when no container file is provided.");
+            }
             metas = LifIO.readAllSeriesMetadata(lifFile);
         }
         String sourceSeriesSignature = sourceSeriesSignature(lifFile, supplier, metas);
@@ -361,12 +371,21 @@ public final class QcMinMaxPerConditionSelector {
             IJ.log("QC min/max cache was present but unusable. Recomputing.");
         }
 
-        IJ.log("QC " + scope.logLabel + ": scanning sampled planes from .lif");
+        IJ.log("QC " + scope.logLabel + ": scanning sampled planes from "
+                + sourceDescription(lifFile, supplier));
         List<ScoreRecord> scored = scoreCandidates(
                 lifFile, supplier, candidates, activeChannels, zSliceConfig, parallelThreads);
         SelectionBundle selectionBundle = assignAndSelectSeries(scored, activeChannels, scope);
         logSelectionSummary(selectionBundle, activeChannels, false, scope);
-        writeScoresCsv(scoresFile, scored, activeChannels);
+        Set<String> scoredAnimals = new LinkedHashSet<String>();
+        for (ScoreRecord record : scored) {
+            if (record != null && record.candidate != null && record.candidate.animalName != null) {
+                scoredAnimals.add(record.candidate.animalName);
+            }
+        }
+        ConditionAssignments conditionModel =
+                ConditionManifestIO.resolveAssignmentsModel(directory, scoredAnimals);
+        writeScoresCsv(scoresFile, scored, activeChannels, conditionModel);
         writeCacheProperties(directory, lifFile, activeChannels, zSliceConfig,
                 sourceSeriesSignature, scope.cacheValue, cacheFile);
 
@@ -1184,22 +1203,25 @@ public final class QcMinMaxPerConditionSelector {
     }
 
     private static List<ScoreRecord> scoreCandidates(File lifFile,
-                                                     DeferredImageSupplier supplier,
+                                                     final DeferredImageSupplier supplier,
                                                      List<QcSelectionCandidate> candidates,
-                                                     List<QcSelectionChannel> qcChannels,
-                                                     ZSliceConfig zSliceConfig,
+                                                     final List<QcSelectionChannel> qcChannels,
+                                                     final ZSliceConfig zSliceConfig,
                                                      int parallelThreads) throws Exception {
-        final Map<Integer, Integer> localSeriesIndexes =
-                localSeriesIndexMap(lifFile, supplier, candidates);
+        final DeferredImageSupplier scoringSupplier = supplier == null && lifFile != null
+                ? new DeferredImageSupplier(lifFile)
+                : supplier;
+        if (scoringSupplier == null) {
+            throw new IllegalArgumentException("QC min/max scoring has no image source.");
+        }
         int requestedThreads = Math.max(1, parallelThreads);
         requestedThreads = Math.min(requestedThreads, Math.max(1, candidates.size()));
         int safeThreads = computeSafeTotalThreads(
-                lifFile, qcChannels, requestedThreads,
-                firstLocalSeriesIndex(candidates, localSeriesIndexes));
+                scoringSupplier, qcChannels, requestedThreads, firstCandidateSeriesIndex(candidates));
 
         if (safeThreads <= 1 || candidates.size() <= 1) {
             IJ.log("QC min/max selector: sequential scan");
-            return scoreSequential(lifFile, localSeriesIndexes, candidates, qcChannels, zSliceConfig);
+            return scoreSequential(scoringSupplier, candidates, qcChannels, zSliceConfig);
         }
 
         IJ.log("QC min/max selector: scanning and scoring " + candidates.size()
@@ -1219,35 +1241,29 @@ public final class QcMinMaxPerConditionSelector {
             pool.submit(new Runnable() {
                 @Override
                 public void run() {
-                    try (Memoizer reader = new Memoizer(new ImageReader())) {
-                        reader.setId(lifFile.getAbsolutePath());
-                        while (true) {
-                            int idx = nextCandidate.getAndIncrement();
-                            if (idx >= candidates.size()) break;
+                    while (true) {
+                        int idx = nextCandidate.getAndIncrement();
+                        if (idx >= candidates.size()) break;
 
-                            QcSelectionCandidate candidate = candidates.get(idx);
-                            try {
-                                IJ.log("QC min/max worker " + workerNum
-                                        + ": sampling and scoring " + candidate.seriesName
-                                        + " [" + (idx + 1) + "/" + candidates.size() + "]");
-                                LoadedCandidate loaded = loadCandidate(reader, candidate,
-                                        localSeriesIndex(localSeriesIndexes, candidate.seriesIndex),
-                                        qcChannels, zSliceConfig);
-                                ScoreRecord record = scoreLoadedCandidate(loaded);
-                                scored.put(candidate.seriesIndex, record);
-                                logCandidateScored(record, qcChannels,
-                                        completedCandidates.incrementAndGet(), candidates.size());
-                            } catch (Exception e) {
-                                IJ.log("Warning: QC min/max scan failed for " + candidate.seriesName
-                                        + ": " + e.getMessage());
-                                ScoreRecord record = new ScoreRecord(candidate);
-                                scored.put(candidate.seriesIndex, record);
-                                logCandidateScored(record, qcChannels,
-                                        completedCandidates.incrementAndGet(), candidates.size());
-                            }
+                        QcSelectionCandidate candidate = candidates.get(idx);
+                        try {
+                            IJ.log("QC min/max worker " + workerNum
+                                    + ": sampling and scoring " + candidate.seriesName
+                                    + " [" + (idx + 1) + "/" + candidates.size() + "]");
+                            LoadedCandidate loaded = loadCandidate(
+                                    scoringSupplier, candidate, qcChannels, zSliceConfig);
+                            ScoreRecord record = scoreLoadedCandidate(loaded);
+                            scored.put(candidate.seriesIndex, record);
+                            logCandidateScored(record, qcChannels,
+                                    completedCandidates.incrementAndGet(), candidates.size());
+                        } catch (Exception e) {
+                            IJ.log("Warning: QC min/max scan failed for " + candidate.seriesName
+                                    + ": " + e.getMessage());
+                            ScoreRecord record = new ScoreRecord(candidate);
+                            scored.put(candidate.seriesIndex, record);
+                            logCandidateScored(record, qcChannels,
+                                    completedCandidates.incrementAndGet(), candidates.size());
                         }
-                    } catch (Exception e) {
-                        IJ.log("Warning: QC min/max worker thread failed: " + e.getMessage());
                     }
                 }
             });
@@ -1316,76 +1332,39 @@ public final class QcMinMaxPerConditionSelector {
         IJ.log(sb.toString());
     }
 
-    private static Map<Integer, Integer> localSeriesIndexMap(
-            File lifFile,
-            DeferredImageSupplier supplier,
-            List<QcSelectionCandidate> candidates) {
-        LinkedHashMap<Integer, Integer> indexes =
-                new LinkedHashMap<Integer, Integer>();
-        if (supplier == null || candidates == null) {
-            return indexes;
-        }
-        for (QcSelectionCandidate candidate : candidates) {
-            if (candidate == null) continue;
-            int globalIndex = candidate.seriesIndex;
-            File source = supplier.getContainerFileForSeries(globalIndex);
-            if (lifFile != null && source != null && !sameFile(lifFile, source)) {
-                throw new IllegalArgumentException(
-                        "Min/max QC currently supports one container source at a time. "
-                                + "Series " + (globalIndex + 1) + " maps to "
-                                + source.getName() + " instead of " + lifFile.getName() + ".");
-            }
-            indexes.put(Integer.valueOf(globalIndex),
-                    Integer.valueOf(supplier.getLocalSeriesIndexForSeries(globalIndex)));
-        }
-        return indexes;
-    }
-
-    private static int localSeriesIndex(Map<Integer, Integer> localSeriesIndexes,
-                                        int globalSeriesIndex) {
-        if (localSeriesIndexes == null) return globalSeriesIndex;
-        Integer local = localSeriesIndexes.get(Integer.valueOf(globalSeriesIndex));
-        return local == null ? globalSeriesIndex : local.intValue();
-    }
-
-    private static int firstLocalSeriesIndex(List<QcSelectionCandidate> candidates,
-                                             Map<Integer, Integer> localSeriesIndexes) {
+    private static int firstCandidateSeriesIndex(List<QcSelectionCandidate> candidates) {
         if (candidates == null || candidates.isEmpty()) return 0;
         QcSelectionCandidate first = candidates.get(0);
-        return first == null ? 0 : localSeriesIndex(localSeriesIndexes, first.seriesIndex);
+        return first == null ? 0 : first.seriesIndex;
     }
 
-    private static boolean sameFile(File left, File right) {
-        if (left == right) return true;
-        if (left == null || right == null) return false;
-        try {
-            return left.getCanonicalFile().equals(right.getCanonicalFile());
-        } catch (IOException e) {
-            return left.getAbsoluteFile().equals(right.getAbsoluteFile());
-        }
-    }
-
-    private static List<ScoreRecord> scoreSequential(File lifFile,
-                                                     Map<Integer, Integer> localSeriesIndexes,
+    private static List<ScoreRecord> scoreSequential(DeferredImageSupplier supplier,
                                                      List<QcSelectionCandidate> candidates,
                                                      List<QcSelectionChannel> qcChannels,
                                                      ZSliceConfig zSliceConfig) throws Exception {
         List<ScoreRecord> records = new ArrayList<ScoreRecord>();
-        try (Memoizer reader = new Memoizer(new ImageReader())) {
-            reader.setId(lifFile.getAbsolutePath());
-            for (int i = 0; i < candidates.size(); i++) {
-                QcSelectionCandidate candidate = candidates.get(i);
-                IJ.log("QC min/max selector: sampling and scoring " + candidate.seriesName
-                        + " [" + (i + 1) + "/" + candidates.size() + "]");
-                LoadedCandidate loaded = loadCandidate(reader, candidate,
-                        localSeriesIndex(localSeriesIndexes, candidate.seriesIndex),
-                        qcChannels, zSliceConfig);
-                ScoreRecord record = scoreLoadedCandidate(loaded);
-                records.add(record);
-                logCandidateScored(record, qcChannels, i + 1, candidates.size());
-            }
+        for (int i = 0; i < candidates.size(); i++) {
+            QcSelectionCandidate candidate = candidates.get(i);
+            IJ.log("QC min/max selector: sampling and scoring " + candidate.seriesName
+                    + " [" + (i + 1) + "/" + candidates.size() + "]");
+            LoadedCandidate loaded = loadCandidate(supplier, candidate, qcChannels, zSliceConfig);
+            ScoreRecord record = scoreLoadedCandidate(loaded);
+            records.add(record);
+            logCandidateScored(record, qcChannels, i + 1, candidates.size());
         }
         return records;
+    }
+
+    private static LoadedCandidate loadCandidate(DeferredImageSupplier supplier,
+                                                 QcSelectionCandidate candidate,
+                                                 List<QcSelectionChannel> qcChannels,
+                                                 ZSliceConfig zSliceConfig) throws Exception {
+        File sourceFile = supplier.getContainerFileForSeries(candidate.seriesIndex);
+        int localSeriesIndex = supplier.getLocalSeriesIndexForSeries(candidate.seriesIndex);
+        try (Memoizer reader = new Memoizer(new ImageReader())) {
+            reader.setId(sourceFile.getAbsolutePath());
+            return loadCandidate(reader, candidate, localSeriesIndex, qcChannels, zSliceConfig);
+        }
     }
 
     private static LoadedCandidate loadCandidate(Memoizer reader,
@@ -1564,6 +1543,41 @@ public final class QcMinMaxPerConditionSelector {
         return safe;
     }
 
+    private static int computeSafeTotalThreads(DeferredImageSupplier supplier,
+                                               List<QcSelectionChannel> qcChannels,
+                                               int requestedThreads,
+                                               int estimateSeriesIndex) {
+        if (requestedThreads <= 1) return 1;
+        if (supplier == null) return requestedThreads;
+
+        long bytesPerTask;
+        try (Memoizer reader = new Memoizer(new ImageReader())) {
+            File source = supplier.getContainerFileForSeries(estimateSeriesIndex);
+            int localSeriesIndex = supplier.getLocalSeriesIndexForSeries(estimateSeriesIndex);
+            reader.setId(source.getAbsolutePath());
+            reader.setSeries(Math.max(0, localSeriesIndex));
+            int sizeX = Math.max(1, reader.getSizeX());
+            int sizeY = Math.max(1, reader.getSizeY());
+            bytesPerTask = (long) sizeX * sizeY * 4L * Math.max(1, qcChannels.size());
+        } catch (Exception e) {
+            IJ.log("QC min/max selector: could not estimate memory, using requested threads.");
+            return requestedThreads;
+        }
+
+        long maxMem = Runtime.getRuntime().maxMemory();
+        long usedMem = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+        long availMem = maxMem - usedMem - MIN_FREE_BYTES;
+        if (availMem <= 0 || bytesPerTask <= 0) return 1;
+
+        int maxThreads = (int) Math.max(1, availMem / bytesPerTask);
+        int safe = Math.max(1, Math.min(requestedThreads, maxThreads));
+        if (safe < requestedThreads) {
+            IJ.log("QC min/max selector: reduced threads from " + requestedThreads
+                    + " to " + safe + " based on available memory.");
+        }
+        return safe;
+    }
+
     private static boolean isCacheValid(String directory, File lifFile,
                                         List<QcSelectionChannel> qcChannels,
                                         ZSliceConfig zSliceConfig,
@@ -1602,9 +1616,8 @@ public final class QcMinMaxPerConditionSelector {
         if (!CACHE_VERSION.equals(props.getProperty(KEY_CACHE_VERSION))) return false;
         if (!SCORE_METHOD.equals(props.getProperty(KEY_SCORE_METHOD))) return false;
         if (!String.valueOf(MAX_SAMPLED_PLANES).equals(props.getProperty(KEY_MAX_SAMPLED_PLANES))) return false;
-        if (!lifFile.getName().equals(props.getProperty(KEY_LIF_NAME))) return false;
-        if (!String.valueOf(lifFile.length()).equals(props.getProperty(KEY_LIF_LENGTH))) return false;
-        if (!String.valueOf(lifFile.lastModified()).equals(props.getProperty(KEY_LIF_MODIFIED))) return false;
+        String sourceFingerprint = sourceCacheFingerprint(lifFile, sourceSeriesSignature);
+        if (!sourceFingerprint.equals(props.getProperty(KEY_SOURCE_FINGERPRINT))) return false;
         if (!channelSignature(qcChannels).equals(props.getProperty(KEY_QC_CHANNEL_SIGNATURE))) return false;
         if (!ZSliceConfigIO.signature(zSliceConfig).equals(props.getProperty(KEY_Z_SLICE_SIGNATURE, "zslice:full"))) return false;
         if (!safe(sourceSeriesSignature).equals(props.getProperty(KEY_SOURCE_SERIES_SIGNATURE, ""))) return false;
@@ -1654,9 +1667,11 @@ public final class QcMinMaxPerConditionSelector {
         props.setProperty(KEY_CACHE_VERSION, CACHE_VERSION);
         props.setProperty(KEY_SCORE_METHOD, SCORE_METHOD);
         props.setProperty(KEY_MAX_SAMPLED_PLANES, String.valueOf(MAX_SAMPLED_PLANES));
-        props.setProperty(KEY_LIF_NAME, lifFile.getName());
-        props.setProperty(KEY_LIF_LENGTH, String.valueOf(lifFile.length()));
-        props.setProperty(KEY_LIF_MODIFIED, String.valueOf(lifFile.lastModified()));
+        props.setProperty(KEY_LIF_NAME, lifFile == null ? "" : lifFile.getName());
+        props.setProperty(KEY_LIF_LENGTH, lifFile == null ? "" : String.valueOf(lifFile.length()));
+        props.setProperty(KEY_LIF_MODIFIED, lifFile == null ? "" : String.valueOf(lifFile.lastModified()));
+        props.setProperty(KEY_SOURCE_FINGERPRINT,
+                sourceCacheFingerprint(lifFile, sourceSeriesSignature));
         props.setProperty(KEY_QC_CHANNEL_SIGNATURE, channelSignature(qcChannels));
         props.setProperty(KEY_Z_SLICE_SIGNATURE, ZSliceConfigIO.signature(zSliceConfig));
         props.setProperty(KEY_SOURCE_SERIES_SIGNATURE, safe(sourceSeriesSignature));
@@ -1737,6 +1752,10 @@ public final class QcMinMaxPerConditionSelector {
                     .append(':')
                     .append(cacheToken(sourceName))
                     .append(':')
+                    .append(sourceFileLength(supplier, globalIndex))
+                    .append(':')
+                    .append(sourceFileModified(supplier, globalIndex))
+                    .append(':')
                     .append(cacheToken(meta.name))
                     .append(':')
                     .append(meta.width)
@@ -1750,6 +1769,52 @@ public final class QcMinMaxPerConditionSelector {
         return sb.toString();
     }
 
+    private static String sourceCacheFingerprint(File sourceFile, String sourceSeriesSignature) {
+        StringBuilder sb = new StringBuilder("source-cache:v1");
+        if (sourceFile != null) {
+            sb.append('|')
+                    .append(cacheToken(sourceFile.getName()))
+                    .append(':')
+                    .append(sourceFile.length())
+                    .append(':')
+                    .append(sourceFile.lastModified());
+        }
+        sb.append('|').append(safe(sourceSeriesSignature));
+        return sb.toString();
+    }
+
+    private static long sourceFileLength(DeferredImageSupplier supplier, int globalSeriesIndex) {
+        File file = sourceFileForSignature(supplier, globalSeriesIndex);
+        return file == null ? -1L : file.length();
+    }
+
+    private static long sourceFileModified(DeferredImageSupplier supplier, int globalSeriesIndex) {
+        File file = sourceFileForSignature(supplier, globalSeriesIndex);
+        return file == null ? -1L : file.lastModified();
+    }
+
+    private static File sourceFileForSignature(DeferredImageSupplier supplier, int globalSeriesIndex) {
+        if (supplier == null) return null;
+        try {
+            return supplier.getContainerFileForSeries(globalSeriesIndex);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static String sourceDescription(File lifFile, DeferredImageSupplier supplier) {
+        if (supplier != null) {
+            if (supplier.isTiffFolderMode()) {
+                return "TIFF source files";
+            }
+            List<File> files = supplier.getContainerFiles();
+            if (files != null && files.size() > 1) {
+                return files.size() + " container source files";
+            }
+        }
+        return lifFile == null ? "image source" : lifFile.getName();
+    }
+
     private static String cacheToken(String value) {
         return safe(value).replace("\\", "\\\\")
                 .replace("|", "\\p")
@@ -1757,7 +1822,12 @@ public final class QcMinMaxPerConditionSelector {
     }
 
     private static void writeScoresCsv(File scoresFile, List<ScoreRecord> records,
-                                       List<QcSelectionChannel> qcChannels) throws IOException {
+                                       List<QcSelectionChannel> qcChannels,
+                                       ConditionAssignments conditionModel) throws IOException {
+        // Sample-sheet columns: for a multi-axis project, break the composite
+        // Condition into the two highest-cardinality axes (D-series #9). A
+        // single-axis project keeps the legacy single "Condition" column.
+        final List<ConditionAxis> sampleSheetAxes = sampleSheetAxes(conditionModel);
         File temp = tempFileFor(scoresFile);
         boolean moved = false;
         try {
@@ -1765,6 +1835,9 @@ public final class QcMinMaxPerConditionSelector {
             try {
                 List<String> header = new ArrayList<String>();
                 header.add("Condition");
+                for (ConditionAxis axis : sampleSheetAxes) {
+                    header.add(sampleSheetColumn(axis));
+                }
                 header.add("SeriesIndex");
                 header.add("SeriesNumber");
                 header.add("SeriesName");
@@ -1779,6 +1852,10 @@ public final class QcMinMaxPerConditionSelector {
                 for (ScoreRecord record : records) {
                     List<String> row = new ArrayList<String>();
                     row.add(record.candidate.conditionName);
+                    for (ConditionAxis axis : sampleSheetAxes) {
+                        row.add(conditionModel == null ? ""
+                                : conditionModel.get(record.candidate.animalName, axis.id));
+                    }
                     row.add(String.valueOf(record.candidate.seriesIndex));
                     row.add(String.valueOf(record.candidate.seriesNumber));
                     row.add(record.candidate.seriesName);
@@ -1801,6 +1878,27 @@ public final class QcMinMaxPerConditionSelector {
                 Files.deleteIfExists(temp.toPath());
             }
         }
+    }
+
+    /**
+     * The (up to two) highest-cardinality condition axes to spread across the
+     * sample-sheet CSV. Empty for a single-axis project, where the composite
+     * "Condition" column already carries the only meaningful label.
+     */
+    private static List<ConditionAxis> sampleSheetAxes(ConditionAssignments model) {
+        List<ConditionAxis> out = new ArrayList<ConditionAxis>();
+        if (model == null) return out;
+        List<ConditionAxis> ranked = model.axesByCardinalityDescending();
+        if (ranked.size() < 2) return out;
+        for (int i = 0; i < ranked.size() && i < 2; i++) {
+            out.add(ranked.get(i));
+        }
+        return out;
+    }
+
+    /** CSV header for a sample-sheet axis column, e.g. {@code Condition_Genotype}. */
+    private static String sampleSheetColumn(ConditionAxis axis) {
+        return axis == null ? "Condition" : axis.csvColumnName();
     }
 
     private static File tempFileFor(File target) throws IOException {
