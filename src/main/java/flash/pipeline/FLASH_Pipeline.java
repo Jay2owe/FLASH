@@ -35,6 +35,8 @@ import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.ProjectStatusStore;
+import flash.pipeline.io.ResultAnimalScanner;
+import flash.pipeline.ui.wizard.ConditionReviewSupport;
 import flash.pipeline.intelligence.DiagnosticsDialog;
 import flash.pipeline.intelligence.AnalysisStatus;
 import flash.pipeline.intelligence.AnalysisStatusScanner;
@@ -93,6 +95,8 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -107,6 +111,8 @@ public class FLASH_Pipeline implements PlugIn {
     private boolean headlessMode = true;
     private boolean verboseLogging = false;
     private boolean autoAggregate = true;
+    /** Per-batch override set by the picker condition preflight; never persisted. */
+    private boolean skipAutoAggregateForBatch = false;
     private boolean parallelProcessing = true;
     private int parallelThreadCount = Math.max(1, Runtime.getRuntime().availableProcessors() / 2);
     private int loaderThreadCount = 1;
@@ -314,7 +320,13 @@ public class FLASH_Pipeline implements PlugIn {
             boolean ranSpatial = selections[IDX_SPATIAL] && completedAnalyses[IDX_SPATIAL];
             boolean ranIntensity = selections[IDX_INTENSITY] && completedAnalyses[IDX_INTENSITY];
             boolean manuallyRanAgg = selections[IDX_AGGREGATION];
-            if (autoAggregate && (ran3D || ranSpatial || ranIntensity) && !manuallyRanAgg) {
+            boolean wantsAutoAggregation = autoAggregate && !skipAutoAggregateForBatch
+                    && (ran3D || ranSpatial || ranIntensity) && !manuallyRanAgg;
+            if (wantsAutoAggregation && !confirmAutoAggregationConditions()) {
+                IJ.log("[FLASH] Auto aggregation skipped: condition assignments left unreviewed.");
+                wantsAutoAggregation = false;
+            }
+            if (wantsAutoAggregation) {
                 IJ.log("Auto-running Master Data Aggregation...");
                 Analysis aggAnalysis = analysisMap.get(IDX_AGGREGATION);
                 if (aggAnalysis != null) {
@@ -826,6 +838,8 @@ public class FLASH_Pipeline implements PlugIn {
                 }
             });
 
+            addConditionStatusRow(pd);
+
             addRecipeWarningPanel(pd);
 
             final ToggleSwitch[] togglesByAnalysis = new ToggleSwitch[analyses.length];
@@ -904,7 +918,186 @@ public class FLASH_Pipeline implements PlugIn {
             for (int i = 0; i < VISIBLE_ANALYSIS_ORDER.length; i++) {
                 results[VISIBLE_ANALYSIS_ORDER[i]] = pd.getNextBoolean();
             }
+
+            ConditionPreflightOutcome outcome = promptConditionPreflight(results);
+            if (outcome == ConditionPreflightOutcome.CANCEL) {
+                continue; // back to the picker so the user can review or change selection
+            }
+            skipAutoAggregateForBatch = (outcome == ConditionPreflightOutcome.SKIP_AUTO_AGGREGATION);
             return results;
+        }
+    }
+
+    enum ConditionPreflightOutcome { PROCEED, SKIP_AUTO_AGGREGATION, CANCEL }
+
+    /**
+     * True when at least one selected workflow consumes condition groups, so the
+     * user should get a chance to review assignments before the run starts. Auto
+     * aggregation from object/spatial/intensity counts because it produces
+     * condition-grouped master tables even when aggregation was not selected.
+     */
+    static boolean selectionNeedsConditionPreflight(boolean[] selections, boolean autoAggregate) {
+        if (selections == null) return false;
+        if (isSelected(selections, IDX_AGGREGATION)) return true;
+        if (isSelected(selections, IDX_STATISTICS)) return true;
+        if (isSelected(selections, IDX_EXCEL_EXPORT)) return true;
+        if (isSelected(selections, IDX_REPRESENTATIVE_FIGURE)) return true;
+        if (autoAggregate
+                && (isSelected(selections, IDX_3D_OBJECT)
+                    || isSelected(selections, IDX_SPATIAL)
+                    || isSelected(selections, IDX_INTENSITY))) {
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isSelected(boolean[] selections, int idx) {
+        return selections != null && idx >= 0 && idx < selections.length && selections[idx];
+    }
+
+    /** True when only post-run auto aggregation (no explicit consumer) triggers the preflight. */
+    private boolean isAutoAggregationOnlyTrigger(boolean[] selections) {
+        boolean explicit = isSelected(selections, IDX_AGGREGATION)
+                || isSelected(selections, IDX_STATISTICS)
+                || isSelected(selections, IDX_EXCEL_EXPORT)
+                || isSelected(selections, IDX_REPRESENTATIVE_FIGURE);
+        if (explicit) return false;
+        return autoAggregate
+                && (isSelected(selections, IDX_3D_OBJECT)
+                    || isSelected(selections, IDX_SPATIAL)
+                    || isSelected(selections, IDX_INTENSITY));
+    }
+
+    /**
+     * Picker-time gate. Returns {@link ConditionPreflightOutcome#PROCEED} when
+     * the selection is not condition-sensitive or no animals exist yet, otherwise
+     * lets the user review, skip auto-aggregation, continue anyway, or cancel.
+     */
+    private ConditionPreflightOutcome promptConditionPreflight(boolean[] selections) {
+        if (!selectionNeedsConditionPreflight(selections, autoAggregate)) {
+            return ConditionPreflightOutcome.PROCEED;
+        }
+        boolean autoAggregationOnly = isAutoAggregationOnlyTrigger(selections);
+        while (true) {
+            LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
+            if (animals.isEmpty()) {
+                // Nothing to review yet; the post-run guard re-checks once results exist.
+                return ConditionPreflightOutcome.PROCEED;
+            }
+            ConditionReviewSupport.Health health =
+                    ConditionReviewSupport.evaluate(directory, animals);
+            if (!health.needsReview()) {
+                return ConditionPreflightOutcome.PROCEED;
+            }
+
+            List<String> opts = new ArrayList<String>();
+            opts.add("Review conditions...");
+            if (autoAggregationOnly) opts.add("Skip auto-aggregation");
+            opts.add("Continue anyway");
+            opts.add("Cancel run");
+
+            int choice = JOptionPane.showOptionDialog(
+                    null,
+                    new JLabel(conditionPreflightMessage(health)),
+                    "Review conditions before running",
+                    JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.WARNING_MESSAGE,
+                    null,
+                    opts.toArray(),
+                    opts.get(0));
+            String picked = choice < 0 ? "Cancel run" : opts.get(choice);
+            if ("Review conditions...".equals(picked)) {
+                reviewConditionsFromPicker(animals);
+                continue; // re-evaluate with the freshly saved assignments
+            }
+            if ("Skip auto-aggregation".equals(picked)) {
+                return ConditionPreflightOutcome.SKIP_AUTO_AGGREGATION;
+            }
+            if ("Continue anyway".equals(picked)) {
+                return ConditionPreflightOutcome.PROCEED;
+            }
+            return ConditionPreflightOutcome.CANCEL;
+        }
+    }
+
+    private static String conditionPreflightMessage(ConditionReviewSupport.Health health) {
+        StringBuilder sb = new StringBuilder("<html><body style='width:380px'>");
+        sb.append("<b>Condition assignments need review</b><br>");
+        for (String message : health.messages) {
+            sb.append(message).append("<br>");
+        }
+        sb.append("<br>FLASH uses these groups for aggregation, statistics, Excel sheets,"
+                + " and representative figures.</body></html>");
+        return sb.toString();
+    }
+
+    private void addConditionStatusRow(PipelineDialog pd) {
+        LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
+        String statusText;
+        if (animals.isEmpty()) {
+            statusText = "Conditions: no animals found yet — run an analysis or set up the project.";
+        } else {
+            statusText = "Conditions: "
+                    + ConditionReviewSupport.evaluate(directory, animals).summary();
+        }
+        pd.addMessage(statusText);
+        JButton reviewBtn = pd.addButton("Review conditions...");
+        reviewBtn.addActionListener(e -> {
+            if (directory == null) {
+                IJ.showMessage("Review conditions", "Pick a directory first.");
+                return;
+            }
+            reviewConditionsFromPicker(ResultAnimalScanner.collect(directory));
+        });
+    }
+
+    private void reviewConditionsFromPicker(Set<String> animals) {
+        if (animals == null || animals.isEmpty()) {
+            IJ.showMessage("Review conditions",
+                    "No animals were found yet. Run an analysis or set up the project first.");
+            return;
+        }
+        ConditionReviewSupport.Options options = new ConditionReviewSupport.Options();
+        options.title = "Review condition assignments";
+        options.primaryButtonText = "Save conditions";
+        ConditionReviewSupport.reviewAndSave(null, directory, animals, options);
+    }
+
+    /**
+     * Post-run guard for auto aggregation: the result set is only complete after
+     * the analyses ran, so re-check condition health here. Returns {@code true}
+     * to proceed with auto aggregation, {@code false} to skip it for this batch.
+     */
+    private boolean confirmAutoAggregationConditions() {
+        if (GraphicsEnvironment.isHeadless()) return true;
+        LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
+        if (animals.isEmpty()) return true;
+        ConditionReviewSupport.Health health =
+                ConditionReviewSupport.evaluate(directory, animals);
+        if (!health.needsReview()) return true;
+
+        while (true) {
+            String[] opts = {"Review conditions...", "Skip auto-aggregation", "Continue anyway"};
+            StringBuilder sb = new StringBuilder("<html><body style='width:360px'>");
+            sb.append("<b>Before auto-aggregation</b><br>");
+            sb.append("FLASH is about to create master summary tables.<br>");
+            for (String message : health.messages) {
+                sb.append(message).append("<br>");
+            }
+            sb.append("</body></html>");
+            int choice = JOptionPane.showOptionDialog(
+                    null, new JLabel(sb.toString()), "Conditions need review",
+                    JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE,
+                    null, opts, opts[0]);
+            if (choice == 0) {
+                reviewConditionsFromPicker(animals);
+                animals = ResultAnimalScanner.collect(directory);
+                health = ConditionReviewSupport.evaluate(directory, animals);
+                if (!health.needsReview()) return true;
+                continue;
+            }
+            if (choice == 1) return false; // skip auto-aggregation
+            return true; // continue anyway / dialog closed
         }
     }
 
