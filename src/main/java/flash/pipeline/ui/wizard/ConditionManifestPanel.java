@@ -36,11 +36,28 @@ public final class ConditionManifestPanel {
 
     private static final java.awt.Color UNASSIGNED_BG = FlashTheme.TABLE_REQUIRED_BG;
 
+    static final String DEFAULT_INTRO_HTML =
+            "<html><body style='width:420px'>"
+            + "<b>Condition assignment review</b><br>"
+            + "Edit the Condition column to assign animals to experimental groups."
+            + " Rows highlighted in pink need review: if saved blank, FLASH may fall"
+            + " back to filename auto-detection, and animals it cannot resolve are left"
+            + " out of condition-level outputs."
+            + "</body></html>";
+
     private final DefaultTableModel model;
     private final JTable table;
     private final JPanel component;
 
     public ConditionManifestPanel(Set<String> animals, Map<String, String> prefill) {
+        this(animals, prefill, null);
+    }
+
+    /**
+     * @param introHtml optional caller-specific instructions (HTML). When
+     *                  {@code null} or blank the shared default copy is used.
+     */
+    public ConditionManifestPanel(Set<String> animals, Map<String, String> prefill, String introHtml) {
         if (animals == null) {
             throw new IllegalArgumentException("animals is required.");
         }
@@ -78,11 +95,9 @@ public final class ConditionManifestPanel {
         panel.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
 
         JLabel instructions = new JLabel(
-                "<html><body style='width:420px'>"
-                + "<b>Condition assignment review</b><br>"
-                + "Edit the Condition column to assign animals to experimental groups."
-                + " Rows highlighted in pink have no condition and will be dropped by downstream analyses."
-                + "</body></html>");
+                introHtml != null && !introHtml.trim().isEmpty()
+                        ? introHtml
+                        : DEFAULT_INTRO_HTML);
         panel.add(instructions, BorderLayout.NORTH);
         panel.add(scrollPane, BorderLayout.CENTER);
 
@@ -135,10 +150,30 @@ public final class ConditionManifestPanel {
                                                            Set<String> animals,
                                                            Map<String, String> prefill,
                                                            String dialogTitle) {
-        ConditionManifestPanel panel = new ConditionManifestPanel(animals, prefill);
-        Object[] options = new Object[]{NextStepLabels.SELECT_REPRESENTATIVES, "Cancel"};
+        return showDialog(null, directory, animals, prefill, dialogTitle,
+                NextStepLabels.SELECT_REPRESENTATIVES, null);
+    }
+
+    /**
+     * Configurable variant for callers other than Representative Figure. The
+     * primary-button text and instructions are caller-supplied so later condition
+     * review entry points (aggregation, statistics, Excel, diagnostics) are no
+     * longer tied to {@link NextStepLabels#SELECT_REPRESENTATIVES}.
+     */
+    public static LinkedHashMap<String, String> showDialog(java.awt.Component parent,
+                                                           String directory,
+                                                           Set<String> animals,
+                                                           Map<String, String> prefill,
+                                                           String dialogTitle,
+                                                           String primaryButtonText,
+                                                           String introHtml) {
+        ConditionManifestPanel panel = new ConditionManifestPanel(animals, prefill, introHtml);
+        String primary = primaryButtonText == null || primaryButtonText.trim().isEmpty()
+                ? NextStepLabels.SELECT_REPRESENTATIVES
+                : primaryButtonText;
+        Object[] options = new Object[]{primary, "Cancel"};
         int result = JOptionPane.showOptionDialog(
-                null,
+                parent,
                 panel.getComponent(),
                 dialogTitle == null ? "Condition Assignment" : dialogTitle,
                 JOptionPane.OK_CANCEL_OPTION,

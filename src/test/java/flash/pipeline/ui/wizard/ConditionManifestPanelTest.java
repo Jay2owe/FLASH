@@ -2,7 +2,10 @@ package flash.pipeline.ui.wizard;
 
 import org.junit.Test;
 
+import javax.swing.JLabel;
 import javax.swing.table.DefaultTableModel;
+import java.awt.Component;
+import java.awt.Container;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -69,6 +72,36 @@ public class ConditionManifestPanelTest {
         ConditionManifestPanel panel = new ConditionManifestPanel(animals, null);
         assertNotNull(panel.getComponent());
         assertTrue(panel.getTable().getRowCount() == 1);
+    }
+
+    @Test
+    public void defaultIntroUsedWhenNoneSupplied() {
+        ConditionManifestPanel panel = new ConditionManifestPanel(ordered("A1"), null);
+        assertEquals(ConditionManifestPanel.DEFAULT_INTRO_HTML, introText(panel));
+    }
+
+    @Test
+    public void customIntroHtmlOverridesDefault() {
+        String custom = "<html><body><b>Excel summary export</b></body></html>";
+        ConditionManifestPanel panel =
+                new ConditionManifestPanel(ordered("A1"), null, custom);
+        assertEquals(custom, introText(panel));
+    }
+
+    @Test
+    public void blankIntroFallsBackToDefault() {
+        ConditionManifestPanel panel =
+                new ConditionManifestPanel(ordered("A1"), null, "   ");
+        assertEquals(ConditionManifestPanel.DEFAULT_INTRO_HTML, introText(panel));
+    }
+
+    private static String introText(ConditionManifestPanel panel) {
+        for (Component c : ((Container) panel.getComponent()).getComponents()) {
+            if (c instanceof JLabel) {
+                return ((JLabel) c).getText();
+            }
+        }
+        return null;
     }
 
     private static Set<String> ordered(String... names) {
