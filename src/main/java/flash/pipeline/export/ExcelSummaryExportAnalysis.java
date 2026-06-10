@@ -1,12 +1,14 @@
 package flash.pipeline.export;
 
 import ij.IJ;
+import flash.pipeline.analyses.AggregationConditionSupport;
 import flash.pipeline.analyses.Analysis;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.IoUtils;
+import flash.pipeline.io.ResultAnimalScanner;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.naming.ConditionAssignments;
 import flash.pipeline.naming.ConditionAxis;
@@ -17,6 +19,7 @@ import flash.pipeline.runrecord.RunRecordAware;
 
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.wizard.ConditionReviewSupport;
 
 import java.awt.FlowLayout;
 import java.awt.GraphicsEnvironment;
@@ -352,6 +355,8 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
 
         final JLabel previewLabel = pd.addMessage(buildPreviewHtml(selected[0]));
 
+        addConditionReviewRow(pd, projectRoot == null ? null : projectRoot.getAbsolutePath());
+
         // Advanced section: live form rows that mutate the chosen preset
         // before Save. Keeps the dropdown as the only Basic field.
         final boolean[] suppressAdvanced = { false };
@@ -581,10 +586,150 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
 
     // ---- Condition resolution ---------------------------------------------
 
+    private void addConditionReviewRow(PipelineDialog pd, final String directory) {
+        pd.addHeader("Conditions");
+        LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
+        String status = animals.isEmpty()
+                ? "No animals found yet — run Master Data Aggregation first."
+                : ConditionReviewSupport.evaluate(directory, animals).summary();
+        pd.addMessage(status);
+
+        JButton reviewButton = new JButton("Review conditions...");
+        reviewButton.addActionListener(new java.awt.event.ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                LinkedHashSet<String> current = ResultAnimalScanner.collect(directory);
+                if (current.isEmpty()) {
+                    IJ.showMessage("Review conditions",
+                            "No animals found yet. Run Master Data Aggregation first.");
+                    return;
+                }
+                ConditionReviewSupport.Options options = new ConditionReviewSupport.Options();
+                options.title = "Excel Summary Export — Condition Assignment";
+                options.primaryButtonText = "Save conditions";
+                ConditionReviewSupport.reviewAndSave(null, directory, current, options);
+            }
+        });
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        row.add(reviewButton);
+        pd.addComponent(row);
+    }
+
     private Map<String, String> autoDetectConditions(String directory, Set<String> animals) {
+        boolean gui = canShowGuiDialog(suppressDialogs, configFromCli, GraphicsEnvironment.isHeadless());
+        ConditionReviewSupport.Health health = ConditionReviewSupport.evaluate(directory, animals);
+
+        if (gui && health.needsReview()) {
+            ConditionReviewSupport.Options options = new ConditionReviewSupport.Options();
+            options.title = "Excel Summary Export — Condition Assignment";
+            options.primaryButtonText = "Save conditions";
+            LinkedHashMap<String, String> reviewed =
+                    ConditionReviewSupport.reviewAndSave(null, directory, animals, options);
+            if (reviewed != null) {
+                offerMasterRefreshIfStale(directory, animals);
+            }
+        } else if (!gui) {
+            // Unattended: never block, but make the condition state auditable.
+            logConditionHealth(health);
+        }
+
         Map<String, String> assignments = ConditionManifestIO.resolveAssignments(directory, animals);
         IJ.log("  Resolved conditions: " + assignments.values());
         return assignments;
+    }
+
+    private static void logConditionHealth(ConditionReviewSupport.Health health) {
+        if (!health.needsReview()) {
+            return;
+        }
+        IJ.log("  [conditions] " + health.summary());
+        for (String message : health.messages) {
+            IJ.log("    - " + message);
+        }
+    }
+
+    /**
+     * When master-table condition labels are stale relative to the current
+     * manifest, offer to reapply current conditions to the master tables so the
+     * workbook and the master CSVs agree. GUI-only; a no-op otherwise.
+     */
+    private void offerMasterRefreshIfStale(String directory, Set<String> animals) {
+        if (!masterConditionLabelsStale(directory, animals)) {
+            return;
+        }
+        String[] options = {"Apply current conditions to master tables", "Continue with current conditions"};
+        int choice = JOptionPane.showOptionDialog(
+                null,
+                "<html><body style='width:360px'>Conditions changed since these master tables"
+                        + " were written.<br><br>Statistics and Excel can use the current"
+                        + " Conditions.csv, but the master table Condition column is stale.</body></html>",
+                "Conditions changed",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[0]);
+        if (choice == 0) {
+            AggregationConditionSupport.RefreshSummary summary =
+                    AggregationConditionSupport.refreshAllMasterTables(directory);
+            IJ.log("[Excel] Refreshed conditions in " + summary.filesUpdated + " master table(s).");
+        }
+    }
+
+    /**
+     * True when any master table carries a Condition value that differs from the
+     * current manifest, or lacks a Condition column entirely.
+     */
+    private boolean masterConditionLabelsStale(String directory, Set<String> animals) {
+        Map<String, String> current = ConditionManifestIO.resolveAssignments(directory, animals);
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        for (String name : new String[]{FlashProjectLayout.MASTER_OBJECTS_FILENAME,
+                FlashProjectLayout.MASTER_INTENSITIES_FILENAME}) {
+            File master = existingProjectSummaryFile(layout, name);
+            if (master == null) continue;
+            if (masterCsvConditionDiffers(master, current)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean masterCsvConditionDiffers(File master, Map<String, String> current) {
+        try {
+            CsvSupport.RecordReader reader = CsvSupport.openRecordReader(master);
+            try {
+                CsvSupport.Record headerRecord = reader.readRecord();
+                if (headerRecord == null) return false;
+                String[] header = CsvSupport.parseRecord(headerRecord.text);
+                int animalIdx = -1;
+                int condIdx = -1;
+                for (int i = 0; i < header.length; i++) {
+                    String col = header[i] == null ? "" : header[i].trim();
+                    if (col.equals("AnimalName")) animalIdx = i;
+                    else if (col.equals("Condition")) condIdx = i;
+                }
+                if (animalIdx < 0) return false;
+                if (condIdx < 0) return true; // old format, no Condition column yet
+                CsvSupport.Record record;
+                while ((record = reader.readRecord()) != null) {
+                    if (CsvSupport.isBlankRecord(record.text)) continue;
+                    String[] row = CsvSupport.parseRecord(record.text);
+                    String animal = animalIdx < row.length ? row[animalIdx].trim() : "";
+                    if (animal.isEmpty()) continue;
+                    String stored = condIdx < row.length ? row[condIdx].trim() : "";
+                    String expected = current.get(animal);
+                    if (expected != null && !expected.equals(stored)) {
+                        return true;
+                    }
+                }
+            } finally {
+                reader.close();
+            }
+        } catch (Exception ignored) {
+            // Unreadable master: do not block the export over a stale-check failure.
+        }
+        return false;
     }
 
     // ---- CSV Parsing ------------------------------------------------------

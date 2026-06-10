@@ -181,46 +181,42 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             return;
         }
 
-        LinkedHashMap<String, String> persistedConditions =
-                readPersistedConditionAssignments(directory);
         LinkedHashMap<String, String> rowToAnimal =
-                inferAnimalUnits(allRowNames, persistedConditions, shouldCollapseToAnimalUnit());
+                inferAnimalUnits(allRowNames,
+                        readPersistedConditionAssignments(directory),
+                        shouldCollapseToAnimalUnit());
         Set<String> allAnimals = new LinkedHashSet<String>();
         allAnimals.addAll(rowToAnimal.values());
 
-        // 2. Resolve condition assignments — interactive or unattended
-        Map<String, String> animalToCondition = resolveConditionAssignments(directory, allAnimals);
-        if (animalToCondition == null) {
-            IJ.log("Statistical analysis cancelled by user.");
-            recordWarn("Statistical analysis cancelled by user.");
-            return;
-        }
-        applyParentConditionsFromNestedRows(animalToCondition, persistedConditions, rowToAnimal);
-
-        // Multi-axis: optionally collapse to a single chosen condition axis so the
-        // comparison groups by (say) Genotype alone instead of the full composite.
-        // No-op for single-axis / "combined" projects (composite preserved).
-        remapToConditionAxis(directory, animalToCondition, allAnimals,
-                statisticsConfig == null ? null : statisticsConfig.conditionAxisId);
-
-        // Build ordered condition list
-        List<String> conditionOrder = new ArrayList<String>();
-        Set<String> seen = new LinkedHashSet<String>();
-        for (String animal : allAnimals) {
-            String cond = animalToCondition.get(animal);
-            if (cond != null && !cond.isEmpty() && seen.add(cond)) {
-                conditionOrder.add(cond);
+        // 2. Resolve condition assignments — interactive or unattended. In GUI mode,
+        //    re-prompt the review dialog until at least two conditions exist instead
+        //    of failing outright on a single collapsed group.
+        Map<String, String> animalToCondition;
+        List<String> conditionOrder;
+        while (true) {
+            animalToCondition = resolveConditionAssignments(directory, allAnimals);
+            if (animalToCondition == null) {
+                IJ.log("Statistical analysis cancelled by user.");
+                recordWarn("Statistical analysis cancelled by user.");
+                return;
             }
-        }
+            // Re-read the manifest each pass so a just-saved review is reflected.
+            applyParentConditionsFromNestedRows(animalToCondition,
+                    readPersistedConditionAssignments(directory), rowToAnimal);
 
-        if (conditionOrder.size() < 2) {
-            String msg = "At least 2 conditions are required for statistical testing. Found: "
-                    + conditionOrder.size() + ".";
-            if (isUnattendedMode(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
-                msg += " Edit FLASH/Results/Tables/Project Summary/Conditions.csv to assign conditions.";
+            // Multi-axis: optionally collapse to a single chosen condition axis so the
+            // comparison groups by (say) Genotype alone instead of the full composite.
+            // No-op for single-axis / "combined" projects (composite preserved).
+            remapToConditionAxis(directory, animalToCondition, allAnimals,
+                    statisticsConfig == null ? null : statisticsConfig.conditionAxisId);
+
+            conditionOrder = orderedConditions(allAnimals, animalToCondition);
+            if (conditionOrder.size() >= 2) {
+                break;
             }
-            notifyUser("Statistical Analysis", msg);
-            return;
+            if (!offerConditionReviewRetry(conditionOrder.size())) {
+                return;
+            }
         }
 
         // 3. Merge data from both CSVs
@@ -1114,6 +1110,48 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
      * the editable table dialog is shown, and accepted edits are persisted
      * back to {@code Conditions.csv} for future CLI runs.
      */
+    static List<String> orderedConditions(Set<String> allAnimals,
+                                          Map<String, String> animalToCondition) {
+        List<String> conditionOrder = new ArrayList<String>();
+        Set<String> seen = new LinkedHashSet<String>();
+        for (String animal : allAnimals) {
+            String cond = animalToCondition.get(animal);
+            if (cond != null && !cond.isEmpty() && seen.add(cond)) {
+                conditionOrder.add(cond);
+            }
+        }
+        return conditionOrder;
+    }
+
+    /**
+     * When fewer than two conditions are present, decide whether to retry the
+     * review. Unattended mode reports and gives up; GUI mode offers to reopen the
+     * condition review so the user can split animals into at least two groups.
+     *
+     * @return {@code true} to retry condition review, {@code false} to abort.
+     */
+    private boolean offerConditionReviewRetry(int conditionCount) {
+        String msg = "Statistics needs at least two conditions. Found: " + conditionCount + ".";
+        if (isUnattendedMode(suppressDialogs, cliConfig, GraphicsEnvironment.isHeadless())) {
+            notifyUser("Statistical Analysis", msg
+                    + " Edit FLASH/Results/Tables/Project Summary/Conditions.csv to assign conditions.");
+            return false;
+        }
+        String[] options = {"Review conditions", "Cancel statistics"};
+        int choice = JOptionPane.showOptionDialog(
+                null,
+                "<html><body style='width:340px'>" + msg
+                        + "<br><br>Assign animals to at least two experimental groups to run"
+                        + " statistics.</body></html>",
+                "Statistics needs at least two conditions",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[0]);
+        return choice == 0;
+    }
+
     Map<String, String> resolveConditionAssignments(String directory, Set<String> animals) {
         Map<String, String> resolved = ConditionManifestIO.resolveAssignments(directory, animals);
 
