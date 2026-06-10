@@ -5,9 +5,11 @@ import flash.pipeline.deconv.psf.ScopeModality;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.io.ResultAnimalScanner;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ConditionNameParser;
 import flash.pipeline.naming.ImageNameParser;
+import flash.pipeline.ui.wizard.ConditionReviewSupport;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -731,6 +733,57 @@ public final class MetadataDiagnostics {
         } else {
             section.ok("Acquisition dates look balanced across the parsed conditions.");
         }
+    }
+
+    /**
+     * Condition health from the canonical {@code Conditions.csv}, not just
+     * filename inference. Prefers the animals that appear in result tables (the
+     * set users actually care about for grouping); falls back to image-name
+     * inference when no results exist yet.
+     */
+    public static void checkConditions(String directory,
+                                       List<SeriesInfo> series,
+                                       DiagnosticsReport.Section section) {
+        LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
+        String source = "result tables";
+        if (animals.isEmpty()) {
+            animals = animalsFromSeries(series);
+            source = "image names";
+        }
+        if (animals.isEmpty()) {
+            section.info("No animals found yet to assign conditions.");
+            return;
+        }
+
+        ConditionReviewSupport.Health health = ConditionReviewSupport.evaluate(directory, animals);
+        section.info(health.animalCount + " animal" + (health.animalCount == 1 ? "" : "s")
+                + " (" + source + "); " + health.conditionCount
+                + " condition" + (health.conditionCount == 1 ? "" : "s") + ".");
+
+        if (health.needsReview()) {
+            for (String message : health.messages) {
+                section.warn(message);
+            }
+            section.info("Use \"Review conditions\" when the animal names in result tables are"
+                    + " correct but their experimental groups are wrong or missing.");
+            section.info("Use \"Edit project setup\" when animal ID, hemisphere, region, source"
+                    + " file, or series metadata is wrong — existing analysis results may need"
+                    + " to be rerun.");
+        } else {
+            section.ok("Condition assignments look ready (" + health.conditionCount + " groups).");
+        }
+    }
+
+    private static LinkedHashSet<String> animalsFromSeries(List<SeriesInfo> series) {
+        LinkedHashSet<String> animals = new LinkedHashSet<String>();
+        if (series == null) return animals;
+        for (SeriesInfo s : series) {
+            String animal = extractAnimalName(s);
+            if (!animal.isEmpty()) {
+                animals.add(animal);
+            }
+        }
+        return animals;
     }
 
     /** P-05: Z-stack depth summary. */

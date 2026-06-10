@@ -825,6 +825,9 @@ public class FLASH_Pipeline implements PlugIn {
                 // TODO(project-home-screen): route this through ProjectHomeDialog
                 // with EDT-safe load/classify work. Keeping the builder here
                 // preserves the existing full-edit behaviour for this stage.
+                if (!confirmProjectSetupEditIfResultsExist()) {
+                    return;
+                }
                 ProjectBuilderDialog.Result picked = ProjectBuilderDialog.open(
                         javax.swing.SwingUtilities.getWindowAncestor(changeBtn),
                         RecentProjectsStore.resolveStoreDir(),
@@ -1061,6 +1064,65 @@ public class FLASH_Pipeline implements PlugIn {
         options.title = "Review condition assignments";
         options.primaryButtonText = "Save conditions";
         ConditionReviewSupport.reviewAndSave(null, directory, animals, options);
+    }
+
+    /**
+     * Warn before opening the full project setup editor when analysis results
+     * already exist, because animal/hemisphere/region/source/series edits there
+     * can invalidate those results. Returns {@code true} to proceed.
+     */
+    private boolean confirmProjectSetupEditIfResultsExist() {
+        if (!projectHasAnalysisResults(directory)) {
+            return true;
+        }
+        String[] options = {"Edit project setup", "Cancel"};
+        int choice = JOptionPane.showOptionDialog(
+                null,
+                "<html><body style='width:380px'>Project setup edits can change animal IDs,"
+                        + " hemispheres, regions, source files, or series selection. Existing"
+                        + " analysis CSVs are not rewritten automatically.<br><br>If you change"
+                        + " these fields, rerun affected analyses before aggregation.<br><br>"
+                        + "To only change experimental groups, use \"Review conditions...\""
+                        + " instead.</body></html>",
+                "Edit project setup?",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[1]);
+        return choice == 0;
+    }
+
+    private static boolean projectHasAnalysisResults(String dir) {
+        if (dir == null || dir.trim().isEmpty()) return false;
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir);
+        java.io.File[] resultDirs = {
+                layout.tablesObjectsWriteDir(),
+                layout.tablesIntensityWriteDir(),
+                layout.tablesSpatialWriteDir(),
+                layout.tablesMorphometryWriteDir(),
+                layout.tablesLineDistanceWriteDir()
+        };
+        for (java.io.File d : resultDirs) {
+            if (directoryHasCsv(d)) return true;
+        }
+        java.io.File summary = layout.tablesProjectSummaryWriteDir();
+        if (summary != null) {
+            if (new java.io.File(summary, FlashProjectLayout.MASTER_OBJECTS_FILENAME).isFile()) return true;
+            if (new java.io.File(summary, FlashProjectLayout.MASTER_INTENSITIES_FILENAME).isFile()) return true;
+        }
+        return false;
+    }
+
+    private static boolean directoryHasCsv(java.io.File dir) {
+        if (dir == null || !dir.isDirectory()) return false;
+        java.io.File[] csvs = dir.listFiles(new java.io.FilenameFilter() {
+            @Override
+            public boolean accept(java.io.File d, String name) {
+                return name != null && name.toLowerCase(java.util.Locale.ROOT).endsWith(".csv");
+            }
+        });
+        return csvs != null && csvs.length > 0;
     }
 
     /**

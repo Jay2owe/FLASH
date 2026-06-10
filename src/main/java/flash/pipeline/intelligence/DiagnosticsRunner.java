@@ -54,6 +54,9 @@ public final class DiagnosticsRunner {
                     MetadataDiagnostics.scanDirectory(directory);
             scanSec.info("Parsed metadata for " + series.size() + " series.");
 
+            DiagnosticsReport.Section conditions = report.addSection("Conditions");
+            MetadataDiagnostics.checkConditions(directory, series, conditions);
+
             DiagnosticsReport.Section obj = report.addSection("Objective");
             MetadataDiagnostics.checkObjective(series, obj);
 

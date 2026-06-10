@@ -1,6 +1,8 @@
 package flash.pipeline.intelligence;
 
 import ij.IJ;
+import flash.pipeline.io.ResultAnimalScanner;
+import flash.pipeline.ui.wizard.ConditionReviewSupport;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -109,12 +111,16 @@ public final class DiagnosticsDialog {
 
         JPanel buttonBar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 8));
         buttonBar.setBackground(BG);
+        final JButton reviewConditionsBtn = new JButton("Review conditions…");
+        reviewConditionsBtn.setPreferredSize(new Dimension(170, 28));
+        reviewConditionsBtn.addActionListener(e -> reviewConditions());
         final JButton saveBtn = new JButton("Save as text…");
         saveBtn.setEnabled(false);
         JButton closeBtn = new JButton("Close");
         saveBtn.setPreferredSize(new Dimension(140, 28));
         closeBtn.setPreferredSize(new Dimension(90, 28));
         closeBtn.addActionListener(e -> dialog.dispose());
+        buttonBar.add(reviewConditionsBtn);
         buttonBar.add(saveBtn);
         buttonBar.add(closeBtn);
 
@@ -171,6 +177,29 @@ public final class DiagnosticsDialog {
                 dialog.removeWindowListener(closeListener);
             }
         }
+    }
+
+    /**
+     * Condition-only review entry point. Edits animal -&gt; condition grouping
+     * through {@code Conditions.csv}; it never touches animal ID, hemisphere,
+     * region, source files, or series selection — those stay in project setup.
+     */
+    private void reviewConditions() {
+        java.util.LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
+        if (animals.isEmpty()) {
+            IJ.showMessage("Review conditions",
+                    "No animals found yet. Run an analysis or set up the project first.");
+            return;
+        }
+        ConditionReviewSupport.Options options = new ConditionReviewSupport.Options();
+        options.title = "Review condition assignments";
+        options.primaryButtonText = "Save conditions";
+        options.introHtml = "<html><body style='width:420px'>"
+                + "<b>Review condition assignments</b><br>"
+                + "Edit experimental groups only. To change animal ID, hemisphere, region,"
+                + " source file, or series metadata, use Edit project setup instead — existing"
+                + " analysis results may need rerunning.</body></html>";
+        ConditionReviewSupport.reviewAndSave(null, directory, animals, options);
     }
 
     private static void renderReport(JPanel panel, DiagnosticsReport report) {
