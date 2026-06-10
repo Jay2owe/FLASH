@@ -25,8 +25,8 @@ import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.roi.RegionDrawSpec;
 import flash.pipeline.roi.RoiIO;
-import flash.pipeline.roi.RoiNaming;
 import flash.pipeline.roi.RegionImageSelectionDialog;
+import flash.pipeline.roi.RegionSetupPanel;
 import flash.pipeline.roi.RoiSetImageBinding;
 import flash.pipeline.roi.RoiSetValidator;
 import flash.pipeline.io.DeferredImageSupplier;
@@ -39,7 +39,6 @@ import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.RoiOrientationPanel;
 import flash.pipeline.ui.ToggleSwitch;
-import flash.pipeline.ui.wizard.RegionTextFieldSupport;
 
 import ij.IJ;
 import ij.ImagePlus;
@@ -285,7 +284,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         JTextField lineSetNameField = pd.addStringField("Line Set Name", "Ventricle", 15);
 
         pd.addHeader("Settings");
-        pd.addChoice("ROI Channel", roiChannelChoices, defaultRoiChannelChoice);
+        JComboBox<String> roiChannelCombo =
+                pd.addChoice("ROI Channel", roiChannelChoices, defaultRoiChannelChoice);
         pd.addChoice("Image Adjustment", new String[]{"None", "Automatic", "Manual"}, "None");
         if (showZSliceSourceChoice) {
             pd.addChoice("Draw ROIs on",
@@ -293,9 +293,16 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                     FULL_IMAGE_SOURCE);
             pd.addHelpText("Use the full stack for ROI drawing, or match the z-slice subset configured in the Configuration folder.");
         }
-        JTextField newNameField = pd.addStringField("New ROI Set Name", "SCN", 15);
-        RegionTextFieldSupport.Handle newNameRegionSupport =
-                RegionTextFieldSupport.install(newNameField, null);
+
+        // Regions to draw (new set): a list, each with its own drawing channel. Image
+        // Adjustment above is session-wide (display-only, never affects saved geometry).
+        // Append mode draws one existing region using the ROI Channel above.
+        pd.addSubHeader("Regions to draw (new set)");
+        final RegionSetupPanel regionPanel =
+                new RegionSetupPanel(roiChannelChoices, defaultRoiChannelChoice, "SCN");
+        pd.addComponent(regionPanel);
+        pd.addHelpText("One row per region; each region picks its own channel. Use 'Add region' "
+                + "to draw several regions in one pass. (Append mode uses the existing set + ROI Channel.)");
         final int totalImagesForLabel = totalImages;
 
         if (hasExisting && createNewToggle != null && appendChoice != null) {
@@ -304,7 +311,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             Runnable syncRoiSetMode = () -> {
                 boolean createNewSelected = finalCreateNewToggle.isSelected();
                 setFieldEnabled(finalAppendChoice, !createNewSelected);
-                setFieldEnabled(newNameField, createNewSelected);
+                setFieldEnabled(roiChannelCombo, !createNewSelected);
+                regionPanel.setRegionEditingEnabled(createNewSelected);
                 pd.setPrimaryButtonText(NextStepLabels.afterRoiSetup(
                         createNewSelected,
                         existingRoiCountForSelection(finalAppendChoice, roiNames, roiFiles),
@@ -314,6 +322,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             appendChoice.addActionListener(e -> syncRoiSetMode.run());
             syncRoiSetMode.run();
         } else {
+            // No existing sets: always create-new, so the region table drives channels.
+            setFieldEnabled(roiChannelCombo, false);
             pd.setPrimaryButtonText(NextStepLabels.afterRoiSetup(true, 0, totalImagesForLabel));
         }
 
@@ -333,46 +343,90 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         }
         boolean drawLineSet = pd.getNextBoolean();
         String lineSetName = pd.getNextString().trim();
-        int roiChannel = parseRoiChannelChoice(pd.getNextChoice());
-        String imageProcessing = pd.getNextChoice();
+        int appendChannel = parseRoiChannelChoice(pd.getNextChoice());   // ROI Channel (append mode)
+        String imageProcessing = pd.getNextChoice();                      // Image Adjustment (session-wide)
         boolean drawOnSubset = showZSliceSourceChoice
                 && CONFIGURED_SUBSET_SOURCE.equals(pd.getNextChoice());
-        String ignoredRawNewName = pd.getNextString();
-        String newName = newNameRegionSupport.canonicalText().trim();
-        String chosen = createNew ? newName : existingSelection;
-        if (chosen == null || chosen.trim().isEmpty()) {
-            IJ.error("ROI Analysis", "ROI set name is blank.");
-            return;
+
+        // Build the region list: from the table for a new set (one row per region, each with
+        // its own channel), or the single selected existing set for append.
+        List<RegionDrawSpec> regionSpecs;
+        if (createNew) {
+            regionSpecs = RegionSetupPanel.toSpecs(regionPanel.rows(),
+                    DrawAndSaveROIsAnalysis::parseRoiChannelChoice, imageProcessing);
+            if (regionSpecs.isEmpty()) {
+                IJ.error("ROI Analysis", "Enter at least one region name.");
+                return;
+            }
+        } else {
+            if (existingSelection == null || existingSelection.trim().isEmpty()) {
+                IJ.error("ROI Analysis", "ROI set name is blank.");
+                return;
+            }
+            regionSpecs = new ArrayList<RegionDrawSpec>();
+            regionSpecs.add(new RegionDrawSpec(existingSelection.trim(), appendChannel, imageProcessing));
         }
 
-        // One region per Draw ROIs pass. The RegionDrawSpec list is kept so multi-region in a
-        // single pass can be added later without reworking the loop.
-        List<RegionDrawSpec> regionSpecs = new ArrayList<RegionDrawSpec>();
-        regionSpecs.add(new RegionDrawSpec(chosen, roiChannel, imageProcessing));
-
-        // Region-scoped image selection: which images this region's ROIs cover. The draw loop
-        // draws only images in selectedSeries (zero-based) and names each ROI by its durable
-        // image-identity token, so the zip can cover any subset. Runs for new AND append.
-        java.util.LinkedHashSet<Integer> selectedSeries = new java.util.LinkedHashSet<Integer>();
+        // Image picker (Dialog 2): one matrix with a checkbox column per region. Returns the
+        // images each region's ROI set is drawn on (zero-based series indices). Shown once for
+        // all regions; runs for new AND append.
+        java.util.LinkedHashMap<String, java.util.LinkedHashSet<Integer>> perRegionSelection;
         {
             List<RegionImageSelectionDialog.Row> pickerRows =
                     RegionImageSelectionDialog.buildRows(supplier, totalImages);
             List<String> regionNames = new ArrayList<String>();
             for (RegionDrawSpec s : regionSpecs) regionNames.add(s.regionName);
             boolean autoSelectOnly = headless || GraphicsEnvironment.isHeadless();
-            java.util.LinkedHashMap<String, java.util.LinkedHashSet<Integer>> perRegionSelection =
+            perRegionSelection =
                     RegionImageSelectionDialog.choose(pickerRows, regionNames, autoSelectOnly);
             if (perRegionSelection == null) {
                 IJ.log("[FLASH] Draw ROIs cancelled at image selection.");
                 return;
             }
-            java.util.LinkedHashSet<Integer> sel = perRegionSelection.get(chosen);
-            if (sel != null) selectedSeries.addAll(sel);
-            if (selectedSeries.isEmpty()) {
-                showOrLog("Draw ROIs and Orientate Images",
-                        "No images selected for region \"" + chosen + "\".");
+        }
+
+        // Draw each region in turn (region-by-region): each opens its picked images, draws with
+        // its own channel, and saves its own zip + ROI Properties CSV. A user cancel/abort in any
+        // region stops the whole pass (partial work is saved by drawOneRegion).
+        for (RegionDrawSpec spec : regionSpecs) {
+            DrawRegionResult result = drawOneRegion(directory, projectRoot, roiDir, supplier,
+                    totalImages, roiBinCfg, drawOnSubset, spec,
+                    perRegionSelection.get(spec.regionName), createNew, roiFiles, roiNames,
+                    drawLineSet);
+            if (result == DrawRegionResult.ABORT) {
                 return;
             }
+        }
+
+        // ── Draw Line Set (optional), once after all regions ─────────────
+        // REGRESSION GUARD: selecting "Draw Line Set" must start the line-drawing handoff.
+        // The fix: keep this explicit call after ROI saving so the toggle cannot silently skip line setup.
+        if (drawLineSet && lineSetName != null && !lineSetName.isEmpty()) {
+            File linesDir = LineDistanceAnalysis.lineSetWriteDir(directory);
+            LineDistanceAnalysis lineAnalysis = new LineDistanceAnalysis();
+            lineAnalysis.drawLineSet(directory, linesDir, lineSetName);
+        }
+    }
+
+    private enum DrawRegionResult { CONTINUE, ABORT }
+
+    /**
+     * Draw one region's ROIs over its selected images and save its zip + ROI Properties CSV.
+     * Reuses the per-image orientation/draw flow; each ROI pair is named by its durable
+     * image-identity token (see {@link RoiSetImageBinding}). Returns
+     * {@link DrawRegionResult#ABORT} when the user cancels/aborts (partial work is saved here),
+     * otherwise {@link DrawRegionResult#CONTINUE}.
+     */
+    private DrawRegionResult drawOneRegion(String directory, File projectRoot, File roiDir,
+            DeferredImageSupplier supplier, int totalImages, BinConfig roiBinCfg,
+            boolean drawOnSubset, RegionDrawSpec spec, java.util.Set<Integer> selectedSeries,
+            boolean createNew, List<File> roiFiles, List<String> roiNames, boolean drawLineSet) {
+        String chosen = spec.regionName;
+        int roiChannel = spec.drawChannel;
+        String imageProcessing = spec.displayMode;
+        if (selectedSeries == null || selectedSeries.isEmpty()) {
+            IJ.log("[FLASH] No images selected for region \"" + chosen + "\"; skipping.");
+            return DrawRegionResult.CONTINUE;
         }
 
         File roiZip = new File(roiDir, chosen + " ROIs.zip");
@@ -406,14 +460,11 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         OrientationBatchController orientationController =
                 new OrientationBatchController(presetStore, totalImages);
 
-        RoiSeriesRange range = RoiSeriesRange.forMode(createNew, rm.getCount(), totalImages);
         if (createNew && totalImages == 0) {
             rm.close();
             showOrLog("Draw ROIs and Orientate Images", "No images were found to draw ROIs.");
-            return;
+            return DrawRegionResult.CONTINUE;
         }
-        int startRoiIndex = range.firstSeriesIndexInclusive + 1;
-        final int startOffset = range.firstSeriesIndexInclusive * 2;
 
         final boolean finalDrawOnSubset = drawOnSubset;
         final BinConfig finalRoiBinCfg = roiBinCfg;
@@ -434,7 +485,6 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         }
 
         for (int i = 0; i < totalImages; i++) {
-            int processingIndex = range.processingIndexFor(i);
             if (!selectedSeries.contains(Integer.valueOf(i))) {
                 continue; // not selected for this region
             }
@@ -523,7 +573,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                     prepCache.clear();
                     closePreparedImages(prep);
                     savePartialAndExit(directory, rm, "user-cancelled at image " + (i + 1));
-                    return;
+                    return DrawRegionResult.ABORT;
                 }
             } finally {
                 drawDialog.close();
@@ -571,7 +621,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                     }
                     prepCache.clear();
                     savePartialAndExit(directory, rm, "user-aborted at image " + (i + 1));
-                    return;
+                    return DrawRegionResult.ABORT;
                 }
             }
 
@@ -658,9 +708,12 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             }
             if (imgAnalysisDirReady) {
                 String suffix = parts.fileSuffix();
+                // Region-qualify the preview so a multi-region image (drawn for several regions
+                // in one pass) does not overwrite another region's preview, matching the
+                // per-region zip/CSV namespacing.
                 String croppedName = suffix.isEmpty()
-                        ? "Cropped.PNG"
-                        : "Cropped_" + suffix + ".PNG";
+                        ? chosen + "_Cropped.PNG"
+                        : chosen + "_Cropped_" + suffix + ".PNG";
                 File croppedOutput = new File(imgAnalysisDir, croppedName);
                 IJ.saveAs(cropped, "PNG", croppedOutput.getAbsolutePath());
                 recordOutput(croppedOutput, "png");
@@ -687,7 +740,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         } catch (IOException e) {
             IJ.log("[FLASH] Could not create ROI tables directory: " + e.getMessage()
                     + " — ROI Properties CSV will not be saved.");
-            return;
+            rm.close();
+            return DrawRegionResult.CONTINUE;
         }
         File roiPropsOut = new File(attrDir, chosen + " ROI Properties.csv");
 
@@ -723,7 +777,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         // ── Validate ROI ordering ───────────────────────────────────────
         if (!RoiSetValidator.validateStructuralWithDialog(rm, partialZipPath)) {
             rm.close();
-            return;
+            return DrawRegionResult.CONTINUE;
         }
 
         // ── Save ROI zip ────────────────────────────────────────────────
@@ -733,19 +787,11 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         rm.close();
 
         showOrLog("Draw ROIs and Orientate Images",
-                "Saved ROIs to:\n" + roiZip.getAbsolutePath() +
+                "Saved ROIs for region \"" + chosen + "\" to:\n" + roiZip.getAbsolutePath() +
                         "\n\nROI properties saved to:\n" + roiPropsOut.getAbsolutePath());
 
         closeAllNoPrompt();
-
-        // ── Draw Line Set (optional) ─────────────────────────────────
-        // REGRESSION GUARD: selecting "Draw Line Set" must start the line-drawing handoff.
-        // The fix: keep this explicit call after ROI saving so the accepted toggle cannot silently skip line setup.
-        if (drawLineSet && lineSetName != null && !lineSetName.isEmpty()) {
-            File linesDir = LineDistanceAnalysis.lineSetWriteDir(directory);
-            LineDistanceAnalysis lineAnalysis = new LineDistanceAnalysis();
-            lineAnalysis.drawLineSet(directory, linesDir, lineSetName);
-        }
+        return DrawRegionResult.CONTINUE;
     }
 
     BinConfig loadBinConfig(String directory) {
