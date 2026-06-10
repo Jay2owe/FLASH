@@ -1730,6 +1730,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         if (col == null) return false;
         if (isRunLineageColumn(col)) return false;
         if (col.equals("AnimalName")) return false;
+        if (col.equals("Condition")) return false;
         if (col.equals("numSections")) return false;
         if (col.contains("numSections")) return false;
         if (col.equals("numZSlices")) return false;

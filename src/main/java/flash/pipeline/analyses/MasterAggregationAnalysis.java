@@ -185,6 +185,10 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
     private final LinkedHashMap<String, String> groupKeyToAnimal =
             new LinkedHashMap<String, String>();
 
+    /** Row name -> {parent animal, condition} used this run; flushed as a snapshot. */
+    private final LinkedHashMap<String, String[]> conditionSnapshotRows =
+            new LinkedHashMap<String, String[]>();
+
     @Override
     public void setHeadless(boolean headless) {
         this.headless = headless;
@@ -494,6 +498,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         IJ.log("=== Master Aggregation Analysis ===");
         resetVolumeTracking();
         groupKeyToAnimal.clear();
+        conditionSnapshotRows.clear();
 
         File projectRoot = new File(directory);
 
@@ -566,6 +571,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         boolean didIntensities = aggregateIntensities(directory, exportDir, numSectionsPerAnimal);
 
         if (didObjects || didIntensities) {
+            AggregationConditionSupport.writeSnapshot(
+                    layout.analysisDetailsWriteDir(), conditionSnapshotRows, currentRunId());
             try {
                 AnalysisStatusScanner.writeSidecar(directory,
                         AnalysisStatusScanner.AGGREGATION_ID,
@@ -1434,9 +1441,11 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
 
         List<String> columns = new ArrayList<String>();
         columns.add("AnimalName");
+        columns.add(AggregationConditionSupport.CONDITION_COLUMN);
         columns.add("numSections");
         Set<String> seenMetricColumns = new LinkedHashSet<String>();
         seenMetricColumns.add("AnimalName");
+        seenMetricColumns.add(AggregationConditionSupport.CONDITION_COLUMN);
         seenMetricColumns.add("numSections");
         for (Map.Entry<String, Map<String, LinkedHashMap<String, Double>>> chEntry : channelRawData.entrySet()) {
             for (LinkedHashMap<String, Double> metrics : chEntry.getValue().values()) {
@@ -1492,7 +1501,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         }
 
         File outFile = new File(exportDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME);
-        writeMasterCsv(outFile, columns, allAnimals, table, sourceRunIdsByGroup);
+        Map<String, String> conditionByGroup = resolveAndRecordConditions(directory, allAnimals);
+        writeMasterCsv(outFile, columns, allAnimals, table, conditionByGroup, sourceRunIdsByGroup);
 
         // Write aggregation analysis details
         if (canNormalize) {
@@ -2086,10 +2096,12 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
 
             List<String> columns = new ArrayList<String>();
             columns.add("AnimalName");
+            columns.add(AggregationConditionSupport.CONDITION_COLUMN);
             columns.add("numSections");
             columns.add(NUM_Z_SLICES_COLUMN);
             Set<String> seenColumns = new LinkedHashSet<String>();
             seenColumns.add("AnimalName");
+            seenColumns.add(AggregationConditionSupport.CONDITION_COLUMN);
             seenColumns.add("numSections");
             seenColumns.add(NUM_Z_SLICES_COLUMN);
             for (Map.Entry<String, Map<String, LinkedHashMap<String, Double>>> chEntry : bucket.channelData.entrySet()) {
@@ -2126,7 +2138,10 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             }
 
             File outFile = new File(exportDir, intensityMasterFilename(entry.getKey()));
-            writeMasterCsv(outFile, columns, bucket.allAnimals, table, bucket.sourceRunIdsByGroup);
+            Map<String, String> conditionByGroup =
+                    resolveAndRecordConditions(directory, bucket.allAnimals);
+            writeMasterCsv(outFile, columns, bucket.allAnimals, table, conditionByGroup,
+                    bucket.sourceRunIdsByGroup);
             wroteAny = true;
         }
 
@@ -2480,9 +2495,28 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
 
     // ------------------------------------------------------------ CSV writing
 
+    /**
+     * Resolve the current condition for each group key and record it for the
+     * run-level snapshot. Applies {@code Conditions.csv} post-hoc, so analyses
+     * run before conditions were set still get correct grouping at aggregation.
+     */
+    private Map<String, String> resolveAndRecordConditions(String directory, Set<String> groupKeys) {
+        LinkedHashMap<String, String> byGroup =
+                AggregationConditionSupport.resolveConditionsForGroups(
+                        directory, groupKeys, groupKeyToAnimal);
+        for (Map.Entry<String, String> entry : byGroup.entrySet()) {
+            String groupKey = entry.getKey();
+            String parent = AggregationConditionSupport.parentAnimal(groupKey, groupKeyToAnimal);
+            String condition = entry.getValue() == null ? "" : entry.getValue();
+            conditionSnapshotRows.put(groupKey, new String[]{parent, condition});
+        }
+        return byGroup;
+    }
+
     private void writeMasterCsv(File outFile, List<String> columns,
                                 Set<String> allAnimals,
                                 LinkedHashMap<String, LinkedHashMap<String, Double>> table,
+                                Map<String, String> conditionByGroup,
                                 Map<String, LinkedHashSet<String>> sourceRunIdsByGroup) {
         File tmpFile = null;
         boolean moved = false;
@@ -2503,6 +2537,11 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                     LinkedHashMap<String, Double> row = table.get(animal);
                     for (int c = 1; c < columns.size(); c++) {
                         String col = columns.get(c);
+                        if (AggregationConditionSupport.CONDITION_COLUMN.equals(col)) {
+                            String condition = conditionByGroup == null ? null : conditionByGroup.get(animal);
+                            vals.add(csvSafeCell(condition == null ? "" : condition));
+                            continue;
+                        }
                         Double val = (row != null) ? row.get(col) : null;
                         vals.add(val != null ? fmt(val) : "");
                     }
