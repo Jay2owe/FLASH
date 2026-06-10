@@ -129,13 +129,36 @@ public final class RoiOrientationPanel {
         this(owner, target, imageProgress, imageTitle, controller, null);
     }
 
+    public RoiOrientationPanel(Window owner, OrientationActionTarget target,
+                               String imageProgress, String imageTitle,
+                               OrientationBatchController controller,
+                               int imageIndexZeroBased, int totalImages,
+                               String finalDestination) {
+        this(owner, target, imageProgress, imageTitle, controller, null,
+                NextStepLabels.roiDrawingPrimaryLabel(
+                        imageIndexZeroBased, totalImages, finalDestination));
+    }
+
     RoiOrientationPanel(Window owner, OrientationActionTarget target,
                         String imageProgress, String imageTitle,
                         OrientationBatchController controller,
                         PresetNamePrompt presetNamePrompt) {
+        this(owner, target, imageProgress, imageTitle, controller,
+                presetNamePrompt, "Finish drawing");
+    }
+
+    private RoiOrientationPanel(Window owner, OrientationActionTarget target,
+                         String imageProgress, String imageTitle,
+                         OrientationBatchController controller,
+                         PresetNamePrompt presetNamePrompt,
+                         String primaryButtonText) {
         this.target = target;
         this.controller = controller;
         this.presetNamePrompt = presetNamePrompt;
+        String safePrimaryButtonText = safeTrim(primaryButtonText);
+        if (safePrimaryButtonText.isEmpty()) {
+            safePrimaryButtonText = "Finish drawing";
+        }
         if (GraphicsEnvironment.isHeadless()) {
             this.dialog = null;
             this.statusLabel = null;
@@ -164,7 +187,8 @@ public final class RoiOrientationPanel {
                 BorderFactory.createLineBorder(BORDER_COLOR),
                 FlashTheme.pad(8, 10, 8, 10)));
 
-        JLabel instructionLabel = new JLabel(instructionHtml(imageProgress, imageTitle));
+        JLabel instructionLabel = new JLabel(
+                instructionHtml(imageProgress, imageTitle, safePrimaryButtonText));
         instructionLabel.setAlignmentX(JLabel.LEFT_ALIGNMENT);
 
         JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
@@ -244,7 +268,7 @@ public final class RoiOrientationPanel {
         cancelButton.setFocusPainted(false);
         cancelButton.addActionListener(e -> finish(DrawDialogResult.CANCELLED));
 
-        JButton confirmButton = new JButton("Finish drawing");
+        JButton confirmButton = new JButton(safePrimaryButtonText);
         confirmButton.setFocusPainted(false);
         confirmButton.addActionListener(e -> finish(DrawDialogResult.CONFIRMED));
 
@@ -343,8 +367,17 @@ public final class RoiOrientationPanel {
     }
 
     static String instructionHtml(String imageProgress, String imageTitle) {
+        return instructionHtml(imageProgress, imageTitle, "Finish drawing");
+    }
+
+    static String instructionHtml(String imageProgress, String imageTitle,
+                                  String primaryButtonText) {
         String progress = safeTrim(imageProgress);
         String title = safeTrim(imageTitle);
+        String primary = safeTrim(primaryButtonText);
+        if (primary.isEmpty()) {
+            primary = "Finish drawing";
+        }
         StringBuilder html = new StringBuilder("<html><body style='width:430px'>");
         if (!progress.isEmpty()) {
             html.append("<b>").append(escapeHtml(progress)).append("</b><br>");
@@ -355,7 +388,9 @@ public final class RoiOrientationPanel {
                     .append("<br><br>");
         }
         html.append("Draw or edit the ROI in ImageJ. Use orientation buttons ")
-                .append("if needed, then click <b>Finish drawing</b> to lock ")
+                .append("if needed, then click <b>")
+                .append(escapeHtml(primary))
+                .append("</b> to lock ")
                 .append("in this image's ROI.");
         html.append("<br><br>Use <b>Repeat last</b> or a saved preset to reuse ")
                 .append("an orientation. The apply-to buttons can keep this image ")

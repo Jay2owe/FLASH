@@ -3,6 +3,7 @@ package flash.pipeline.ui.wizard;
 import ij.IJ;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.NextStepLabels;
 
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
@@ -134,10 +135,16 @@ public final class ConditionManifestPanel {
                                                            Map<String, String> prefill,
                                                            String dialogTitle) {
         ConditionManifestPanel panel = new ConditionManifestPanel(animals, prefill);
-        int result = JOptionPane.showConfirmDialog(
-                null, panel.getComponent(),
+        Object[] options = new Object[]{NextStepLabels.SELECT_REPRESENTATIVES, "Cancel"};
+        int result = JOptionPane.showOptionDialog(
+                null,
+                panel.getComponent(),
                 dialogTitle == null ? "Condition Assignment" : dialogTitle,
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                options,
+                options[0]);
         if (result != JOptionPane.OK_OPTION) return null;
 
         LinkedHashMap<String, String> assignments = panel.collectAssignments();

@@ -1,6 +1,7 @@
 package flash.pipeline.representative;
 
 import flash.pipeline.presentation.PresentationTileConfig;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 
@@ -136,7 +137,7 @@ public final class ConditionLayoutChooser {
         });
         refresh.run();
 
-        dialog.setPrimaryButtonText("Continue");
+        dialog.setPrimaryButtonText(NextStepLabels.BUILD_FIGURE);
         if (!dialog.showDialog()) {
             return null;
         }

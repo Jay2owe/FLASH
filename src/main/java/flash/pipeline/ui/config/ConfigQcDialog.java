@@ -863,8 +863,11 @@ public final class ConfigQcDialog {
      * the next step in the per-channel breadcrumb, and only then finishes.
      */
     private String computeLockInLabel() {
+        ConfigQcStage stage = currentStage();
         if (!isLastImage()) {
-            return NextStepLabels.qcPrimaryLabel(true, null);
+            String currentTitle = stage == null ? null : stage.title();
+            int nextImageNumber = context.getCurrentImageIndex() + 2;
+            return NextStepLabels.qcPrimaryLabel(currentTitle, true, nextImageNumber);
         }
         String nextLabel;
         int nextInternal = findNextApplicable(stageIndex + 1);
@@ -874,7 +877,7 @@ public final class ConfigQcDialog {
         } else {
             nextLabel = nextOuterBreadcrumbLabel();
         }
-        return NextStepLabels.qcPrimaryLabel(false, nextLabel);
+        return NextStepLabels.qcPrimaryLabel(nextLabel, false, 0);
     }
 
     /** Label of the next step after this dialog within the per-channel breadcrumb, or null. */

@@ -255,8 +255,7 @@ public class FLASH_Pipeline implements PlugIn {
 
         initAnalyses();
 
-        boolean continuePipeline = true;
-        while (continuePipeline) {
+        while (true) {
             boolean[] selections = showAnalysisDialog();
             if (selections == null) break;
 
@@ -358,11 +357,6 @@ public class FLASH_Pipeline implements PlugIn {
                 IJ.log("[FLASH] Last-run recipe not updated because one or more analyses failed.");
             }
 
-            PipelineDialog repeat = new PipelineDialog("Repeat Pipeline?");
-            repeat.addMessage("Would you like to perform another analysis?");
-            repeat.addToggle("Run another analysis", true);
-            if (!repeat.showDialog()) break;
-            continuePipeline = repeat.getNextBoolean();
         }
 
         releaseImageCache();
@@ -1516,7 +1510,7 @@ public class FLASH_Pipeline implements PlugIn {
             IJ.showMessage("FLASH",
                     context + " failed.\n\n"
                     + message + "\n\n"
-                    + "FLASH will return to the next prompt so you can run another analysis.");
+                    + "FLASH will return to the main analysis window.");
         }
     }
 
