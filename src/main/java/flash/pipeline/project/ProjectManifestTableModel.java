@@ -3,6 +3,9 @@ package flash.pipeline.project;
 import flash.pipeline.intelligence.identity.Confidence;
 import flash.pipeline.intelligence.identity.FieldValue;
 import flash.pipeline.intelligence.identity.IdentityCandidate;
+import flash.pipeline.intelligence.identity.IdentityResolver;
+import flash.pipeline.intelligence.identity.IdentityResolvers;
+import flash.pipeline.intelligence.identity.NamingGrammar;
 import flash.pipeline.intelligence.identity.SourceRecord;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.naming.ConditionAxis;
@@ -759,6 +762,24 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         }
         String fileName = src == null ? "" : src.getName();
         return SourceRecord.looseFile(fileName, parent, grandparent);
+    }
+
+    /**
+     * Batch-resolve every rendered row's identity via the standard strategy stack
+     * and apply the result (auto-fill; confirmed cells preserved). Idempotent for
+     * a fixed set of rows — the single entry point both the Project Builder and
+     * Set Up Configuration use so detection never diverges between the two screens.
+     */
+    public void resolveIdentities() {
+        resolveIdentities(null);
+    }
+
+    /** As {@link #resolveIdentities()} but with a user grammar on top of the stack. */
+    public void resolveIdentities(NamingGrammar grammar) {
+        List<SourceRecord> records = buildSourceRecords();
+        IdentityResolver resolver = grammar == null
+                ? IdentityResolvers.standard() : IdentityResolvers.standard(grammar);
+        applyResolvedBatch(records, resolver.resolve(records));
     }
 
     /**

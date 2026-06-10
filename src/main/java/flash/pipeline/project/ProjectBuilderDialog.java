@@ -292,6 +292,7 @@ public final class ProjectBuilderDialog {
                     File[] files = chooser.getSelectedFiles();
                     for (File f : files) addFileSafely(f);
                     if (files.length > 0) seedOutputRootIfBlank(files[0].getParentFile());
+                    resolveAndRefresh();
                 }
             }
         });
@@ -620,6 +621,13 @@ public final class ProjectBuilderDialog {
         return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
+    /** Batch-resolve identity for freshly added rows (the same resolver Set Up Configuration uses). */
+    private void resolveAndRefresh() {
+        model.resolveIdentities();
+        applyColumnPreferences();
+        refreshReviewSummary();
+    }
+
     private int lastReviewedRow = -1;
 
     /** Select the next low/none-confidence row that still needs review (wraps around). */
@@ -855,6 +863,7 @@ public final class ProjectBuilderDialog {
                             seedOutputRootIfBlank(f.getParentFile());
                         }
                     }
+                    resolveAndRefresh();
                     return true;
                 } catch (Exception ex) {
                     IJ.log("[FLASH] Drag-drop failed: " + ex.getMessage());
@@ -876,6 +885,7 @@ public final class ProjectBuilderDialog {
             }
         });
         for (File f : hits) addFileSafely(f);
+        resolveAndRefresh();
     }
 
     private void addFileSafely(File file) {
