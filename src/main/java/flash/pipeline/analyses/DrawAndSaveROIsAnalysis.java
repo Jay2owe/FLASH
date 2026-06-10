@@ -23,6 +23,7 @@ import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.roi.RegionDrawSpec;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.roi.RoiNaming;
 import flash.pipeline.roi.RoiSetValidator;
@@ -89,7 +90,7 @@ import javax.swing.filechooser.FileNameExtensionFilter;
  * - Detects existing ROI zip sets in the current FLASH layout and legacy folders
  * - User chooses to create a new ROI set or append to existing
  * - Opens each series from the .lif file
- * - For each image: user draws ROIs and clicks OK to continue
+ * - For each image: user draws ROIs and confirms the labelled primary action
  * - Saves the ROI set through the central ROI analysis-image layout.
  * - Saves ROI property tables through the central ROI table layout.
  */
@@ -293,6 +294,11 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         JTextField newNameField = pd.addStringField("New ROI Set Name", "SCN", 15);
         RegionTextFieldSupport.Handle newNameRegionSupport =
                 RegionTextFieldSupport.install(newNameField, null);
+        JTextField additionalRegionsField = pd.addStringField(
+                "Additional regions (comma-separated, optional)", "", 15);
+        pd.addHelpText("Draw more than one region this session. Each region is saved to its own "
+                + "\"<name> ROIs.zip\" covering only the images you pick for it. Leave blank for a "
+                + "single region.");
         final int totalImagesForLabel = totalImages;
 
         if (hasExisting && createNewToggle != null && appendChoice != null) {
@@ -302,6 +308,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 boolean createNewSelected = finalCreateNewToggle.isSelected();
                 setFieldEnabled(finalAppendChoice, !createNewSelected);
                 setFieldEnabled(newNameField, createNewSelected);
+                setFieldEnabled(additionalRegionsField, createNewSelected);
                 pd.setPrimaryButtonText(NextStepLabels.afterRoiSetup(
                         createNewSelected,
                         existingRoiCountForSelection(finalAppendChoice, roiNames, roiFiles),
@@ -335,11 +342,27 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         boolean drawOnSubset = showZSliceSourceChoice
                 && CONFIGURED_SUBSET_SOURCE.equals(pd.getNextChoice());
         String ignoredRawNewName = pd.getNextString();
+        String additionalRegionsRaw = pd.getNextString();
         String newName = newNameRegionSupport.canonicalText().trim();
         String chosen = createNew ? newName : existingSelection;
         if (chosen == null || chosen.trim().isEmpty()) {
             IJ.error("ROI Analysis", "ROI set name is blank.");
             return;
+        }
+
+        // Region list for this session. Stage 04 draws every region image-subset; until
+        // then the loop below draws the primary region only (regionSpecs.get(0)).
+        List<RegionDrawSpec> regionSpecs = new ArrayList<RegionDrawSpec>();
+        if (createNew) {
+            regionSpecs.add(new RegionDrawSpec(newName, roiChannel, imageProcessing));
+            for (String extra : additionalRegionsRaw.split(",")) {
+                String extraName = extra == null ? "" : extra.trim();
+                if (!extraName.isEmpty()) {
+                    regionSpecs.add(new RegionDrawSpec(extraName, roiChannel, imageProcessing));
+                }
+            }
+        } else {
+            regionSpecs.add(new RegionDrawSpec(chosen, roiChannel, imageProcessing));
         }
 
         File roiZip = new File(roiDir, chosen + " ROIs.zip");
