@@ -343,6 +343,14 @@ public final class ProjectBuilderDialog {
                 applyColumnPreferences();
             }
         });
+        JButton infer = new JButton("Infer…");
+        infer.setToolTipText("Apply a one-click inference rule (parent folder, token, prefix, regex) with a preview.");
+        infer.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                IdentityInferenceDialog.show(dialog, model, grammarProjectDir());
+                applyColumnPreferences();
+            }
+        });
 
         bar.add(addFolder);
         bar.add(addFiles);
@@ -354,6 +362,7 @@ public final class ProjectBuilderDialog {
         bar.add(importRoster);
         bar.add(exportRoster);
         bar.add(editGrammar);
+        bar.add(infer);
         bar.add(Box.createHorizontalStrut(12));
         bar.add(reviewNext);
         bar.add(reviewSummary);
