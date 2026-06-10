@@ -103,11 +103,33 @@ public final class PatternPreviewPanel extends JPanel {
     }
 
     private static Outcome previewResolved(ProjectManifestTableModel model, IdentityResolver resolver) {
+        List<SourceRecord> records = model.buildSourceRecords();
+        Map<SourceRecord, IdentityCandidate> resolved = resolver.resolve(records);
+
         List<String> fieldIds = new ArrayList<String>(Arrays.asList(FIXED_FIELDS));
         List<String> fieldLabels = new ArrayList<String>(Arrays.asList(FIXED_LABELS));
+        // Condition axes to preview: the model's explicit axes, OR the implicit
+        // "Condition" when none are defined, UNION any axes the resolver detected
+        // that aren't in the schema yet (those would be added on Apply).
+        java.util.LinkedHashMap<String, String> condAxes = new java.util.LinkedHashMap<String, String>();
         for (ConditionAxis axis : model.conditionAxes()) {
-            fieldIds.add(axis.id);
-            fieldLabels.add(axis.label == null || axis.label.trim().isEmpty() ? axis.id : axis.label);
+            condAxes.put(axis.id, axis.label == null || axis.label.trim().isEmpty() ? axis.id : axis.label);
+        }
+        if (condAxes.isEmpty()) {
+            condAxes.put("condition", "Condition");
+        }
+        for (IdentityCandidate c : resolved.values()) {
+            if (c == null) continue;
+            for (Map.Entry<String, FieldValue> e : c.conditions().entrySet()) {
+                FieldValue fv = e.getValue();
+                if (fv != null && !fv.isBlank() && e.getKey() != null && !condAxes.containsKey(e.getKey())) {
+                    condAxes.put(e.getKey(), labelForAxisId(e.getKey()));
+                }
+            }
+        }
+        for (Map.Entry<String, String> e : condAxes.entrySet()) {
+            fieldIds.add(e.getKey());
+            fieldLabels.add(e.getValue());
         }
 
         List<String> rowLabels = new ArrayList<String>();
@@ -115,9 +137,6 @@ public final class PatternPreviewPanel extends JPanel {
         List<Map<String, FieldCell>> after = new ArrayList<Map<String, FieldCell>>();
         int changes = 0;
         int conflicts = 0;
-
-        List<SourceRecord> records = model.buildSourceRecords();
-        Map<SourceRecord, IdentityCandidate> resolved = resolver.resolve(records);
 
         for (int idx = 0; idx < records.size(); idx++) {
             SourceRecord rec = records.get(idx);
@@ -142,6 +161,11 @@ public final class PatternPreviewPanel extends JPanel {
             after.add(afterRow);
         }
         return new Outcome(fieldIds, fieldLabels, rowLabels, before, after, changes, conflicts);
+    }
+
+    private static String labelForAxisId(String id) {
+        if (id == null || id.isEmpty()) return "Condition";
+        return Character.toUpperCase(id.charAt(0)) + id.substring(1);
     }
 
     private static int columnForField(ProjectManifestTableModel model, String field) {

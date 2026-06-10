@@ -27,8 +27,11 @@ public final class RosterIO {
 
     /** Header tokens (normalised) that name the animal/sample column. */
     private static final Set<String> ANIMAL_HEADERS = new HashSet<String>(Arrays.asList(
-            "animal", "animalid", "animalname", "sample", "samplename",
-            "mouse", "subject", "id", "name"));
+            "animal", "animalid", "animalname", "animalno", "animalnumber",
+            "sample", "samplename", "sampleid", "specimen",
+            "mouse", "mouseid", "mousename", "mouseno",
+            "subject", "subjectid", "subjectname",
+            "id", "name"));
 
     private RosterIO() {}
 
@@ -131,7 +134,15 @@ public final class RosterIO {
             axisForCol[c] = axis;
             if (seenAxisIds.add(axis.id)) roster.axes.add(axis);
         }
-        if (animalCol < 0) animalCol = 0;   // fall back to first column as the animal id
+        if (animalCol < 0) {
+            // No recognised animal header — fall back to the first column as the
+            // animal id, and drop the bogus condition axis it was misclassified as.
+            animalCol = 0;
+            if (axisForCol.length > 0 && axisForCol[0] != null) {
+                roster.axes.remove(axisForCol[0]);
+                axisForCol[0] = null;
+            }
+        }
 
         Set<String> seenAnimals = new LinkedHashSet<String>();
         for (int i = h + 1; i < lines.length; i++) {

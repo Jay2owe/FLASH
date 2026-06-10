@@ -791,11 +791,59 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     public void applyResolvedBatch(List<SourceRecord> records,
                                    Map<SourceRecord, IdentityCandidate> resolved) {
         if (records == null || resolved == null) return;
+        ensureAxesForCandidates(resolved.values());
         int n = Math.min(records.size(), visible.size());
         for (int idx = 0; idx < n; idx++) {
             IdentityCandidate candidate = resolved.get(records.get(idx));
             if (candidate != null) applyResolved(idx, candidate);
         }
+    }
+
+    /**
+     * Add a column for any condition axis a resolver/inference candidate detected
+     * that the current schema does not yet have, so auto-detected Genotype /
+     * Timepoint / grammar axes actually surface instead of being silently dropped
+     * by {@link #applyResolved}. A legacy implicit single-axis project is first
+     * promoted to an explicit primary {@code Condition} axis so its values keep
+     * their meaning; a pure single-{@code condition} resolve adds nothing.
+     */
+    private void ensureAxesForCandidates(java.util.Collection<IdentityCandidate> candidates) {
+        if (candidates == null) return;
+        LinkedHashSet<String> detected = new LinkedHashSet<String>();
+        for (IdentityCandidate c : candidates) {
+            if (c == null) continue;
+            for (Map.Entry<String, FieldValue> e : c.conditions().entrySet()) {
+                FieldValue fv = e.getValue();
+                if (fv != null && !fv.isBlank() && e.getKey() != null) detected.add(e.getKey());
+            }
+        }
+        if (detected.isEmpty()) return;
+        boolean anyMissing = false;
+        for (String id : detected) {
+            if (conditionColumnForAxis(id) < 0) { anyMissing = true; break; }
+        }
+        if (!anyMissing) return;
+
+        boolean structureChanged = false;
+        // Promote the implicit single axis to an explicit primary Condition so its
+        // values stay primary while the new axes are appended after it.
+        if (conditionAxes.isEmpty()) {
+            conditionAxes.add(DEFAULT_CONDITION_AXIS);
+            structureChanged = true;
+        }
+        for (String id : detected) {
+            if (conditionColumnForAxis(id) < 0 && !hasAxis(id)) {
+                conditionAxes.add(ConditionAxis.of(labelForAxisId(id)));
+                structureChanged = true;
+            }
+        }
+        if (structureChanged) fireTableStructureChanged();
+    }
+
+    /** Best-effort display label for a normalised axis id (e.g. {@code genotype} -> {@code Genotype}). */
+    private static String labelForAxisId(String id) {
+        if (id == null || id.isEmpty()) return "Condition";
+        return Character.toUpperCase(id.charAt(0)) + id.substring(1);
     }
 
     /** Index of the next rendered row (from {@code after}) with a low/none-confidence identity cell, or -1. */
@@ -938,12 +986,14 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             if (rewriteAxisValue(primary ? row.condition : row.conditions.get(norm), from)) {
                 if (primary) row.condition = to;
                 else putOrRemove(row.conditions, norm, to);
+                touchUserSet(row.meta, norm);   // a deliberate cleanup is user-confirmed
                 changed++;
             }
             for (SeriesRow s : row.series) {
                 if (rewriteAxisValue(primary ? s.condition : s.conditions.get(norm), from)) {
                     if (primary) s.condition = to;
                     else putOrRemove(s.conditions, norm, to);
+                    touchUserSet(s.meta, norm);
                     changed++;
                 }
             }

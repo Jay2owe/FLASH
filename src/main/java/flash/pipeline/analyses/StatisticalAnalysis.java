@@ -1289,7 +1289,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                 cfg.distributionMode,
                 cfg.postHocMethod,
                 cfg.metricFilter,
-                cfg.metricAggregationOverrides);
+                cfg.metricAggregationOverrides,
+                cfg.conditionAxisId);
         try {
             new StatisticsPresetIO(new File(directory)).save(preset);
             IJ.log("Saved Statistics preset: " + trimmed);

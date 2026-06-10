@@ -64,6 +64,28 @@ public class StatisticsPresetIOTest {
     }
 
     @Test
+    public void conditionAxisIdRoundTripsThroughJsonAndConfig() throws Exception {
+        StatisticsPreset preset = new StatisticsPreset(
+                "By genotype", "desc",
+                StatisticsConfig.PairedMode.OFF,
+                StatisticsConfig.DistributionMode.AUTO,
+                StatisticsConfig.PostHocMethod.BONFERRONI,
+                null, null, "genotype");
+        assertEquals("genotype", preset.getConditionAxisId());
+        assertEquals("genotype", preset.toConfig().conditionAxisId);
+
+        StatisticsPreset reparsed = StatisticsPreset.fromJson(preset.toJson());
+        assertEquals("genotype", reparsed.getConditionAxisId());
+        assertEquals("genotype", reparsed.toConfig().conditionAxisId);
+
+        // legacy preset without the field stays combined (null)
+        StatisticsPreset legacy = StatisticsPreset.fromJson(
+                "{\"name\":\"legacy\",\"pairedMode\":\"OFF\",\"distributionMode\":\"AUTO\","
+                        + "\"postHocMethod\":\"BONFERRONI\"}");
+        assertNull(legacy.getConditionAxisId());
+    }
+
+    @Test
     public void twoGroupAutomaticPresetUsesEngineDefaults() throws Exception {
         StatisticsPreset preset = loadStock("2_group_automatic");
 

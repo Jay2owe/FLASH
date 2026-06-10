@@ -49,6 +49,26 @@ public class RosterImportTest {
     }
 
     @Test
+    public void mouseIdHeaderIsAnimalNotABogusAxis() {
+        RosterIO.Roster r = RosterIO.parse("Mouse ID,Genotype\nM1,hAPP\n");
+        // exactly one axis (Genotype) — "Mouse ID" must be the animal column, not an axis
+        assertEquals(1, r.axes.size());
+        assertEquals("genotype", r.axes.get(0).id);
+        assertEquals("hAPP", r.byAnimal.get("M1").get("genotype"));
+        assertFalse(r.byAnimal.get("M1").containsKey("mouse_id"));
+    }
+
+    @Test
+    public void unrecognisedFirstColumnFallsBackToAnimalWithoutBogusAxis() {
+        RosterIO.Roster r = RosterIO.parse("Cage,Genotype\nM1,hAPP\n");
+        // "Cage" isn't a known animal synonym; it's the first column -> animal, not an axis
+        assertEquals(1, r.axes.size());
+        assertEquals("genotype", r.axes.get(0).id);
+        assertEquals("hAPP", r.byAnimal.get("M1").get("genotype"));
+        assertFalse(r.byAnimal.get("M1").containsKey("cage"));
+    }
+
+    @Test
     public void tsvParsesToo() {
         RosterIO.Roster r = RosterIO.parse("AnimalID\tGenotype\nM1\thAPP\n");
         assertEquals("hAPP", r.byAnimal.get("M1").get("genotype"));

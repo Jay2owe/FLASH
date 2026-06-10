@@ -67,6 +67,21 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void resolveAddsDetectedConditionAxis() {
+        // Fresh project, no axes declared. A genotype token in the name must
+        // surface as a new Genotype axis rather than being silently dropped.
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.addFile(new File("hAPP_M14_LH_SCN.tif"));
+        assertTrue(model.conditionAxes().isEmpty());
+
+        model.resolveIdentities();
+
+        int genotypeCol = model.conditionColumnForAxis("genotype");
+        assertTrue("a Genotype axis column should have been created", genotypeCol >= 0);
+        assertEquals("hAPP", model.getValueAt(0, genotypeCol));
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();

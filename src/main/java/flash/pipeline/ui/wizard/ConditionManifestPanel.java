@@ -186,7 +186,9 @@ public final class ConditionManifestPanel {
         LinkedHashMap<String, String> assignments = panel.collectAssignments();
         if (directory != null) {
             try {
-                ConditionManifestIO.saveAssignments(directory, assignments);
+                // This composite-only review panel must not collapse a multi-axis
+                // Conditions.csv (Condition_<axis> columns) back to a single column.
+                ConditionManifestIO.saveAssignmentsPreservingMultiAxis(directory, assignments);
             } catch (Exception e) {
                 IJ.log("Warning: could not save condition assignments: " + e.getMessage());
             }

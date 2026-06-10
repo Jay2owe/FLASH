@@ -44,6 +44,28 @@ public class PatternPreviewPanelTest {
     }
 
     @Test
+    public void previewIncludesImplicitConditionAxis() {
+        // A legacy single-condition project has no explicit axes, but the preview
+        // must still surface the implicit "Condition" column so condition changes show.
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.addFile(new File("placeholder.tif"));
+        model.setValueAt("Old", 0, ProjectManifestTableModel.COL_CONDITION);
+
+        java.util.List<flash.pipeline.intelligence.identity.FieldRule> rules =
+                new ArrayList<flash.pipeline.intelligence.identity.FieldRule>();
+        rules.add(flash.pipeline.intelligence.identity.FieldRule.alias(
+                flash.pipeline.intelligence.identity.FieldRule.Type.CONDITION, "Condition",
+                java.util.Arrays.asList(new flash.pipeline.intelligence.identity.ValuePattern(
+                        "New", java.util.Collections.singletonList("placeholder")))));
+        NamingGrammar g = new NamingGrammar("force", rules);
+
+        PatternPreviewPanel.Outcome outcome = PatternPreviewPanel.previewGrammar(model, g);
+        assertTrue(outcome.fieldIds.contains("condition"));
+        assertEquals("Old", outcome.before.get(0).get("condition"));
+        assertEquals("New", outcome.after.get(0).get("condition").value);
+    }
+
+    @Test
     public void previewCountsChangesAndConflicts() {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
         model.addFile(new File("placeholder.tif"));   // no parseable identity

@@ -68,6 +68,18 @@ public class ConditionMergeTest {
     }
 
     @Test
+    public void merge_marksCellsUserSetSoAutoFillWontUndoIt() {
+        ProjectManifestTableModel model = twoAxisModel();
+        model.mergeConditionValues("Genotype", Arrays.asList("ctrl", "Control", "CTRL"), "Control");
+
+        // a confirmed cleanup must survive a later auto-detection pass
+        assertTrue(model.isUserSet(0, ProjectManifestTableModel.COL_CONDITION));
+        model.setAutoValue(0, ProjectManifestTableModel.COL_CONDITION,
+                "ctrl", flash.pipeline.intelligence.identity.Confidence.HIGH, "grammar");
+        assertEquals("Control", model.getValueAt(0, ProjectManifestTableModel.COL_CONDITION));
+    }
+
+    @Test
     public void merge_singleAxisProjectStillWorks() {
         ProjectManifestTableModel model = new ProjectManifestTableModel();   // implicit single Condition
         model.addFile(new File("a.tif"));

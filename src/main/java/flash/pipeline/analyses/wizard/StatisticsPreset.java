@@ -27,6 +27,8 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
     private final StatisticsConfig.PostHocMethod postHocMethod;
     private final List<String> metricFilter;
     private final Map<String, StatisticsConfig.MetricAggregation> metricAggregationOverrides;
+    /** Condition axis to group by ({@code null} = combined/composite — the legacy default). */
+    private final String conditionAxisId;
 
     public StatisticsPreset(String name,
                             String description,
@@ -45,6 +47,18 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
                             StatisticsConfig.PostHocMethod postHocMethod,
                             List<String> metricFilter,
                             Map<String, StatisticsConfig.MetricAggregation> metricAggregationOverrides) {
+        this(name, description, pairedMode, distributionMode, postHocMethod,
+                metricFilter, metricAggregationOverrides, null);
+    }
+
+    public StatisticsPreset(String name,
+                            String description,
+                            StatisticsConfig.PairedMode pairedMode,
+                            StatisticsConfig.DistributionMode distributionMode,
+                            StatisticsConfig.PostHocMethod postHocMethod,
+                            List<String> metricFilter,
+                            Map<String, StatisticsConfig.MetricAggregation> metricAggregationOverrides,
+                            String conditionAxisId) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = CURRENT_LIBRARY_VERSION;
@@ -55,6 +69,12 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
                 ? StatisticsConfig.PostHocMethod.BONFERRONI : postHocMethod;
         this.metricFilter = freezeList(metricFilter);
         this.metricAggregationOverrides = freezeMetricAggregationOverrides(metricAggregationOverrides);
+        this.conditionAxisId = emptyToNull(conditionAxisId);
+    }
+
+    /** Condition axis to group statistics by, or {@code null} for combined/composite. */
+    public String getConditionAxisId() {
+        return conditionAxisId;
     }
 
     @Override
@@ -112,6 +132,7 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
                 ? null
                 : new LinkedHashMap<String, StatisticsConfig.MetricAggregation>(
                         metricAggregationOverrides);
+        cfg.conditionAxisId = conditionAxisId;
         return cfg;
     }
 
@@ -126,6 +147,9 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
         root.put("pairedMode", pairedMode.name());
         root.put("distributionMode", distributionMode.name());
         root.put("postHocMethod", postHocMethod.name());
+        if (conditionAxisId != null) {
+            root.put("conditionAxisId", conditionAxisId);
+        }
         if (metricFilter == null) {
             root.put("metricFilter", null);
         } else {
@@ -170,8 +194,9 @@ public final class StatisticsPreset implements Preset<StatisticsPreset> {
         List<String> metricFilter = parseMetricFilter(root);
         Map<String, StatisticsConfig.MetricAggregation> metricAggregationOverrides =
                 parseMetricAggregationOverrides(root);
+        String conditionAxisId = JsonIO.stringValue(root.get("conditionAxisId"));
         return new StatisticsPreset(name, description, paired, distribution, postHoc,
-                metricFilter, metricAggregationOverrides);
+                metricFilter, metricAggregationOverrides, conditionAxisId);
     }
 
     private static List<String> parseMetricFilter(Map<String, Object> root) {
