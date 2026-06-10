@@ -108,6 +108,7 @@ public final class ProjectBuilderDialog {
     private final ProjectManifestTableModel model;
     private final JTable table;
     private JLabel reviewSummary;
+    private int popupColumn = -1;
     private final File pluginsDir;
     private final ExecutorService probeExecutor =
             Executors.newSingleThreadExecutor(r -> {
@@ -572,6 +573,9 @@ public final class ProjectBuilderDialog {
         JMenuItem setHemisphere = new JMenuItem("Set hemisphere…");
         JMenuItem setRegion = new JMenuItem("Set region…");
         JMenuItem setCondition = new JMenuItem("Set condition…");
+        final JMenuItem fillDown = new JMenuItem("Fill down");
+        final JMenuItem fillBlanks = new JMenuItem("Fill blanks (from above)");
+        final JMenuItem applySameAnimal = new JMenuItem("Apply cell to same animal");
         final JMenuItem toggleSeries = new JMenuItem("Expand series");
         JMenuItem removeRow = new JMenuItem("Remove");
 
@@ -596,6 +600,24 @@ public final class ProjectBuilderDialog {
                 bulkSetCondition();
             }
         });
+        fillDown.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                int col = fillColumn();
+                if (col >= 0) { model.fillDown(table.getSelectedRows(), col); applyColumnPreferences(); }
+            }
+        });
+        fillBlanks.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                int col = fillColumn();
+                if (col >= 0) { model.fillBlanks(table.getSelectedRows(), col); applyColumnPreferences(); }
+            }
+        });
+        applySameAnimal.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                int col = fillColumn();
+                if (col >= 0) { model.applyToSameAnimal(table.getSelectedRows(), col); applyColumnPreferences(); }
+            }
+        });
         toggleSeries.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 int[] sel = table.getSelectedRows();
@@ -614,6 +636,10 @@ public final class ProjectBuilderDialog {
         menu.add(setRegion);
         menu.add(setCondition);
         menu.addSeparator();
+        menu.add(fillDown);
+        menu.add(fillBlanks);
+        menu.add(applySameAnimal);
+        menu.addSeparator();
         menu.add(toggleSeries);
         menu.addSeparator();
         menu.add(removeRow);
@@ -627,6 +653,11 @@ public final class ProjectBuilderDialog {
                 if (row >= 0 && !table.isRowSelected(row)) {
                     table.setRowSelectionInterval(row, row);
                 }
+                popupColumn = table.columnAtPoint(e.getPoint());
+                boolean fillable = isDetectableColumn(fillColumn());
+                fillDown.setEnabled(fillable);
+                fillBlanks.setEnabled(fillable);
+                applySameAnimal.setEnabled(fillable);
                 boolean expandable = row >= 0 && model.isExpandableFileRow(row);
                 toggleSeries.setEnabled(expandable);
                 toggleSeries.setText(expandable && model.isExpanded(row)
@@ -634,6 +665,13 @@ public final class ProjectBuilderDialog {
                 menu.show(e.getComponent(), e.getX(), e.getY());
             }
         });
+    }
+
+    /** Column targeted by fill actions: the cell under the popup, falling back to the focused column. */
+    private int fillColumn() {
+        if (isDetectableColumn(popupColumn)) return popupColumn;
+        int focused = table.getSelectedColumn();
+        return isDetectableColumn(focused) ? focused : -1;
     }
 
     private void attachExpansionClick() {

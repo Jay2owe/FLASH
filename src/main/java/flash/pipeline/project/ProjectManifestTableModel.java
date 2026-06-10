@@ -761,6 +761,82 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         return high;
     }
 
+    // ── Stage 12: fill-down / fill-blanks / apply-to-same-animal ────────────
+
+    /**
+     * Copy the topmost selected cell's value down the rest of the selection
+     * (any identity / condition column). Explicitly selected rows are overwritten
+     * even if user-set. Each filled cell becomes user-confirmed.
+     */
+    public void fillDown(int[] rowIndexes, int column) {
+        if (rowIndexes == null || rowIndexes.length < 2) return;
+        if (fieldIdForColumn(column) == null) return;
+        int[] sorted = sortedCopy(rowIndexes);
+        String value = stringValue(getValueAt(sorted[0], column));
+        for (int i = 1; i < sorted.length; i++) {
+            setValueAt(value, sorted[i], column);
+        }
+    }
+
+    /**
+     * Fill only the blank cells in the selection from the nearest non-blank value
+     * above (within the selection). Never overwrites a non-blank (confirmed) cell.
+     */
+    public void fillBlanks(int[] rowIndexes, int column) {
+        if (rowIndexes == null || rowIndexes.length == 0) return;
+        if (fieldIdForColumn(column) == null) return;
+        int[] sorted = sortedCopy(rowIndexes);
+        String last = "";
+        for (int idx : sorted) {
+            if (idx < 0 || idx >= visible.size()) continue;
+            String current = stringValue(getValueAt(idx, column));
+            if (current != null && !current.trim().isEmpty()) {
+                last = current;
+            } else if (!last.isEmpty()) {
+                setValueAt(last, idx, column);
+            }
+        }
+    }
+
+    /**
+     * Propagate each selected cell's value to all rows sharing its
+     * {@code AnimalName} — the common case for animal-level condition / genotype /
+     * timepoint. Confirmed (user-set) cells outside the selection are not clobbered.
+     */
+    public void applyToSameAnimal(int[] rowIndexes, int column) {
+        if (rowIndexes == null || rowIndexes.length == 0) return;
+        if (fieldIdForColumn(column) == null) return;
+        Set<Integer> selected = new LinkedHashSet<Integer>();
+        for (int idx : rowIndexes) selected.add(Integer.valueOf(idx));
+
+        Map<String, String> valueByAnimal = new LinkedHashMap<String, String>();
+        for (int idx : sortedCopy(rowIndexes)) {
+            if (idx < 0 || idx >= visible.size()) continue;
+            String animal = stringValue(getValueAt(idx, COL_ANIMAL)).trim();
+            if (animal.isEmpty()) continue;
+            if (!valueByAnimal.containsKey(animal)) {
+                valueByAnimal.put(animal, stringValue(getValueAt(idx, column)));
+            }
+        }
+        if (valueByAnimal.isEmpty()) return;
+
+        for (int idx = 0; idx < visible.size(); idx++) {
+            String animal = stringValue(getValueAt(idx, COL_ANIMAL)).trim();
+            if (!valueByAnimal.containsKey(animal)) continue;
+            if (!selected.contains(Integer.valueOf(idx)) && isUserSet(idx, column)) {
+                continue;   // respect confirmed cells outside the selection
+            }
+            setValueAt(valueByAnimal.get(animal), idx, column);
+        }
+    }
+
+    private static int[] sortedCopy(int[] values) {
+        int[] copy = new int[values.length];
+        System.arraycopy(values, 0, copy, 0, values.length);
+        java.util.Arrays.sort(copy);
+        return copy;
+    }
+
     /** Complete axis-&gt;value map for persistence; empty for single-axis projects. */
     private Map<String, String> fullConditions(String primaryValue, Map<String, String> extras) {
         Map<String, String> full = new LinkedHashMap<String, String>();
