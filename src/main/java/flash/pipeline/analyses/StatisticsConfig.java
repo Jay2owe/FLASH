@@ -121,6 +121,14 @@ public final class StatisticsConfig {
     public PostHocMethod postHocMethod = PostHocMethod.BONFERRONI;
     /** {@code null} or empty means "test every numeric metric column". */
     public List<String> metricFilter = null;
+    /**
+     * Which condition axis to group by, for multi-axis projects. {@code null} or
+     * empty means "combined" — group by the full composite condition (the
+     * default and the only behaviour for single-axis projects). When set to a
+     * condition axis id (e.g. {@code "genotype"}) the comparison collapses every
+     * other axis and groups animals by that single axis.
+     */
+    public String conditionAxisId = null;
     /** Per-metric nested-row collapse overrides; absent or AUTO uses the built-in heuristic. */
     public Map<String, MetricAggregation> metricAggregationOverrides = null;
 

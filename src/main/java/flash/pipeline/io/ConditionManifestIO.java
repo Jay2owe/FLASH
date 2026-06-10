@@ -332,6 +332,28 @@ public final class ConditionManifestIO {
                 + " (" + cleaned.size() + " entries)");
     }
 
+    /**
+     * Save composite assignments without clobbering an existing multi-axis
+     * manifest. The single-condition review tables (aggregation / statistics)
+     * only carry the composite label, so writing it back would collapse a
+     * per-axis {@code Conditions.csv} into one column. For a multi-axis project
+     * this is a no-op (the per-axis file stays authoritative); otherwise it
+     * behaves exactly like {@link #saveAssignments(String, Map)}.
+     *
+     * @return {@code true} if written, {@code false} if a multi-axis file was preserved.
+     */
+    public static boolean saveAssignmentsPreservingMultiAxis(String directory,
+                                                             Map<String, String> assignments)
+            throws IOException {
+        ConditionAssignments existing = readAssignmentsModel(directory);
+        if (existing.axes().size() > 1) {
+            IJ.log("Multi-axis condition manifest preserved; composite edits not written back.");
+            return false;
+        }
+        saveAssignments(directory, assignments);
+        return true;
+    }
+
     // ---- N-axis condition model (multi-condition support) ----------------
 
     /**

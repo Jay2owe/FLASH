@@ -432,10 +432,11 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         dialog.addComponent(main);
         if (!dialog.showDialog()) return null;
 
-        // Persist condition assignments
+        // Persist condition assignments — but never collapse a multi-axis manifest,
+        // since this review table only carries the composite condition label.
         Map<String, String> assignments = conditionPanel.collectAssignments();
         try {
-            ConditionManifestIO.saveAssignments(directory, assignments);
+            ConditionManifestIO.saveAssignmentsPreservingMultiAxis(directory, assignments);
         } catch (Exception e) {
             IJ.log("Warning: could not save condition assignments: " + e.getMessage());
         }

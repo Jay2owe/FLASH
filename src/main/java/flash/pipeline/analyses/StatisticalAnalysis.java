@@ -5,6 +5,8 @@ import flash.pipeline.analyses.wizard.StatisticsPreset;
 import flash.pipeline.analyses.wizard.StatisticsPresetIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.io.ConditionManifestIO;
+import flash.pipeline.naming.ConditionAssignments;
+import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.IoUtils;
@@ -195,6 +197,12 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         }
         applyParentConditionsFromNestedRows(animalToCondition, persistedConditions, rowToAnimal);
 
+        // Multi-axis: optionally collapse to a single chosen condition axis so the
+        // comparison groups by (say) Genotype alone instead of the full composite.
+        // No-op for single-axis / "combined" projects (composite preserved).
+        remapToConditionAxis(directory, animalToCondition, allAnimals,
+                statisticsConfig == null ? null : statisticsConfig.conditionAxisId);
+
         // Build ordered condition list
         List<String> conditionOrder = new ArrayList<String>();
         Set<String> seen = new LinkedHashSet<String>();
@@ -378,6 +386,28 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         return cfg != null
                 && cfg.pairedMode != null
                 && cfg.pairedMode != StatisticsConfig.PairedMode.OFF;
+    }
+
+    /**
+     * Collapse composite condition labels to a single chosen axis for per-axis
+     * statistics. A no-op when {@code axisId} is blank or the project has no such
+     * axis, so single-axis / "combined" comparisons are byte-identical to before.
+     * Reads the N-axis model via {@link ConditionManifestIO#resolveAssignmentsModel}
+     * — never parses the composite string.
+     */
+    static void remapToConditionAxis(String directory,
+                                     Map<String, String> animalToCondition,
+                                     Set<String> animals,
+                                     String axisId) {
+        if (axisId == null || axisId.trim().isEmpty()) return;
+        if (animalToCondition == null || animals == null) return;
+        ConditionAssignments model =
+                ConditionManifestIO.resolveAssignmentsModel(directory, animals);
+        if (model.axisById(axisId) == null) return;   // unknown axis -> keep composite
+        for (String animal : animals) {
+            String value = model.get(animal, axisId);
+            animalToCondition.put(animal, value == null ? "" : value.trim());
+        }
     }
 
     private static LinkedHashMap<String, List<Double>> buildUnpairedMetricGroups(
@@ -1106,17 +1136,83 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
 
         PipelineDialog pd = new PipelineDialog("Statistical Analysis \u2014 Condition Assignment", PipelineDialog.Phase.EXPORT);
         pd.addComponent(buildStatisticsPresetRow(directory));
+        final JComboBox<StatsAxisChoice> axisCombo = buildConditionAxisCombo(directory);
+        if (axisCombo != null) {
+            javax.swing.JPanel axisRow =
+                    new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+            axisRow.setOpaque(false);
+            axisRow.add(new javax.swing.JLabel("Group statistics by:"));
+            axisRow.add(axisCombo);
+            pd.addComponent(axisRow);
+        }
         pd.addComponent(manifest.getComponent());
 
         if (!pd.showDialog()) return null;
 
+        if (axisCombo != null) {
+            Object selected = axisCombo.getSelectedItem();
+            if (statisticsConfig != null) {
+                statisticsConfig.conditionAxisId =
+                        selected instanceof StatsAxisChoice ? ((StatsAxisChoice) selected).axisId : null;
+            }
+        }
+
         LinkedHashMap<String, String> assignments = manifest.collectAssignments();
+        // The panel only edits the composite "Condition"; preserve a per-axis
+        // manifest rather than collapsing it. Single-axis projects persist as before.
         try {
-            ConditionManifestIO.saveAssignments(directory, assignments);
+            ConditionManifestIO.saveAssignmentsPreservingMultiAxis(directory, assignments);
         } catch (Exception e) {
             IJ.log("Warning: could not save condition assignments: " + e.getMessage());
         }
         return assignments;
+    }
+
+    /**
+     * Combo listing the condition axes for a multi-axis project (first entry
+     * "(combined)" = group by the full composite). Returns {@code null} for
+     * single-axis projects, where there is nothing to choose.
+     */
+    private JComboBox<StatsAxisChoice> buildConditionAxisCombo(String directory) {
+        ConditionAssignments model = ConditionManifestIO.readAssignmentsModel(directory);
+        List<ConditionAxis> axes = model.axes();
+        if (axes.size() < 2) return null;
+        List<StatsAxisChoice> choices = new ArrayList<StatsAxisChoice>();
+        choices.add(new StatsAxisChoice(null, "(combined \u2014 all axes)"));
+        for (ConditionAxis a : axes) {
+            choices.add(new StatsAxisChoice(a.id,
+                    a.label == null || a.label.trim().isEmpty() ? a.id : a.label));
+        }
+        JComboBox<StatsAxisChoice> combo =
+                new JComboBox<StatsAxisChoice>(choices.toArray(new StatsAxisChoice[choices.size()]));
+        String current = statisticsConfig == null ? null : statisticsConfig.conditionAxisId;
+        if (current != null && !current.trim().isEmpty()) {
+            for (StatsAxisChoice c : choices) {
+                if (current.equals(c.axisId)) {
+                    combo.setSelectedItem(c);
+                    break;
+                }
+            }
+        }
+        combo.setMaximumSize(new Dimension(260, 24));
+        combo.setToolTipText(
+                "Multi-axis projects: compare by a single condition axis, or the full combination.");
+        return combo;
+    }
+
+    /** Combo entry for the per-axis statistics chooser ({@code axisId == null} = combined). */
+    private static final class StatsAxisChoice {
+        final String axisId;
+        final String label;
+
+        StatsAxisChoice(String axisId, String label) {
+            this.axisId = axisId;
+            this.label = label;
+        }
+
+        @Override public String toString() {
+            return label;
+        }
     }
 
     private JComponent buildStatisticsPresetRow(final String directory) {

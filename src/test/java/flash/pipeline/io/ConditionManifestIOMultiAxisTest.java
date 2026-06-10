@@ -151,6 +151,46 @@ public class ConditionManifestIOMultiAxisTest {
         }
     }
 
+    @Test
+    public void saveAssignmentsPreservingMultiAxis_doesNotClobberPerAxisFile() throws Exception {
+        File dir = temp.newFolder("multi");
+
+        ConditionAssignments multi = new ConditionAssignments();
+        multi.addAxis(ConditionAxis.of("Genotype"));
+        multi.addAxis(ConditionAxis.of("Timepoint"));
+        multi.put("M1", "genotype", "hAPP");
+        multi.put("M1", "timepoint", "WeekFour");
+        ConditionManifestIO.writeAssignments(ConditionManifestIO.getFile(dir.getAbsolutePath()), multi);
+
+        java.util.LinkedHashMap<String, String> composite = new java.util.LinkedHashMap<String, String>();
+        composite.put("M1", "hAPP_WeekFour");
+        boolean written = ConditionManifestIO.saveAssignmentsPreservingMultiAxis(
+                dir.getAbsolutePath(), composite);
+
+        assertFalse("multi-axis manifest must be preserved", written);
+        // per-axis columns survive
+        ConditionAssignments back =
+                ConditionManifestIO.readAssignments(ConditionManifestIO.getFile(dir.getAbsolutePath()));
+        assertEquals(2, back.axes().size());
+        assertEquals("hAPP", back.get("M1", "genotype"));
+        assertEquals("WeekFour", back.get("M1", "timepoint"));
+    }
+
+    @Test
+    public void saveAssignmentsPreservingMultiAxis_writesWhenSingleAxis() throws Exception {
+        File dir = temp.newFolder("single");
+
+        java.util.LinkedHashMap<String, String> composite = new java.util.LinkedHashMap<String, String>();
+        composite.put("M1", "WT");
+        boolean written = ConditionManifestIO.saveAssignmentsPreservingMultiAxis(
+                dir.getAbsolutePath(), composite);
+
+        assertTrue("single-axis project should persist edits", written);
+        Map<String, String> back =
+                ConditionManifestIO.read(ConditionManifestIO.getFile(dir.getAbsolutePath()));
+        assertEquals("WT", back.get("M1"));
+    }
+
     private static String readAll(File f) throws Exception {
         Scanner sc = new Scanner(f, "UTF-8").useDelimiter("\\A");
         try {

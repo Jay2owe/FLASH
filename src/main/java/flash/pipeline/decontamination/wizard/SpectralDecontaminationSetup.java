@@ -17,6 +17,8 @@ import flash.pipeline.decontamination.features.SizeFilterFeature;
 import flash.pipeline.decontamination.features.ThresholdCorrectedTargetFeature;
 import flash.pipeline.decontamination.features.VetoMasksFeature;
 import flash.pipeline.io.ConditionManifestIO;
+import flash.pipeline.naming.ConditionAssignments;
+import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.runrecord.LoadedRunParameters;
 
@@ -339,21 +341,40 @@ public class SpectralDecontaminationSetup {
     private static List<String> controlConditions(File projectRoot) {
         List<String> controls = new ArrayList<String>();
         if (projectRoot == null) return controls;
-        LinkedHashMap<String, String> assignments =
-                ConditionManifestIO.readAssignmentsIfExists(projectRoot.getAbsolutePath());
+        // Read the N-axis model and flag an animal as control when ANY condition
+        // axis value is a control keyword (a single-axis project behaves exactly
+        // as before). The returned labels are the composite per-animal conditions
+        // so they still match the per-series composite condition downstream — we
+        // never parse the composite string itself.
+        ConditionAssignments model =
+                ConditionManifestIO.readAssignmentsModel(projectRoot.getAbsolutePath());
         try {
             LinkedHashSet<String> unique = new LinkedHashSet<String>();
-            for (String condition : assignments.values()) {
-                String lower = condition.toLowerCase(Locale.US);
-                if (lower.contains("control") || lower.contains("negative")
-                        || lower.contains("secondary_only") || lower.contains("noprimary")) {
-                    unique.add(condition);
+            for (String animal : model.animals()) {
+                if (!isControlAnimal(model, animal)) continue;
+                String composite = model.composite(animal, "_");
+                if (composite != null && !composite.trim().isEmpty()) {
+                    unique.add(composite);
                 }
             }
             controls.addAll(unique);
         } catch (Exception ignored) {
         }
         return controls;
+    }
+
+    private static boolean isControlAnimal(ConditionAssignments model, String animal) {
+        for (ConditionAxis axis : model.axes()) {
+            if (isControlKeyword(model.get(animal, axis.id))) return true;
+        }
+        return false;
+    }
+
+    private static boolean isControlKeyword(String value) {
+        if (value == null) return false;
+        String lower = value.toLowerCase(Locale.US);
+        return lower.contains("control") || lower.contains("negative")
+                || lower.contains("secondary_only") || lower.contains("noprimary");
     }
 
     private static int defaultMinimumVoxels(BinConfig binConfig, int targetChannel) {

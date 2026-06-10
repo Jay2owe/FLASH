@@ -8,6 +8,8 @@ import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.naming.ChannelFilenameCodec;
+import flash.pipeline.naming.ConditionAssignments;
+import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.results.RunIdCsv;
 import flash.pipeline.results.StartHereWriter;
 import flash.pipeline.runrecord.AnalysisRunContext;
@@ -177,6 +179,10 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         }
 
         Map<String, String> animalToCondition = autoDetectConditions(directory, allAnimals);
+        // N-axis model for the per-axis condition columns; composite values match
+        // animalToCondition so grouping stays consistent. Single-axis -> one column.
+        ConditionAssignments conditionModel =
+                ConditionManifestIO.resolveAssignmentsModel(directory, allAnimals);
 
         List<String> conditionOrder = new ArrayList<String>();
         Set<String> seen = new LinkedHashSet<String>();
@@ -227,8 +233,8 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         File outFile = layout.summaryWorkbookWriteFile();
         File statisticsCsv = existingProjectSummaryFile(layout, FlashProjectLayout.STATISTICS_FILENAME);
         try {
-            writeExcel(outFile, statisticsCsv, conditionOrder, animalToCondition, allAnimals,
-                    metricColumns, mergedData, detailsPerMarker);
+            writeExcel(outFile, statisticsCsv, conditionOrder, animalToCondition, conditionModel,
+                    allAnimals, metricColumns, mergedData, detailsPerMarker);
             StartHereWriter.write(layout);
             IJ.log("Excel saved: " + outFile.getAbsolutePath());
         } catch (Exception e) {
@@ -738,6 +744,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
                             File statisticsCsv,
                             List<String> conditionOrder,
                             Map<String, String> animalToCondition,
+                            ConditionAssignments conditionModel,
                             Set<String> allAnimals,
                             List<String> metricColumns,
                             LinkedHashMap<String, Map<String, Double>> mergedData,
@@ -748,8 +755,8 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             Set<String> usedSheetNames = new HashSet<String>();
 
             if (preset.isIncludeExperimentalConditionsSheet()) {
-                writeConditionsSheet(wb, conditionOrder, animalToCondition, allAnimals,
-                        styles, usedSheetNames);
+                writeConditionsSheet(wb, conditionOrder, animalToCondition, conditionModel,
+                        allAnimals, styles, usedSheetNames);
             }
 
             if (preset.isIncludeDataSummarySheet()) {
@@ -937,6 +944,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
     private void writeConditionsSheet(Workbook wb,
                                       List<String> conditionOrder,
                                       Map<String, String> animalToCondition,
+                                      ConditionAssignments conditionModel,
                                       Set<String> allAnimals,
                                       Styles styles,
                                       Set<String> usedSheetNames) {
@@ -944,13 +952,33 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         String sheetName = ExcelNameMap.safeSheetName("Experimental Conditions", usedSheetNames);
         Sheet sheet = wb.createSheet(sheetName);
 
+        // One column per condition axis. A single-axis project keeps the exact
+        // legacy "Condition" header and layout; a multi-axis project splits the
+        // composite into a column per axis (e.g. Genotype, Timepoint).
+        List<ConditionAxis> axes = conditionModel == null ? null : conditionModel.axes();
+        boolean perAxis = axes != null && axes.size() > 1;
+
+        List<String> headerLabels = new ArrayList<String>();
+        if (perAxis) {
+            for (ConditionAxis axis : axes) {
+                headerLabels.add(axis.label == null || axis.label.trim().isEmpty()
+                        ? axis.id : axis.label);
+            }
+        } else {
+            headerLabels.add("Condition");
+        }
+        headerLabels.add("Animals");
+        headerLabels.add(RunIdCsv.RUN_ID_COLUMN);
+
         Row headerRow = sheet.createRow(0);
-        String[] headers = {"Condition", "Animals", RunIdCsv.RUN_ID_COLUMN};
-        for (int c = 0; c < headers.length; c++) {
+        for (int c = 0; c < headerLabels.size(); c++) {
             Cell cell = headerRow.createCell(c);
-            cell.setCellValue(headers[c]);
+            cell.setCellValue(headerLabels.get(c));
             cell.setCellStyle(styles.headerStyle);
         }
+
+        int animalsCol = headerLabels.size() - 2;
+        int runCol = headerLabels.size() - 1;
 
         int rowIdx = 1;
         for (String cond : conditionOrder) {
@@ -962,22 +990,40 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             }
 
             Row row = sheet.createRow(rowIdx++);
-            Cell condCell = row.createCell(0);
-            setTextCellValue(condCell, cond);
-            condCell.setCellStyle(styles.centerStyle);
+            if (perAxis) {
+                // Per-axis values are shared by every animal in a composite group;
+                // read them off the first member (composite is a function of axes).
+                String sample = animalsInCond.isEmpty() ? null : animalsInCond.get(0);
+                for (int a = 0; a < axes.size(); a++) {
+                    Cell axisCell = row.createCell(a);
+                    String value = sample == null ? "" : conditionModel.get(sample, axes.get(a).id);
+                    setTextCellValue(axisCell, value);
+                    axisCell.setCellStyle(styles.centerStyle);
+                }
+            } else {
+                Cell condCell = row.createCell(0);
+                setTextCellValue(condCell, cond);
+                condCell.setCellStyle(styles.centerStyle);
+            }
 
-            Cell animalsCell = row.createCell(1);
+            Cell animalsCell = row.createCell(animalsCol);
             setTextCellValue(animalsCell, join(animalsInCond, ", "));
             animalsCell.setCellStyle(styles.cellStyle);
 
-            Cell runCell = row.createCell(2);
+            Cell runCell = row.createCell(runCol);
             setTextCellValue(runCell, currentRunId());
             runCell.setCellStyle(styles.cellStyle);
         }
 
-        sheet.setColumnWidth(0, 20 * 256);
-        sheet.setColumnWidth(1, 60 * 256);
-        sheet.setColumnWidth(2, 28 * 256);
+        if (perAxis) {
+            for (int a = 0; a < axes.size(); a++) {
+                sheet.setColumnWidth(a, 18 * 256);
+            }
+        } else {
+            sheet.setColumnWidth(0, 20 * 256);
+        }
+        sheet.setColumnWidth(animalsCol, 60 * 256);
+        sheet.setColumnWidth(runCol, 28 * 256);
     }
 
     private void writeDataSummarySheet(Workbook wb,
