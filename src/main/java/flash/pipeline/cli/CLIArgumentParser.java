@@ -590,6 +590,15 @@ public final class CLIArgumentParser {
                     "object.colocThreshold", threshold, 30.0, 0.0, 100.0));
         }
 
+        String bbThreshold = getValue(options, "object.bbColocThreshold");
+        if (bbThreshold == null) {
+            bbThreshold = getValue(options, "object.bb_coloc_threshold");
+        }
+        if (bbThreshold != null) {
+            object.bbColocThresholdPercent = Double.valueOf(parseDoubleValue(
+                    "object.bbColocThreshold", bbThreshold, 30.0, 0.0, 100.0));
+        }
+
         String nuclearMarker = getValue(options, "object.nuclear_marker");
         if (nuclearMarker == null) {
             nuclearMarker = getValue(options, "object.nuclearMarker");

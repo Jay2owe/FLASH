@@ -47,7 +47,9 @@ public final class ObjectCsvColumnOrder {
             "BZ",
             "B-width",
             "B-height",
-            "B-depth"
+            "B-depth",
+            "B-volume (voxels)",
+            "B-volume (micron^3)"
     );
     private static final Map<String, Integer> VORONOI_ORDER = fixedOrder(
             "Voronoi_TerritoryArea_um2",

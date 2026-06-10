@@ -484,7 +484,7 @@ public final class ObjectsCounter3DWrapper {
             rt.setValue("XM", i, comX);
             rt.setValue("YM", i, comY);
             rt.setValue("ZM", i, comZ);
-            writeBoundingBoxValues(rt, i, obj.getBoundingBox());
+            writeBoundingBoxValues(rt, i, obj.getBoundingBox(), voxelVol);
 
             // Label: pixel value in the label image (used by CPC colocalization)
             rt.setValue("Label", i, (int) obj.getLabel());
@@ -624,6 +624,8 @@ public final class ObjectsCounter3DWrapper {
         setTableHeading(rt, 10, "B-width");
         setTableHeading(rt, 11, "B-height");
         setTableHeading(rt, 12, "B-depth");
+        setTableHeading(rt, 13, "B-volume (voxels)");
+        setTableHeading(rt, 14, "B-volume (micron^3)");
 
         for (int i = 0; i < objs.size(); i++) {
             Object o = objs.get(i);
@@ -663,9 +665,14 @@ public final class ObjectsCounter3DWrapper {
             rt.setValue("BX", i, intAt(topLeft, 0, 0));
             rt.setValue("BY", i, intAt(topLeft, 1, 0));
             rt.setValue("BZ", i, intAt(topLeft, 2, 0));
-            rt.setValue("B-width", i, getDoubleField(o, "bound_cube_width", 0));
-            rt.setValue("B-height", i, getDoubleField(o, "bound_cube_height", 0));
-            rt.setValue("B-depth", i, getDoubleField(o, "bound_cube_depth", 0));
+            double boundWidth = getDoubleField(o, "bound_cube_width", 0);
+            double boundHeight = getDoubleField(o, "bound_cube_height", 0);
+            double boundDepth = getDoubleField(o, "bound_cube_depth", 0);
+            rt.setValue("B-width", i, boundWidth);
+            rt.setValue("B-height", i, boundHeight);
+            rt.setValue("B-depth", i, boundDepth);
+            writeBoundingBoxVolume(rt, i, (long) Math.max(0, boundWidth) * (long) Math.max(0, boundHeight)
+                    * (long) Math.max(0, boundDepth), voxelVol);
 
             // Label: Counter3D uses 1-based sequential labels
             rt.setValue("Label", i, i + 1);
@@ -684,7 +691,10 @@ public final class ObjectsCounter3DWrapper {
         return fallback;
     }
 
-    private static void writeBoundingBoxValues(ResultsTable table, int row, BoundingBox box) {
+    private static final java.util.concurrent.atomic.AtomicBoolean WARNED_NO_BB_CALIBRATION =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    private static void writeBoundingBoxValues(ResultsTable table, int row, BoundingBox box, double voxelVolume) {
         if (table == null) return;
         if (box == null) {
             table.setValue("BX", row, 0);
@@ -693,14 +703,38 @@ public final class ObjectsCounter3DWrapper {
             table.setValue("B-width", row, 0);
             table.setValue("B-height", row, 0);
             table.setValue("B-depth", row, 0);
+            table.setValue("B-volume (voxels)", row, 0);
+            table.setValue("B-volume (micron^3)", row, 0);
             return;
         }
+        int width = Math.max(0, box.xmax - box.xmin + 1);
+        int height = Math.max(0, box.ymax - box.ymin + 1);
+        int depth = Math.max(0, box.zmax - box.zmin + 1);
         table.setValue("BX", row, box.xmin);
         table.setValue("BY", row, box.ymin);
         table.setValue("BZ", row, box.zmin);
-        table.setValue("B-width", row, Math.max(0, box.xmax - box.xmin + 1));
-        table.setValue("B-height", row, Math.max(0, box.ymax - box.ymin + 1));
-        table.setValue("B-depth", row, Math.max(0, box.zmax - box.zmin + 1));
+        table.setValue("B-width", row, width);
+        table.setValue("B-height", row, height);
+        table.setValue("B-depth", row, depth);
+        writeBoundingBoxVolume(table, row, (long) width * height * depth, voxelVolume);
+    }
+
+    /**
+     * Writes {@code B-volume (voxels)} (the box width*height*depth) and {@code B-volume (micron^3)}
+     * (voxel volume * calibrated voxel size). When calibration is unavailable {@code voxelVolume}
+     * is 1.0, so the micron column mirrors the voxel count; this is logged once and never crashes.
+     */
+    private static void writeBoundingBoxVolume(ResultsTable table, int row, long boxVoxels, double voxelVolume) {
+        double calibratedVoxel = voxelVolume > 0 ? voxelVolume : 1.0;
+        if (calibratedVoxel == 1.0 && WARNED_NO_BB_CALIBRATION.compareAndSet(false, true)) {
+            try {
+                ij.IJ.log("FLASH: bounding-box micron volume uncalibrated; reporting voxel counts (1.0 scale).");
+            } catch (Throwable ignored) {
+                // logging is best-effort; never let it break table construction
+            }
+        }
+        table.setValue("B-volume (voxels)", row, boxVoxels);
+        table.setValue("B-volume (micron^3)", row, boxVoxels * calibratedVoxel);
     }
 
     @SuppressWarnings("deprecation")

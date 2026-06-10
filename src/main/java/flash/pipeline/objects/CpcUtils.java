@@ -23,6 +23,10 @@ public final class CpcUtils {
         public double cx, cy, cz;
         public int voxelCount;
         public int partnerLabel;
+        /** Inclusive voxel-index bounding box. Empty objects keep min &gt; max. */
+        public int xmin = Integer.MAX_VALUE, xmax = Integer.MIN_VALUE;
+        public int ymin = Integer.MAX_VALUE, ymax = Integer.MIN_VALUE;
+        public int zmin = Integer.MAX_VALUE, zmax = Integer.MIN_VALUE;
 
         public ObjectInfo(int label) {
             this.label = label;
@@ -30,6 +34,34 @@ public final class CpcUtils {
 
         public boolean isColocalized() {
             return partnerLabel > 0;
+        }
+
+        /** True when no voxels have been recorded, so the bounding box is undefined. */
+        public boolean isBoxEmpty() {
+            return xmax < xmin || ymax < ymin || zmax < zmin;
+        }
+
+        /** Bounding-box volume in voxels (width*height*depth, inclusive); 0 when empty. */
+        public long bbVolume() {
+            if (isBoxEmpty()) return 0L;
+            return (long) (xmax - xmin + 1) * (ymax - ymin + 1) * (zmax - zmin + 1);
+        }
+
+        /** True when point (px,py,pz) lies within the inclusive bounding box. */
+        public boolean bbContains(double px, double py, double pz) {
+            if (isBoxEmpty()) return false;
+            return px >= xmin && px <= xmax
+                    && py >= ymin && py <= ymax
+                    && pz >= zmin && pz <= zmax;
+        }
+
+        /** Volume (voxels) of the intersection of this box with another; 0 when disjoint or empty. */
+        public long bbIntersectionVolume(ObjectInfo o) {
+            if (o == null || isBoxEmpty() || o.isBoxEmpty()) return 0L;
+            long ox = Math.max(0, Math.min(xmax, o.xmax) - Math.max(xmin, o.xmin) + 1);
+            long oy = Math.max(0, Math.min(ymax, o.ymax) - Math.max(ymin, o.ymin) + 1);
+            long oz = Math.max(0, Math.min(zmax, o.zmax) - Math.max(zmin, o.zmin) + 1);
+            return ox * oy * oz;
         }
     }
 
@@ -44,6 +76,7 @@ public final class CpcUtils {
         int h = img.getHeight();
         int nSlices = stack.getSize();
 
+        // Per label: [0]=sumX [1]=sumY [2]=sumZ [3]=count [4]=xmin [5]=xmax [6]=ymin [7]=ymax [8]=zmin [9]=zmax
         Map<Integer, long[]> stats = new LinkedHashMap<Integer, long[]>();
         for (int z = 0; z < nSlices; z++) {
             ImageProcessor ip = stack.getProcessor(z + 1);
@@ -53,13 +86,22 @@ public final class CpcUtils {
                     if (label <= 0) continue;
                     long[] s = stats.get(label);
                     if (s == null) {
-                        s = new long[4];
+                        s = new long[10];
+                        s[4] = Long.MAX_VALUE; s[5] = Long.MIN_VALUE;
+                        s[6] = Long.MAX_VALUE; s[7] = Long.MIN_VALUE;
+                        s[8] = Long.MAX_VALUE; s[9] = Long.MIN_VALUE;
                         stats.put(label, s);
                     }
                     s[0] += x;
                     s[1] += y;
                     s[2] += z;
                     s[3]++;
+                    if (x < s[4]) s[4] = x;
+                    if (x > s[5]) s[5] = x;
+                    if (y < s[6]) s[6] = y;
+                    if (y > s[7]) s[7] = y;
+                    if (z < s[8]) s[8] = z;
+                    if (z > s[9]) s[9] = z;
                 }
             }
         }
@@ -72,6 +114,12 @@ public final class CpcUtils {
             obj.cx = (double) s[0] / s[3];
             obj.cy = (double) s[1] / s[3];
             obj.cz = (double) s[2] / s[3];
+            obj.xmin = (int) s[4];
+            obj.xmax = (int) s[5];
+            obj.ymin = (int) s[6];
+            obj.ymax = (int) s[7];
+            obj.zmin = (int) s[8];
+            obj.zmax = (int) s[9];
             objects.add(obj);
         }
         return objects;
@@ -109,6 +157,12 @@ public final class CpcUtils {
             c.cy = o.cy;
             c.cz = o.cz;
             c.voxelCount = o.voxelCount;
+            c.xmin = o.xmin;
+            c.xmax = o.xmax;
+            c.ymin = o.ymin;
+            c.ymax = o.ymax;
+            c.zmin = o.zmin;
+            c.zmax = o.zmax;
             copy.add(c);
         }
         return copy;

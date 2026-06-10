@@ -215,6 +215,9 @@ public class CLIConfig {
         if (object.colocThresholdPercent != null) {
             parts.add("object.colocThreshold=" + formatDouble(object.colocThresholdPercent.doubleValue()));
         }
+        if (object.bbColocThresholdPercent != null) {
+            parts.add("object.bbColocThreshold=" + formatDouble(object.bbColocThresholdPercent.doubleValue()));
+        }
         if (object.nuclearMarkerIndex != null) {
             parts.add("object.nuclear_marker=" + (object.nuclearMarkerIndex.intValue() + 1));
         }
@@ -643,6 +646,7 @@ public class CLIConfig {
         Boolean runSpatial = null;
         Boolean classicalCentroidFiltering = null;
         Double colocThresholdPercent = null;
+        Double bbColocThresholdPercent = null;
         Integer nuclearMarkerIndex = null;
 
         public String getPresetName() { return presetName; }
@@ -653,6 +657,7 @@ public class CLIConfig {
         public Boolean getRunSpatial() { return runSpatial; }
         public Boolean getClassicalCentroidFiltering() { return classicalCentroidFiltering; }
         public Double getColocThresholdPercent() { return colocThresholdPercent; }
+        public Double getBBColocThresholdPercent() { return bbColocThresholdPercent; }
         public Integer getNuclearMarkerIndex() { return nuclearMarkerIndex; }
 
         public boolean hasConfiguration() {
@@ -664,6 +669,7 @@ public class CLIConfig {
                     || runSpatial != null
                     || classicalCentroidFiltering != null
                     || colocThresholdPercent != null
+                    || bbColocThresholdPercent != null
                     || nuclearMarkerIndex != null;
         }
     }

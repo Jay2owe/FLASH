@@ -45,6 +45,7 @@ public final class ThreeDObjectSetupConfig {
                 defaultStrictness(safeIdentities)));
         for (String channelName : safeCfg.channelNames) {
             out.markerThresholds.put(channelName, Double.valueOf(out.thresholdPercent));
+            out.bbThresholds.put(channelName, Double.valueOf(out.bbThresholdPercent));
         }
 
         for (int i = 0; i < safeCfg.numChannels(); i++) {
@@ -86,6 +87,7 @@ public final class ThreeDObjectSetupConfig {
         out.thresholdPercent = safePreset.getColocThresholdPercent();
         for (String channelName : safeCfg.channelNames) {
             out.markerThresholds.put(channelName, Double.valueOf(out.thresholdPercent));
+            out.bbThresholds.put(channelName, Double.valueOf(out.bbThresholdPercent));
         }
         for (int i = 0; i < safeCfg.numChannels(); i++) {
             for (int j = i + 1; j < safeCfg.numChannels(); j++) {
@@ -209,9 +211,11 @@ public final class ThreeDObjectSetupConfig {
         public boolean runSpatial;
         public boolean classicalCentroidFiltering;
         public double thresholdPercent;
+        public double bbThresholdPercent = 30.0;
         public int nuclearMarkerIndex = -1;
         public final boolean[] processChannels;
         public final Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
+        public final Map<String, Double> bbThresholds = new LinkedHashMap<String, Double>();
         public final Set<String> primaryPairs = new LinkedHashSet<String>();
 
         private DerivedConfig(int channels) {

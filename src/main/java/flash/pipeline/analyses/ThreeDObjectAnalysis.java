@@ -272,6 +272,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private boolean doCpc = true;
     private boolean doIntensityColoc = false;
     private Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
+    /** Per-channel bounding-box coloc threshold (%), independent of {@link #markerThresholds}. */
+    private final Map<String, Double> bbThresholds = new LinkedHashMap<String, Double>();
     private boolean wizardExtractProcessLength = false;
     private boolean wizardRunSpatial = false;
     private int wizardNuclearMarkerIndex = -1;
@@ -902,6 +904,14 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             prev != null ? prev : 30.0, 0));
                 }
 
+                gdOpts.addHeader("Bounding-box Coloc Thresholds");
+                for (String chName : cfg.channelNames) {
+                    Double prevBB = bbThresholds.get(chName);
+                    objectBindings.bbThresholdFields.add(gdOpts.addNumericField(
+                            chName + " BB Coloc Threshold (%)",
+                            prevBB != null ? prevBB : 30.0, 0));
+                }
+
                 if (analyseFullImagesWithoutRois) {
                     gdOpts.addHeader("Analysis Region");
                     gdOpts.addHelpText("No saved ROI sets were found. This run will analyse the full image stack for each image.");
@@ -967,6 +977,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 markerThresholds.clear();
                 for (String chName : cfg.channelNames) {
                     markerThresholds.put(chName, gdOpts.getNextNumber());
+                }
+                bbThresholds.clear();
+                for (String chName : cfg.channelNames) {
+                    bbThresholds.put(chName, gdOpts.getNextNumber());
                 }
                 for (int r = 0; r < roiSetNames.length; r++) {
                     selectedRoiSets[r] = gdOpts.getNextBoolean();
@@ -1688,6 +1702,13 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     field.setText(numericText(threshold.doubleValue(), 0));
                 }
             }
+            for (int i = 0; i < bindings.bbThresholdFields.size() && cfg != null && i < cfg.channelNames.size(); i++) {
+                JTextField field = bindings.bbThresholdFields.get(i);
+                Double bbThreshold = bbThresholds.get(cfg.channelNames.get(i));
+                if (field != null && bbThreshold != null) {
+                    field.setText(numericText(bbThreshold.doubleValue(), 0));
+                }
+            }
         } finally {
             bindings.programmaticChange = false;
         }
@@ -1955,6 +1976,13 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 derived.markerThresholds.put(channelName, object.getColocThresholdPercent());
             }
         }
+        if (object.getBBColocThresholdPercent() != null) {
+            derived.bbThresholdPercent = object.getBBColocThresholdPercent().doubleValue();
+            derived.bbThresholds.clear();
+            for (String channelName : cfg.channelNames) {
+                derived.bbThresholds.put(channelName, object.getBBColocThresholdPercent());
+            }
+        }
         if (object.getNuclearMarkerIndex() != null) {
             derived.nuclearMarkerIndex = object.getNuclearMarkerIndex().intValue();
         }
@@ -1972,6 +2000,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         wizardNuclearMarkerIndex = derived.nuclearMarkerIndex;
         wizardProcessChannels = Arrays.copyOf(derived.processChannels, derived.processChannels.length);
         markerThresholds = new LinkedHashMap<String, Double>(derived.markerThresholds);
+        bbThresholds.clear();
+        bbThresholds.putAll(derived.bbThresholds);
     }
 
     private static void setToggle(ToggleSwitch toggle, boolean selected) {
@@ -2028,6 +2058,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         ToggleSwitch runSpatialToggle;
         ToggleSwitch classicalCentroidFilterToggle;
         List<JTextField> thresholdFields = new ArrayList<JTextField>();
+        List<JTextField> bbThresholdFields = new ArrayList<JTextField>();
         Runnable primaryLabelUpdater;
     }
 
@@ -5267,6 +5298,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
     private double getColocThreshold(String source) {
         Double t = markerThresholds.get(source);
+        return t != null ? t : 30.0;
+    }
+
+    /** Per-channel bounding-box coloc threshold (%), defaulting to 30 when unset. */
+    private double getBBColocThreshold(String source) {
+        Double t = bbThresholds.get(source);
         return t != null ? t : 30.0;
     }
 

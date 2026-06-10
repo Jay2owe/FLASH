@@ -119,6 +119,9 @@ public class ObjectsCounter3DWrapperTest {
         assertEquals(3.0, stats.getValue("B-width", 0), 0.0);
         assertEquals(3.0, stats.getValue("B-height", 0), 0.0);
         assertEquals(3.0, stats.getValue("B-depth", 0), 0.0);
+        // B-volume = width*height*depth; uncalibrated image -> micron column mirrors voxels (1.0 scale).
+        assertEquals(27.0, stats.getValue("B-volume (voxels)", 0), 0.0);
+        assertEquals(27.0, stats.getValue("B-volume (micron^3)", 0), 0.0);
     }
 
     @Test
