@@ -462,6 +462,7 @@ public class CLIArgumentParserTest {
                 + "intensity.spatial.granularity_um=2,4,8,16,32,64 "
                 + "intensity.spatial.texture_k=4 "
                 + "intensity.spatial.permutations=199 "
+                + "intensity.spatial.costes_permutations=77 "
                 + "intensity.spatial.seed=1");
 
         assertNotNull(parsed);
@@ -671,6 +672,7 @@ public class CLIArgumentParserTest {
                 intensity.getSpatialGranularityScalesUm(), 0.0001);
         assertEquals(Integer.valueOf(4), intensity.getSpatialTextureClassCount());
         assertEquals(Integer.valueOf(199), intensity.getSpatialPermutations());
+        assertEquals(Integer.valueOf(77), intensity.getSpatialCostesPermutations());
         assertEquals(Long.valueOf(1L), intensity.getSpatialSeed());
     }
 

@@ -310,6 +310,10 @@ public class CLIConfig {
         if (intensity.spatialPermutations != null) {
             parts.add("intensity.spatial.permutations=" + intensity.spatialPermutations);
         }
+        if (intensity.spatialCostesPermutations != null) {
+            parts.add("intensity.spatial.costes_permutations="
+                    + intensity.spatialCostesPermutations);
+        }
         if (intensity.spatialSeed != null) {
             parts.add("intensity.spatial.seed=" + intensity.spatialSeed);
         }
@@ -761,6 +765,7 @@ public class CLIConfig {
         Double spatialRimDepthUm = null;
         Integer spatialTextureClassCount = null;
         Integer spatialPermutations = null;
+        Integer spatialCostesPermutations = null;
         Long spatialSeed = null;
         IntensitySpatialConfig.FailurePolicy spatialFailurePolicy = null;
 
@@ -803,6 +808,7 @@ public class CLIConfig {
         public Double getSpatialRimDepthUm() { return spatialRimDepthUm; }
         public Integer getSpatialTextureClassCount() { return spatialTextureClassCount; }
         public Integer getSpatialPermutations() { return spatialPermutations; }
+        public Integer getSpatialCostesPermutations() { return spatialCostesPermutations; }
         public Long getSpatialSeed() { return spatialSeed; }
         public IntensitySpatialConfig.FailurePolicy getSpatialFailurePolicy() { return spatialFailurePolicy; }
 
@@ -830,6 +836,7 @@ public class CLIConfig {
                     || spatialRimDepthUm != null
                     || spatialTextureClassCount != null
                     || spatialPermutations != null
+                    || spatialCostesPermutations != null
                     || spatialSeed != null
                     || spatialFailurePolicy != null;
         }
@@ -895,6 +902,9 @@ public class CLIConfig {
                 builder.textureClassCount(spatialTextureClassCount.intValue());
             }
             if (spatialPermutations != null) builder.permutations(spatialPermutations.intValue());
+            if (spatialCostesPermutations != null) {
+                builder.costesPermutations(spatialCostesPermutations.intValue());
+            }
             if (spatialSeed != null) builder.seed(spatialSeed.longValue());
             if (spatialFailurePolicy != null) builder.failurePolicy(spatialFailurePolicy);
             if (spatialEnabled != null) {

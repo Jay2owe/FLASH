@@ -65,6 +65,7 @@ public class IntensityPresetIOTest {
                 .rimDepthUm(18.0)
                 .textureClassCount(5)
                 .permutations(99)
+                .costesPermutations(33)
                 .seed(42L)
                 .build();
         IntensityPreset preset = new IntensityPreset("Spatial Intensity", "test", null,
@@ -89,6 +90,7 @@ public class IntensityPresetIOTest {
         assertEquals(18.0, loaded.getSpatial().getRimDepthUm(), 0.0001);
         assertEquals(5, loaded.getSpatial().getTextureClassCount());
         assertEquals(99, loaded.getSpatial().getPermutations());
+        assertEquals(33, loaded.getSpatial().getCostesPermutations());
         assertEquals(42L, loaded.getSpatial().getSeed());
     }
 

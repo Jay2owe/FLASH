@@ -274,7 +274,7 @@ public final class CLIArgumentParser {
                 + "  intensity.spatial.perslice=nullmodel,depth,glcm,scaledivergence   (per-mode, preferred)\n"
                 + "  intensity.spatial.mip_analyses=patchiness,hotspots,glcm,anisotropy\n"
                 + "  intensity.spatial.native3d_analyses=anisotropy3d,crossmark3d\n"
-                + "  intensity.spatial.analyses=patchiness,hotspots,depth,anisotropy,crossmark,mi,distance_shell   (legacy)\n"
+                + "  intensity.spatial.analyses=patchiness,hotspots,depth,anisotropy,crosscorr,crossmark,mi,distance_shell   (legacy)\n"
                 + "  intensity.spatial.source=mip|full_stack   (legacy; ignored when per-mode tokens are set)\n"
                 + "  intensity.spatial.mip=true|false\n"
                 + "  intensity.spatial.native3d=true|false\n"
@@ -285,6 +285,7 @@ public final class CLIArgumentParser {
                 + "  intensity.spatial.granularity_um=2,4,8,16,32,64\n"
                 + "  intensity.spatial.texture_k=4\n"
                 + "  intensity.spatial.permutations=199\n"
+                + "  intensity.spatial.costes_permutations=199\n"
                 + "  intensity.spatial.seed=1\n"
                 + "  spectral.preset=patchy_autofluorescence\n"
                 + "  spectral.goal=cleaned_image|cleaned_mask|score_objects|measure_only\n"
@@ -793,6 +794,17 @@ public final class CLIArgumentParser {
             intensity.spatialPermutations = Integer.valueOf(parseIntValue(
                     "intensity.spatial.permutations", permutations,
                     IntensitySpatialConfig.DEFAULT_PERMUTATIONS, 0, Integer.MAX_VALUE));
+        }
+
+        String costesPermutations = getValue(options, "intensity.spatial.costes_permutations");
+        if (costesPermutations == null) {
+            costesPermutations = getValue(options, "intensity.spatial.costesPermutations");
+        }
+        if (costesPermutations != null) {
+            intensity.spatialCostesPermutations = Integer.valueOf(parseIntValue(
+                    "intensity.spatial.costes_permutations", costesPermutations,
+                    IntensitySpatialConfig.DEFAULT_COSTES_PERMUTATIONS, 0,
+                    IntensitySpatialConfig.MAX_COSTES_PERMUTATIONS));
         }
 
         String seed = getValue(options, "intensity.spatial.seed");

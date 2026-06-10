@@ -147,7 +147,7 @@ public final class CrossMark3DAnalysis implements IntensitySpatialPairAnalysis {
                         new FloatType((float) thresholdB),
                         ThresholdMode.Above);
 
-        double costesP = costesP(pearsons, container, context.config().getPermutations(),
+        double costesP = costesP(pearsons, container, context.config().getCostesPermutations(),
                 volume.count, context);
         return new ColocMetrics(pearson, costesP, thresholdA, thresholdB,
                 finiteOrNan(mandersResult.m1), finiteOrNan(mandersResult.m2));
@@ -176,7 +176,7 @@ public final class CrossMark3DAnalysis implements IntensitySpatialPairAnalysis {
                 manders.calculateMandersCorrelation(cursor,
                         new FloatType(0.0f), new FloatType(0.0f), ThresholdMode.Above);
 
-        double costesP = costesP(pearsons, container, context.config().getPermutations(),
+        double costesP = costesP(pearsons, container, context.config().getCostesPermutations(),
                 volume.count, context);
         return new BinarizedColocMetrics(costesP,
                 finiteOrNan(mandersResult.m1), finiteOrNan(mandersResult.m2));

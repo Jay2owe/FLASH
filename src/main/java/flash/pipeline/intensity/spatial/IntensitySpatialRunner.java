@@ -91,6 +91,9 @@ public final class IntensitySpatialRunner {
 
         List<IntensitySpatialPairAnalysis> pair =
                 new ArrayList<IntensitySpatialPairAnalysis>();
+        addPairAnalysis(pair, "crosscorr_fast_2d", new PairFactory() {
+            @Override public IntensitySpatialPairAnalysis create() { return new FastCrossCorrelation2DAnalysis(); }
+        });
         addPairAnalysis(pair, "crossmark_2d", new PairFactory() {
             @Override public IntensitySpatialPairAnalysis create() { return new CrossMark2DAnalysis(); }
         });
@@ -217,10 +220,18 @@ public final class IntensitySpatialRunner {
         }
 
         LinkedHashMap<String, Double> values = new LinkedHashMap<String, Double>();
+        boolean fullCrossMarkWillRun = context.config().isEnabledIn(
+                IntensitySpatialConfig.AnalysisKey.CROSSMARK, context.outputMode())
+                && hasPairAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK,
+                context.outputMode());
         for (IntensitySpatialPairAnalysis analysis : pairAnalyses) {
             if (analysis == null
                     || !context.config().isEnabledIn(analysis.key(), context.outputMode())
                     || !analysis.outputModes().contains(context.outputMode())) {
+                continue;
+            }
+            if (analysis.key() == IntensitySpatialConfig.AnalysisKey.CROSSCORR_FAST
+                    && fullCrossMarkWillRun) {
                 continue;
             }
             if ((analysis.key() == IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL
@@ -268,6 +279,19 @@ public final class IntensitySpatialRunner {
             }
         }
         return new IntensitySpatialResult(values);
+    }
+
+    private boolean hasPairAnalysis(IntensitySpatialConfig.AnalysisKey key,
+                                    IntensitySpatialOutputMode outputMode) {
+        if (key == null || outputMode == null) return false;
+        for (IntensitySpatialPairAnalysis analysis : pairAnalyses) {
+            if (analysis != null
+                    && analysis.key() == key
+                    && analysis.outputModes().contains(outputMode)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean dependenciesAvailable(IntensitySpatialAnalysis analysis,

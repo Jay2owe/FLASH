@@ -30,6 +30,8 @@ public final class IntensitySpatialConfig implements Serializable {
     public static final double DEFAULT_RIM_DEPTH_UM = 10.0;
     public static final int DEFAULT_TEXTURE_CLASS_COUNT = 4;
     public static final int DEFAULT_PERMUTATIONS = 199;
+    public static final int DEFAULT_COSTES_PERMUTATIONS = DEFAULT_PERMUTATIONS;
+    public static final int MAX_COSTES_PERMUTATIONS = 199;
     public static final long DEFAULT_SEED = 1L;
     public static final int MIN_NATIVE_3D_SLICES = 5;
 
@@ -93,6 +95,7 @@ public final class IntensitySpatialConfig implements Serializable {
         GLCM("glcm", false, false),
         TEXTURECLASS("textureclass", false, false),
         SCALEDIVERGENCE("scaledivergence", false, false),
+        CROSSCORR_FAST("crosscorr", true, false),
         CROSSMARK("crossmark", true, false),
         ENTROPY_MI("mi", true, false),
         DISTANCE_SHELL("distance_shell", true, false),
@@ -131,6 +134,10 @@ public final class IntensitySpatialConfig implements Serializable {
             if ("scaledivergence".equals(normalized) || "multifractal".equals(normalized)) return SCALEDIVERGENCE;
             if ("entropymi".equals(normalized) || "mutualinformation".equals(normalized)
                     || "mi".equals(normalized)) return ENTROPY_MI;
+            if ("crosscorrelation".equals(normalized) || "fastcrosscorrelation".equals(normalized)
+                    || "fastcrosscorr".equals(normalized) || "crosscorrfast".equals(normalized)) {
+                return CROSSCORR_FAST;
+            }
             if ("distanceshell".equals(normalized) || "shell".equals(normalized)) return DISTANCE_SHELL;
             if ("crossmark3d".equals(normalized)) return CROSSMARK_3D;
             if ("distanceshell3d".equals(normalized)) return DISTANCE_SHELL_3D;
@@ -163,6 +170,7 @@ public final class IntensitySpatialConfig implements Serializable {
     private final double rimDepthUm;
     private final int textureClassCount;
     private final int permutations;
+    private final int costesPermutations;
     private final long seed;
     private final FailurePolicy failurePolicy;
 
@@ -186,6 +194,7 @@ public final class IntensitySpatialConfig implements Serializable {
         this.rimDepthUm = positive(builder.rimDepthUm, DEFAULT_RIM_DEPTH_UM);
         this.textureClassCount = positive(builder.textureClassCount, DEFAULT_TEXTURE_CLASS_COUNT);
         this.permutations = nonNegative(builder.permutations, DEFAULT_PERMUTATIONS);
+        this.costesPermutations = nonNegative(builder.costesPermutations, DEFAULT_COSTES_PERMUTATIONS);
         this.seed = builder.seed;
         this.failurePolicy = builder.failurePolicy == null
                 ? FailurePolicy.SKIP_FAILED_ANALYSIS
@@ -244,6 +253,7 @@ public final class IntensitySpatialConfig implements Serializable {
     public double getRimDepthUm() { return rimDepthUm; }
     public int getTextureClassCount() { return textureClassCount; }
     public int getPermutations() { return permutations; }
+    public int getCostesPermutations() { return costesPermutations; }
     public long getSeed() { return seed; }
     public FailurePolicy getFailurePolicy() { return failurePolicy; }
 
@@ -259,6 +269,7 @@ public final class IntensitySpatialConfig implements Serializable {
                 || Double.compare(rimDepthUm, DEFAULT_RIM_DEPTH_UM) != 0
                 || textureClassCount != DEFAULT_TEXTURE_CLASS_COUNT
                 || permutations != DEFAULT_PERMUTATIONS
+                || costesPermutations != DEFAULT_COSTES_PERMUTATIONS
                 || seed != DEFAULT_SEED
                 || failurePolicy != FailurePolicy.SKIP_FAILED_ANALYSIS;
     }
@@ -331,6 +342,7 @@ public final class IntensitySpatialConfig implements Serializable {
         root.put("rimDepthUm", Double.valueOf(rimDepthUm));
         root.put("textureClassCount", Integer.valueOf(textureClassCount));
         root.put("permutations", Integer.valueOf(permutations));
+        root.put("costesPermutations", Integer.valueOf(costesPermutations));
         root.put("seed", Long.valueOf(seed));
         root.put("failurePolicy", failurePolicy.name());
         return root;
@@ -365,6 +377,10 @@ public final class IntensitySpatialConfig implements Serializable {
             anySelected = !analyses.isEmpty();
         }
         boolean enabled = JsonIO.booleanValue(first(root, "enabled", "spatial"), anySelected);
+        int spatialPermutations = JsonIO.intValue(root.get("permutations"), DEFAULT_PERMUTATIONS);
+        int costesPermutations = JsonIO.intValue(
+                first(root, "costesPermutations", "costes_permutations"),
+                spatialPermutations);
         return builder
                 .enabled(enabled)
                 .overlaysEnabled(JsonIO.booleanValue(first(root, "overlays", "overlaysEnabled"), false))
@@ -378,7 +394,8 @@ public final class IntensitySpatialConfig implements Serializable {
                 .rimDepthUm(doubleValue(first(root, "rimDepthUm", "rim_depth_um"), DEFAULT_RIM_DEPTH_UM))
                 .textureClassCount(JsonIO.intValue(first(root, "textureClassCount", "texture_k"),
                         DEFAULT_TEXTURE_CLASS_COUNT))
-                .permutations(JsonIO.intValue(root.get("permutations"), DEFAULT_PERMUTATIONS))
+                .permutations(spatialPermutations)
+                .costesPermutations(costesPermutations)
                 .seed(longValue(root.get("seed"), DEFAULT_SEED))
                 .failurePolicy(FailurePolicy.parse(JsonIO.stringValue(first(root, "failurePolicy", "failure_policy"))))
                 .build();
@@ -647,6 +664,8 @@ public final class IntensitySpatialConfig implements Serializable {
         private double rimDepthUm = DEFAULT_RIM_DEPTH_UM;
         private int textureClassCount = DEFAULT_TEXTURE_CLASS_COUNT;
         private int permutations = DEFAULT_PERMUTATIONS;
+        private int costesPermutations = DEFAULT_COSTES_PERMUTATIONS;
+        private boolean costesPermutationsExplicit = false;
         private long seed = DEFAULT_SEED;
         private FailurePolicy failurePolicy = FailurePolicy.SKIP_FAILED_ANALYSIS;
 
@@ -672,6 +691,8 @@ public final class IntensitySpatialConfig implements Serializable {
             this.rimDepthUm = base.rimDepthUm;
             this.textureClassCount = base.textureClassCount;
             this.permutations = base.permutations;
+            this.costesPermutations = base.costesPermutations;
+            this.costesPermutationsExplicit = true;
             this.seed = base.seed;
             this.failurePolicy = base.failurePolicy;
         }
@@ -807,6 +828,15 @@ public final class IntensitySpatialConfig implements Serializable {
 
         public Builder permutations(int permutations) {
             this.permutations = permutations;
+            if (!costesPermutationsExplicit) {
+                this.costesPermutations = permutations;
+            }
+            return this;
+        }
+
+        public Builder costesPermutations(int costesPermutations) {
+            this.costesPermutations = costesPermutations;
+            this.costesPermutationsExplicit = true;
             return this;
         }
 

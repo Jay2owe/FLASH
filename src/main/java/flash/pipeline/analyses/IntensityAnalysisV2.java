@@ -188,6 +188,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         JTextField rimDepthField;
         JTextField textureClassCountField;
         JTextField permutationsField;
+        JTextField costesPermutationsField;
+        javax.swing.JSlider costesPermutationsSlider;
+        javax.swing.JLabel costesPermutationsLabel;
         JTextField seedField;
 
         Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> toggles(IntensitySpatialOutputMode mode) {
@@ -221,6 +224,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE
     };
     private static final IntensitySpatialConfig.AnalysisKey[] GUI_CROSS_CHANNEL_2D_ANALYSES = {
+            IntensitySpatialConfig.AnalysisKey.CROSSCORR_FAST,
             IntensitySpatialConfig.AnalysisKey.CROSSMARK,
             IntensitySpatialConfig.AnalysisKey.ENTROPY_MI,
             IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL
@@ -1997,6 +2001,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         String imageId = imageIdWithProgress(parts, imageProgressLabel);
         logProgressStep(imageStepContext, "intensity-spatial cross-channel: "
                 + crossChannelPlanSummary(spatialConfig));
+        CrossChannelMipCache mipCache = null;
+        try {
         for (int c = 0; c < channelCount; c++) {
             ImagePlus sourceRaw = rawImages[c];
             if (sourceRaw == null) continue;
@@ -2034,33 +2040,26 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             IntensitySpatialOutputKey mipKey = outputPlan.keyForChannelMode(sourceName,
                     IntensitySpatialOutputMode.MIP);
             if (hasMip2d && outputPlan.shouldPopulate(mipKey)) {
-                ImagePlus sourceMip = null;
-                ImagePlus sourceBinMip = null;
-                ImagePlus sourceMaskMip = null;
                 try {
-                    logProgressStep(imageStepContext, "source " + sourceName
-                            + " MIP: building cross-channel projections");
-                    sourceMip = IntensitySpatialRunner.maxIntensityProjection(
-                            sourceRaw, sourceName + "_raw_MIP");
-                    sourceBinMip = IntensitySpatialRunner.maxIntensityProjection(
-                            imageAt(binarizedImages, c), sourceName + "_binarized_MIP");
-                    sourceMaskMip = IntensitySpatialRunner.maxIntensityProjection(
-                            imageAt(binaryMasks, c), sourceName + "_mask_MIP");
+                    if (mipCache == null) {
+                        logProgressStep(imageStepContext,
+                                "MIP: building cross-channel projections once per channel");
+                        mipCache = CrossChannelMipCache.build(
+                                channelNames, channelCount, rawImages, binarizedImages, binaryMasks);
+                    }
+                    ImagePlus sourceMip = mipCache.raw(c);
+                    ImagePlus sourceBinMip = mipCache.binarized(c);
+                    ImagePlus sourceMaskMip = mipCache.mask(c);
+                    if (sourceMip == null) continue;
                     for (int p = 0; p < channelCount; p++) {
                         if (p == c || rawImages[p] == null) continue;
                         String pairProgress = "pair " + orderedPairProgress(c, p, channelCount)
                                 + " " + sourceName + " MIP -> " + channelNames[p] + " MIP";
                         logProgressStep(imageStepContext, pairProgress);
-                        ImagePlus partnerMip = null;
-                        ImagePlus partnerBinMip = null;
-                        ImagePlus partnerMaskMip = null;
                         try {
-                            partnerMip = IntensitySpatialRunner.maxIntensityProjection(
-                                    rawImages[p], channelNames[p] + "_raw_MIP");
-                            partnerBinMip = IntensitySpatialRunner.maxIntensityProjection(
-                                    imageAt(binarizedImages, p), channelNames[p] + "_binarized_MIP");
-                            partnerMaskMip = IntensitySpatialRunner.maxIntensityProjection(
-                                    imageAt(binaryMasks, p), channelNames[p] + "_mask_MIP");
+                            ImagePlus partnerMip = mipCache.raw(p);
+                            ImagePlus partnerBinMip = mipCache.binarized(p);
+                            ImagePlus partnerMaskMip = mipCache.mask(p);
                             IntensitySpatialResult result = runner.measurePair(new IntensitySpatialPairContext(
                                     spatialConfig,
                                     sourceMip, sourceBinMip, sourceMaskMip,
@@ -2072,20 +2071,12 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                             IJ.log("[FLASH] Intensity-spatial cross-channel MIP skipped for "
                                     + imageId + " source " + sourceName
                                     + " partner " + channelNames[p] + ": " + ex.getMessage());
-                        } finally {
-                            closeImage(partnerMip);
-                            closeImage(partnerBinMip);
-                            closeImage(partnerMaskMip);
                         }
                     }
                 } catch (RuntimeException ex) {
                     IJ.log("[FLASH] Intensity-spatial cross-channel MIP skipped for "
                             + imageId + " source " + sourceName
                             + ": " + ex.getMessage());
-                } finally {
-                    closeImage(sourceMip);
-                    closeImage(sourceBinMip);
-                    closeImage(sourceMaskMip);
                 }
             }
 
@@ -2124,6 +2115,11 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                             sourceName, channelNames[p], roiLabel, null));
                     nativeResults[c] = mergeSpatialResults(nativeResults[c], result);
                 }
+            }
+        }
+        } finally {
+            if (mipCache != null) {
+                mipCache.close();
             }
         }
     }
@@ -2189,7 +2185,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     /** Cross-channel 2D analyses present in a single mode's selection. */
     private static boolean containsCrossChannel2d(Set<IntensitySpatialConfig.AnalysisKey> analyses) {
         return analyses != null
-                && (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                && (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSCORR_FAST)
+                || analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
                 || analyses.contains(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI)
                 || analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL));
     }
@@ -2330,6 +2327,70 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
     private static ImagePlus imageAt(ImagePlus[] images, int index) {
         return images == null || index < 0 || index >= images.length ? null : images[index];
+    }
+
+    private static final class CrossChannelMipCache {
+        private final ImagePlus[] raw;
+        private final ImagePlus[] binarized;
+        private final ImagePlus[] mask;
+
+        private CrossChannelMipCache(int channelCount) {
+            int size = Math.max(0, channelCount);
+            this.raw = new ImagePlus[size];
+            this.binarized = new ImagePlus[size];
+            this.mask = new ImagePlus[size];
+        }
+
+        static CrossChannelMipCache build(String[] channelNames,
+                                          int channelCount,
+                                          ImagePlus[] rawImages,
+                                          ImagePlus[] binarizedImages,
+                                          ImagePlus[] binaryMasks) {
+            CrossChannelMipCache cache = new CrossChannelMipCache(channelCount);
+            try {
+                for (int i = 0; i < channelCount; i++) {
+                    ImagePlus rawImage = imageAt(rawImages, i);
+                    if (rawImage == null) continue;
+                    String channelName = channelNameAt(channelNames, i);
+                    cache.raw[i] = IntensitySpatialRunner.maxIntensityProjection(
+                            rawImage, channelName + "_raw_MIP");
+                    cache.binarized[i] = IntensitySpatialRunner.maxIntensityProjection(
+                            imageAt(binarizedImages, i), channelName + "_binarized_MIP");
+                    cache.mask[i] = IntensitySpatialRunner.maxIntensityProjection(
+                            imageAt(binaryMasks, i), channelName + "_mask_MIP");
+                }
+                return cache;
+            } catch (RuntimeException ex) {
+                cache.close();
+                throw ex;
+            }
+        }
+
+        ImagePlus raw(int index) {
+            return imageAt(raw, index);
+        }
+
+        ImagePlus binarized(int index) {
+            return imageAt(binarized, index);
+        }
+
+        ImagePlus mask(int index) {
+            return imageAt(mask, index);
+        }
+
+        void close() {
+            closeImages(raw);
+            closeImages(binarized);
+            closeImages(mask);
+        }
+
+        private static String channelNameAt(String[] channelNames, int index) {
+            if (channelNames == null || index < 0 || index >= channelNames.length
+                    || channelNames[index] == null || channelNames[index].trim().isEmpty()) {
+                return "channel" + (index + 1);
+            }
+            return channelNames[index];
+        }
     }
 
     private ChannelSpatialResults measureChannelSpatial(ImagePlus raw,
@@ -3049,14 +3110,15 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             return;
         }
 
-        if (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)) {
-            addCrossMarkCoreColumns(columns, source, partner);
+        if (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSCORR_FAST)
+                || analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)) {
+            addFastCrossCorrelationColumns(columns, source, partner);
         }
         if (analyses.contains(IntensitySpatialConfig.AnalysisKey.ENTROPY_MI)) {
             addEntropyMiColumns(columns, source, partner);
         }
         if (analyses.contains(IntensitySpatialConfig.AnalysisKey.CROSSMARK)) {
-            addCrossMarkColocColumns(columns, source, partner, sourceBinarized, partnerBinarized);
+            addCrossMarkFullColumns(columns, source, partner, sourceBinarized, partnerBinarized);
         }
         if (analyses.contains(IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL)
                 && partnerBinarized) {
@@ -3065,15 +3127,13 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
     }
 
-    private static void addCrossMarkCoreColumns(LinkedHashSet<String> columns,
-                                                String source,
-                                                String partner) {
+    private static void addFastCrossCorrelationColumns(LinkedHashSet<String> columns,
+                                                       String source,
+                                                       String partner) {
         String suffix = "_" + partner;
         columns.add(source + "_Pearson" + suffix);
         columns.add(source + "_CCFPeakDist_um" + suffix);
         columns.add(source + "_CCFPeakAmp" + suffix);
-        columns.add(source + "_MarkCorrRadius_um" + suffix);
-        columns.add(source + "_MarkCorrStrength" + suffix);
     }
 
     private static void addEntropyMiColumns(LinkedHashSet<String> columns,
@@ -3085,12 +3145,14 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         columns.add(source + "_MIPeakStrength" + suffix);
     }
 
-    private static void addCrossMarkColocColumns(LinkedHashSet<String> columns,
-                                                 String source,
-                                                 String partner,
-                                                 boolean sourceBinarized,
-                                                 boolean partnerBinarized) {
+    private static void addCrossMarkFullColumns(LinkedHashSet<String> columns,
+                                                String source,
+                                                String partner,
+                                                boolean sourceBinarized,
+                                                boolean partnerBinarized) {
         String suffix = "_" + partner;
+        columns.add(source + "_MarkCorrRadius_um" + suffix);
+        columns.add(source + "_MarkCorrStrength" + suffix);
         columns.add(source + "_CostesP" + suffix);
         columns.add(source + "_CostesTa" + suffix);
         columns.add(source + "_CostesTb" + suffix);
@@ -3479,7 +3541,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     safeBinarization, likelyStackDepth);
 
             final Runnable updateSummary = new Runnable() {
-                @Override public void run() { updateSpatialWillRun(bindings); }
+                @Override public void run() {
+                    updateSpatialWillRun(bindings);
+                    updateCostesPermutationControlState(bindings);
+                }
             };
 
             javax.swing.JTabbedPane tabs = new javax.swing.JTabbedPane();
@@ -3522,7 +3587,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             bindings.textureClassCountField =
                     dialog.addNumericField("Texture class count", base.getTextureClassCount(), 0);
             bindings.permutationsField =
-                    dialog.addNumericField("Random permutations", base.getPermutations(), 0);
+                    dialog.addNumericField("Hotspot permutations", base.getPermutations(), 0);
+            addCostesPermutationSlider(dialog, bindings, base.getCostesPermutations());
             bindings.seedField =
                     dialog.addStringField("Random seed", String.valueOf(base.getSeed()), 12);
 
@@ -3714,6 +3780,89 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         int native3d = countSelectedToggles(bindings.toggles(IntensitySpatialOutputMode.NATIVE_3D));
         bindings.willRunLabel.setText("Will run:   Per-Slice " + perSlice
                 + "   -   MIP " + mip + "   -   3D " + native3d + "   metrics");
+    }
+
+    private static void addCostesPermutationSlider(PipelineDialog dialog,
+                                                   final IntensitySpatialPresetBindings bindings,
+                                                   int initialValue) {
+        final int initial = clampCostesPermutations(initialValue);
+        final javax.swing.JLabel label = new javax.swing.JLabel("Costes permutations");
+        final javax.swing.JSlider slider = new javax.swing.JSlider(0,
+                IntensitySpatialConfig.MAX_COSTES_PERMUTATIONS, initial);
+        final JTextField field = new JTextField(String.valueOf(initial), 4);
+        slider.setMajorTickSpacing(50);
+        slider.setMinorTickSpacing(10);
+        slider.setPaintTicks(true);
+        slider.setSnapToTicks(false);
+        slider.addChangeListener(e -> field.setText(String.valueOf(slider.getValue())));
+        field.addActionListener(e -> syncCostesFieldToSlider(field, slider));
+        field.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override public void focusLost(java.awt.event.FocusEvent e) {
+                syncCostesFieldToSlider(field, slider);
+            }
+        });
+
+        JPanel row = new JPanel();
+        row.setLayout(new javax.swing.BoxLayout(row, javax.swing.BoxLayout.X_AXIS));
+        row.setOpaque(false);
+        row.setAlignmentX(java.awt.Component.LEFT_ALIGNMENT);
+        row.add(label);
+        row.add(javax.swing.Box.createHorizontalStrut(8));
+        row.add(slider);
+        row.add(javax.swing.Box.createHorizontalStrut(6));
+        field.setMaximumSize(new java.awt.Dimension(52, 24));
+        row.add(field);
+        row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 32));
+
+        if (bindings != null) {
+            bindings.costesPermutationsLabel = label;
+            bindings.costesPermutationsSlider = slider;
+            bindings.costesPermutationsField = field;
+        }
+        dialog.addComponent(row);
+    }
+
+    private static void updateCostesPermutationControlState(IntensitySpatialPresetBindings bindings) {
+        if (bindings == null) return;
+        boolean enabled = hasSelectedFullCrossMark(bindings);
+        if (bindings.costesPermutationsLabel != null) {
+            bindings.costesPermutationsLabel.setEnabled(enabled);
+        }
+        if (bindings.costesPermutationsSlider != null) {
+            bindings.costesPermutationsSlider.setEnabled(enabled);
+        }
+        if (bindings.costesPermutationsField != null) {
+            bindings.costesPermutationsField.setEnabled(enabled);
+        }
+    }
+
+    private static boolean hasSelectedFullCrossMark(IntensitySpatialPresetBindings bindings) {
+        return isSelectedInMode(bindings, IntensitySpatialOutputMode.BASE,
+                IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                || isSelectedInMode(bindings, IntensitySpatialOutputMode.MIP,
+                IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                || isSelectedInMode(bindings, IntensitySpatialOutputMode.NATIVE_3D,
+                IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D);
+    }
+
+    private static boolean isSelectedInMode(IntensitySpatialPresetBindings bindings,
+                                            IntensitySpatialOutputMode mode,
+                                            IntensitySpatialConfig.AnalysisKey key) {
+        if (bindings == null || mode == null || key == null) return false;
+        ToggleSwitch toggle = bindings.toggles(mode).get(key);
+        return toggle != null && toggle.isEnabled() && toggle.isSelected();
+    }
+
+    private static void syncCostesFieldToSlider(JTextField field, javax.swing.JSlider slider) {
+        if (field == null || slider == null) return;
+        int value = clampCostesPermutations(nonNegativeIntOrDefault(doubleFieldValue(field),
+                IntensitySpatialConfig.DEFAULT_COSTES_PERMUTATIONS));
+        slider.setValue(value);
+        field.setText(String.valueOf(value));
+    }
+
+    private static int clampCostesPermutations(int value) {
+        return Math.max(0, Math.min(IntensitySpatialConfig.MAX_COSTES_PERMUTATIONS, value));
     }
 
     private static int countSelectedToggles(Map<IntensitySpatialConfig.AnalysisKey, ToggleSwitch> map) {
@@ -3919,8 +4068,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     numericText(validated.getTextureClassCount(), 0));
             setFieldText(bindings.permutationsField,
                     numericText(validated.getPermutations(), 0));
+            setCostesPermutationControlValue(bindings, validated.getCostesPermutations());
             setFieldText(bindings.seedField, String.valueOf(validated.getSeed()));
             updateSpatialWillRun(bindings);
+            updateCostesPermutationControlState(bindings);
         } finally {
             bindings.programmaticChange = false;
         }
@@ -3986,9 +4137,22 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 .permutations(nonNegativeIntFieldOrDefault(
                         bindings == null ? null : bindings.permutationsField,
                         IntensitySpatialConfig.DEFAULT_PERMUTATIONS))
+                .costesPermutations(clampCostesPermutations(nonNegativeIntFieldOrDefault(
+                        bindings == null ? null : bindings.costesPermutationsField,
+                        IntensitySpatialConfig.DEFAULT_COSTES_PERMUTATIONS)))
                 .seed(longOrDefault(fieldText(bindings == null ? null : bindings.seedField),
                         IntensitySpatialConfig.DEFAULT_SEED))
                 .build();
+    }
+
+    private static void setCostesPermutationControlValue(IntensitySpatialPresetBindings bindings,
+                                                         int value) {
+        if (bindings == null) return;
+        int clamped = clampCostesPermutations(value);
+        setFieldText(bindings.costesPermutationsField, String.valueOf(clamped));
+        if (bindings.costesPermutationsSlider != null) {
+            bindings.costesPermutationsSlider.setValue(clamped);
+        }
     }
 
     private static File projectRootForDirectory(String directory) {
@@ -4060,7 +4224,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         if (key == IntensitySpatialConfig.AnalysisKey.GLCM) return "GLCM texture";
         if (key == IntensitySpatialConfig.AnalysisKey.TEXTURECLASS) return "Texture classes";
         if (key == IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE) return "Scale divergence";
-        if (key == IntensitySpatialConfig.AnalysisKey.CROSSMARK) return "Cross-channel mark correlation";
+        if (key == IntensitySpatialConfig.AnalysisKey.CROSSCORR_FAST) return "Fast cross-channel correlation";
+        if (key == IntensitySpatialConfig.AnalysisKey.CROSSMARK) return "Full CrossMark / Coloc2";
         if (key == IntensitySpatialConfig.AnalysisKey.ENTROPY_MI) return "Cross-channel mutual information";
         if (key == IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL) return "Distance shells around binarised partner";
         if (key == IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D) return "Native 3D anisotropy";

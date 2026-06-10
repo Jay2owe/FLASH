@@ -13,10 +13,12 @@ import org.junit.After;
 import org.junit.Test;
 
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 
@@ -93,6 +95,27 @@ public class CrossMark2DAnalysisTest {
     }
 
     @Test
+    public void separateCostesPermutationsControlSkipsCostesWithoutChangingHotspotPermutations() throws Exception {
+        installDependencyStatuses(null);
+        IntensitySpatialConfig noCostesRandomization = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK)
+                .permutations(9)
+                .costesPermutations(0)
+                .build();
+        ImagePlus source = gradientImage(32, 32, false);
+        ImagePlus partner = gradientImage(32, 32, false);
+
+        IntensitySpatialResult result = new CrossMark2DAnalysis().measure(context(noCostesRandomization,
+                source, null, null, partner, null, null));
+
+        assertTrue(noCostesRandomization.getPermutations() == 9);
+        assertTrue(noCostesRandomization.getCostesPermutations() == 0);
+        assertTrue(Double.isNaN(result.value("DAPI_CostesP_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_MandersM1_mCherry")));
+    }
+
+    @Test
     public void largeColocPlaneSkipsColocCopiesButKeepsDirectSpatialMetrics() throws Exception {
         installDependencyStatuses(null);
         System.setProperty(SpatialResourceGuards.MAX_COLOC_IMAGE_PIXELS_PROPERTY, "4");
@@ -107,6 +130,81 @@ public class CrossMark2DAnalysisTest {
         assertTrue(Double.isNaN(result.value("DAPI_MandersM1_mCherry")));
         assertTrue(Double.isFinite(result.value("DAPI_CCFPeakAmp_mCherry")));
         assertTrue(Double.isFinite(result.value("DAPI_MarkCorrStrength_mCherry")));
+    }
+
+    @Test
+    public void fastCrossCorrelationDoesNotRequireColoc2OrEmitFullCrossmarkColumns() throws Exception {
+        installDependencyStatuses(DependencyId.COLOC2_RUNTIME);
+        IntensitySpatialConfig fastOnly = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSCORR_FAST,
+                        IntensitySpatialOutputMode.BASE)
+                .build();
+        ImagePlus source = gradientImage(32, 32, false);
+        ImagePlus partner = gradientImage(32, 32, false);
+
+        IntensitySpatialResult result = IntensitySpatialRunner.standard().measurePair(
+                context(fastOnly, source, null, null, partner, null, null));
+
+        assertTrue(Double.isFinite(result.value("DAPI_Pearson_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_CCFPeakAmp_mCherry")));
+        assertFalse(result.values().containsKey("DAPI_MarkCorrStrength_mCherry"));
+        assertFalse(result.values().containsKey("DAPI_MandersM1_mCherry"));
+    }
+
+    @Test
+    public void fastCrossCorrelationBytecodeDoesNotReferenceFullCrossmarkOrColoc2() throws Exception {
+        assertClassFileDoesNotReference(FastCrossCorrelation2DAnalysis.class,
+                "CrossMark2DAnalysis", "sc/fiji/coloc");
+        assertClassFileDoesNotReference(FastCrossCorrelation2DCore.class,
+                "CrossMark2DAnalysis", "sc/fiji/coloc");
+    }
+
+    @Test
+    public void combinedFastAndFullCrossmarkKeepFastPearsonWhenColoc2Unavailable() throws Exception {
+        installDependencyStatuses(DependencyId.COLOC2_RUNTIME);
+        IntensitySpatialConfig combined = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSCORR_FAST,
+                        IntensitySpatialOutputMode.BASE)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK,
+                        IntensitySpatialOutputMode.BASE)
+                .build();
+        ImagePlus source = gradientImage(32, 32, false);
+        ImagePlus partner = gradientImage(32, 32, false);
+
+        IntensitySpatialResult result = IntensitySpatialRunner.standard().measurePair(
+                context(combined, source, null, null, partner, null, null));
+
+        assertTrue(Double.isFinite(result.value("DAPI_Pearson_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_CCFPeakAmp_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_MarkCorrStrength_mCherry")));
+        assertTrue(Double.isNaN(result.value("DAPI_MandersM1_mCherry")));
+    }
+
+    @Test
+    public void fastCrossCorrelationStillRunsWhenFullCrossmarkIsSelectedButNotRegistered() throws Exception {
+        installDependencyStatuses(null);
+        IntensitySpatialConfig combined = IntensitySpatialConfig.builder()
+                .enabled(true)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSCORR_FAST,
+                        IntensitySpatialOutputMode.BASE)
+                .addAnalysis(IntensitySpatialConfig.AnalysisKey.CROSSMARK,
+                        IntensitySpatialOutputMode.BASE)
+                .build();
+        ImagePlus source = gradientImage(32, 32, false);
+        ImagePlus partner = gradientImage(32, 32, false);
+        IntensitySpatialRunner fastOnlyRunner = new IntensitySpatialRunner(
+                Collections.<IntensitySpatialAnalysis>emptyList(),
+                Collections.<IntensitySpatialPairAnalysis>singletonList(
+                        new FastCrossCorrelation2DAnalysis()));
+
+        IntensitySpatialResult result = fastOnlyRunner.measurePair(
+                context(combined, source, null, null, partner, null, null));
+
+        assertTrue(Double.isFinite(result.value("DAPI_Pearson_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_CCFPeakAmp_mCherry")));
+        assertFalse(result.values().containsKey("DAPI_MarkCorrStrength_mCherry"));
     }
 
     @Test
@@ -137,7 +235,7 @@ public class CrossMark2DAnalysisTest {
         IntensitySpatialResult result = IntensitySpatialRunner.standard().measurePair(context(
                 source, null, null, partner, null, null));
 
-        assertTrue(Double.isNaN(result.value("DAPI_Pearson_mCherry")));
+        assertTrue(Double.isFinite(result.value("DAPI_Pearson_mCherry")));
         assertTrue(Double.isNaN(result.value("DAPI_MandersM1_mCherry")));
         assertTrue(Double.isFinite(result.value("DAPI_CCFPeakAmp_mCherry")));
         assertTrue(Double.isFinite(result.value("DAPI_MarkCorrStrength_mCherry")));
@@ -269,6 +367,30 @@ public class CrossMark2DAnalysisTest {
             System.setOut(originalOut);
         }
         return out.toString(StandardCharsets.UTF_8.name()) + (ijLog == null ? "" : ijLog);
+    }
+
+    private static void assertClassFileDoesNotReference(Class<?> type, String... references) throws Exception {
+        String classText = new String(classBytes(type), StandardCharsets.ISO_8859_1);
+        for (String reference : references) {
+            assertFalse(type.getSimpleName() + " should not reference " + reference,
+                    classText.contains(reference));
+        }
+    }
+
+    private static byte[] classBytes(Class<?> type) throws Exception {
+        InputStream in = type.getResourceAsStream(type.getSimpleName() + ".class");
+        assertTrue("Missing class resource for " + type.getName(), in != null);
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
+        } finally {
+            in.close();
+        }
     }
 
     private interface ThrowingRunnable {
