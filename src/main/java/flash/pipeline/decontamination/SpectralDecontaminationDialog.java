@@ -7,6 +7,7 @@ import flash.pipeline.decontamination.wizard.SpectralDecontaminationSetup;
 import flash.pipeline.runrecord.LoadedRunParameterApplier;
 import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import ij.IJ;
 
@@ -82,6 +83,7 @@ public class SpectralDecontaminationDialog {
         dialog.addMessage("Controls and experimental conditions are grouped separately. "
                 + "Use Back to adjust the correction stack before continuing.");
         dialog.addComponent(new SpectralPreviewPanel(previews));
+        dialog.setPrimaryButtonText(NextStepLabels.RUN_SPECTRAL_BATCH);
 
         if (!dialog.showDialog()) {
             return dialog.wasBackPressed() ? PreviewDecision.BACK : PreviewDecision.CANCEL;
@@ -140,6 +142,7 @@ public class SpectralDecontaminationDialog {
         for (int i = 0; i < binConfig.numChannels(); i++) {
             dialog.addToggle(channelLabel(i), config.getExcludedChannelIndexes().contains(Integer.valueOf(i)));
         }
+        dialog.setPrimaryButtonText(NextStepLabels.CONDITION_SOURCE);
 
         if (!dialog.showDialog()) {
             if ("loaded_run".equals(dialog.getActionCommand()) && loadedFromRun[0] != null) {

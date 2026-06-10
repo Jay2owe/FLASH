@@ -21,6 +21,7 @@ import flash.pipeline.runrecord.ParameterSnapshot;
 import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceRange;
@@ -487,6 +488,13 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                                 featureChoices,
                                 featureHelps,
                                 summaryLabel);
+                        CorrectionPipeline previewPipeline = buildPipelineFromSelections(
+                                registry,
+                                expertToggle.isSelected(),
+                                (String) presetChoice.getSelectedItem(),
+                                featureChoices);
+                        dialog.setPrimaryButtonText(
+                                nextLabelAfterSpectralFeatureStack(previewPipeline));
                     } finally {
                         updating[0] = false;
                     }
@@ -687,6 +695,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
             dialog.addNumericField("Threshold grid step", defaults.getThresholdStep(), 2);
             dialog.addNumericField("Ratio target minimum", defaults.getTargetMinThreshold(), 2);
             dialog.addHelpText("Ratio target minimum is only used by the target-to-contaminant ratio metric.");
+            dialog.setPrimaryButtonText(NextStepLabels.SPECTRAL_PREVIEW);
 
             if (!dialog.showDialog()) {
                 if (dialog.wasBackPressed()) {
@@ -760,6 +769,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
             dialog.addNumericField("Minimum bleed fit pixels", defaults.getMinBleedFitPixels(), 0);
             dialog.addToggle("Write local coefficient maps", defaults.isWriteParameterMaps());
             dialog.addHelpText("Leave coefficient maps off unless you need per-pixel troubleshooting images.");
+            dialog.setPrimaryButtonText(nextLabelAfterSpectralFullForwardModel(config));
 
             if (!dialog.showDialog()) {
                 if (dialog.wasBackPressed()) {
@@ -831,6 +841,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
             dialog.addNumericField("Envelope percentile", defaults.getEnvelopePercentile(), 1);
             dialog.addNumericField("Envelope bin count", defaults.getBinCount(), 0);
             dialog.addNumericField("Minimum pixels per bin", defaults.getMinBinPixels(), 0);
+            dialog.setPrimaryButtonText(nextLabelAfterSpectralEnvelope(config));
 
             if (!dialog.showDialog()) {
                 if (dialog.wasBackPressed()) {
@@ -1718,6 +1729,31 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         return config.getCorrectionPipeline().getFeatureIds().contains(featureId);
     }
 
+    private String nextLabelAfterSpectralFeatureStack(CorrectionPipeline pipeline) {
+        return NextStepLabels.afterSpectralFeatureStack(
+                containsFeature(pipeline, FullForwardModelFeature.ID),
+                containsFeature(pipeline, EnvelopeCorrectionFeature.ID),
+                containsFeature(pipeline, RocThresholdSearchFeature.ID));
+    }
+
+    private String nextLabelAfterSpectralFullForwardModel(SpectralDecontaminationConfig config) {
+        return NextStepLabels.afterSpectralFullForwardModel(
+                containsFeature(config, EnvelopeCorrectionFeature.ID),
+                containsFeature(config, RocThresholdSearchFeature.ID));
+    }
+
+    private String nextLabelAfterSpectralEnvelope(SpectralDecontaminationConfig config) {
+        return NextStepLabels.afterSpectralEnvelope(
+                containsFeature(config, RocThresholdSearchFeature.ID));
+    }
+
+    private static boolean containsFeature(CorrectionPipeline pipeline, String featureId) {
+        if (pipeline == null || featureId == null) {
+            return false;
+        }
+        return pipeline.getFeatureIds().contains(featureId);
+    }
+
     private CorrectionPipeline prefixBeforeRocThresholdSearch(CorrectionPipeline pipeline) {
         if (pipeline == null) {
             return CorrectionPipeline.empty();
@@ -2289,12 +2325,32 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         dialog.addHeader("Conditions");
         dialog.addMessage("Choose how Spectral Decontamination should assign images to experimental conditions.");
         String defaultLabel = config.getConditionSource().getLabel();
-        if (ConditionManifestIO.getExistingFile(directory) == null
+        final boolean existingConditionFileAvailable =
+                ConditionManifestIO.getExistingFile(directory) != null;
+        if (!existingConditionFileAvailable
                 && config.getConditionSource()
                 == SpectralDecontaminationConfig.ConditionSource.USE_EXISTING_CONDITION_FILE) {
             defaultLabel = SpectralDecontaminationConfig.ConditionSource.INFER_FROM_IMAGE_NAMES.getLabel();
         }
-        dialog.addChoice("Condition source", SpectralDecontaminationConfig.ConditionSource.labels(), defaultLabel);
+        final JComboBox<String> sourceChoice = dialog.addChoice(
+                "Condition source",
+                SpectralDecontaminationConfig.ConditionSource.labels(),
+                defaultLabel);
+        final Runnable refreshPrimaryLabel = new Runnable() {
+            @Override public void run() {
+                SpectralDecontaminationConfig.ConditionSource selected =
+                        SpectralDecontaminationConfig.ConditionSource.fromLabel(
+                                sourceChoice.getSelectedItem() == null
+                                        ? null
+                                        : sourceChoice.getSelectedItem().toString());
+                dialog.setPrimaryButtonText(NextStepLabels.afterSpectralConditionSource(
+                        selected == SpectralDecontaminationConfig.ConditionSource.ASSIGN_MANUALLY,
+                        selected == SpectralDecontaminationConfig.ConditionSource.USE_EXISTING_CONDITION_FILE,
+                        existingConditionFileAvailable));
+            }
+        };
+        sourceChoice.addActionListener(e -> refreshPrimaryLabel.run());
+        refreshPrimaryLabel.run();
         if (!dialog.showDialog()) return null;
         return SpectralDecontaminationConfig.ConditionSource.fromLabel(dialog.getNextChoice());
     }
@@ -2323,6 +2379,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         for (String animal : animals) {
             dialog.addStringField(animal, defaults.get(animal), 18);
         }
+        dialog.setPrimaryButtonText(NextStepLabels.CONDITION_ROLES);
         if (!dialog.showDialog()) return null;
 
         LinkedHashMap<String, String> assignments = new LinkedHashMap<String, String>();
@@ -2363,6 +2420,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
             for (String condition : conditions) {
                 dialog.addToggle(condition, defaultExperimentals.contains(condition));
             }
+            dialog.setPrimaryButtonText(NextStepLabels.CORRECTION_STACK);
             if (!dialog.showDialog()) return null;
 
             List<String> controls = readConditionToggles(dialog, conditions);
