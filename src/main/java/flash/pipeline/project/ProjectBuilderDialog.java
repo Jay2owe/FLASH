@@ -1,5 +1,6 @@
 package flash.pipeline.project;
 
+import flash.pipeline.intelligence.identity.Confidence;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
@@ -39,6 +40,7 @@ import javax.swing.event.TableModelListener;
 import javax.swing.filechooser.FileFilter;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellEditor;
+import javax.swing.table.TableCellRenderer;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -105,6 +107,7 @@ public final class ProjectBuilderDialog {
     private final JTextField outputRootField;
     private final ProjectManifestTableModel model;
     private final JTable table;
+    private JLabel reviewSummary;
     private final File pluginsDir;
     private final ExecutorService probeExecutor =
             Executors.newSingleThreadExecutor(r -> {
@@ -136,7 +139,22 @@ public final class ProjectBuilderDialog {
         }
         content.add(buildHeader(), BorderLayout.NORTH);
 
-        table = new JTable(model);
+        table = new JTable(model) {
+            @Override
+            public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
+                Component c = super.prepareRenderer(renderer, row, column);
+                applyConfidenceCue(c, row, column);
+                return c;
+            }
+
+            @Override
+            public String getToolTipText(MouseEvent event) {
+                int row = rowAtPoint(event.getPoint());
+                int column = columnAtPoint(event.getPoint());
+                String tip = confidenceTooltip(row, column);
+                return tip != null ? tip : super.getToolTipText(event);
+            }
+        };
         table.setAutoCreateRowSorter(false);
         table.setFillsViewportHeight(true);
         table.setRowHeight(22);
@@ -164,6 +182,12 @@ public final class ProjectBuilderDialog {
         if (suggestedSourceFolder != null) {
             loadExistingProjectIfPresent(suggestedSourceFolder, false);
         }
+        model.addTableModelListener(new TableModelListener() {
+            @Override public void tableChanged(TableModelEvent e) {
+                refreshReviewSummary();
+            }
+        });
+        refreshReviewSummary();
         dialog.pack();
         dialog.setMinimumSize(new Dimension(720, 480));
         dialog.setLocationRelativeTo(owner);
@@ -288,12 +312,26 @@ public final class ProjectBuilderDialog {
             }
         });
 
+        JButton reviewNext = new JButton("Review next");
+        reviewNext.setToolTipText("Jump to the next row with a low-confidence auto-detected value.");
+        reviewNext.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                jumpToNextLowConfidence();
+            }
+        });
+
+        reviewSummary = new JLabel("");
+        reviewSummary.setForeground(FlashTheme.TEXT_MUTED);
+
         bar.add(addFolder);
         bar.add(addFiles);
         bar.add(openProject);
         bar.add(openRecent);
         bar.add(Box.createHorizontalStrut(12));
         bar.add(remove);
+        bar.add(Box.createHorizontalStrut(12));
+        bar.add(reviewNext);
+        bar.add(reviewSummary);
         return bar;
     }
 
@@ -423,6 +461,107 @@ public final class ProjectBuilderDialog {
             }
             return this;
         }
+    }
+
+    // ── Stage 09: confidence cue (tint + glyph) + provenance tooltip ────────
+
+    private boolean isDetectableColumn(int column) {
+        return column == ProjectManifestTableModel.COL_ANIMAL
+                || column == ProjectManifestTableModel.COL_HEMISPHERE
+                || column == ProjectManifestTableModel.COL_REGION
+                || model.isConditionColumn(column);
+    }
+
+    /** Tint + glyph an identity cell by its auto-detection confidence; neutral for user-set / undetected. */
+    private void applyConfidenceCue(Component c, int row, int column) {
+        if (row < 0 || column < 0 || row >= model.getRowCount()) return;
+        if (table.isRowSelected(row)) return;            // keep selection highlight
+        boolean detected = isDetectableColumn(column)
+                && !model.isUserSet(row, column)
+                && !model.provenanceAt(row, column).isEmpty();
+        if (!detected) {
+            c.setBackground(table.getBackground());
+            return;
+        }
+        Confidence confidence = model.confidenceAt(row, column);
+        Color tint = confidenceColor(confidence);
+        c.setBackground(tint != null ? tint : table.getBackground());
+        if (c instanceof JLabel) {
+            JLabel label = (JLabel) c;
+            String glyph = confidenceGlyph(confidence);
+            String text = label.getText();
+            if (!glyph.isEmpty() && text != null && !text.isEmpty()) {
+                label.setText(glyph + "  " + text);
+            }
+        }
+    }
+
+    private static Color confidenceColor(Confidence confidence) {
+        if (confidence == null) return null;
+        switch (confidence) {
+            case HIGH:   return FlashTheme.PRIMARY_BG;
+            case MEDIUM: return FlashTheme.WARNING_BG;
+            case LOW:
+            case NONE:   return FlashTheme.SURFACE_MUTED;
+            default:     return null;
+        }
+    }
+
+    private static String confidenceGlyph(Confidence confidence) {
+        if (confidence == null) return "";
+        switch (confidence) {
+            case HIGH:   return "✓";   // check
+            case MEDIUM: return "•";   // bullet
+            case LOW:
+            case NONE:   return "?";
+            default:     return "";
+        }
+    }
+
+    private String confidenceTooltip(int row, int column) {
+        if (row < 0 || column < 0 || row >= model.getRowCount()) return null;
+        if (!isDetectableColumn(column)) return null;
+        if (model.isUserSet(row, column)) return "Set by you";
+        String provenance = model.provenanceAt(row, column);
+        if (provenance == null || provenance.isEmpty()) return null;
+        Confidence confidence = model.confidenceAt(row, column);
+        return "<html>" + escapeHtml(provenance) + "<br/><i>confidence: "
+                + (confidence == null ? "none" : confidence.name().toLowerCase(Locale.ROOT))
+                + "</i></html>";
+    }
+
+    private static String escapeHtml(String s) {
+        return s == null ? "" : s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private int lastReviewedRow = -1;
+
+    /** Select the next low/none-confidence row that still needs review (wraps around). */
+    private void jumpToNextLowConfidence() {
+        int next = model.nextLowConfidenceRow(lastReviewedRow);
+        if (next < 0) next = model.nextLowConfidenceRow(-1);   // wrap to top
+        if (next < 0) {
+            JOptionPane.showMessageDialog(dialog,
+                    "No rows need review — every detected identity is high-confidence or confirmed.",
+                    "Review", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        lastReviewedRow = next;
+        table.getSelectionModel().setSelectionInterval(next, next);
+        table.scrollRectToVisible(table.getCellRect(next, 0, true));
+    }
+
+    private void refreshReviewSummary() {
+        if (reviewSummary == null) return;
+        int total = model.getRowCount();
+        if (total == 0) {
+            reviewSummary.setText("");
+            return;
+        }
+        int high = model.highConfidenceRowCount();
+        int needReview = total - high;
+        reviewSummary.setText(high + "/" + total + " high-confidence"
+                + (needReview > 0 ? "; " + needReview + " need review" : ""));
     }
 
     // ── Context menu / DnD / series shortcut ───────────────────────────────

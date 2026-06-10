@@ -1,5 +1,8 @@
 package flash.pipeline.project;
 
+import flash.pipeline.intelligence.identity.Confidence;
+import flash.pipeline.intelligence.identity.FieldValue;
+import flash.pipeline.intelligence.identity.IdentityCandidate;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.naming.ConditionNameParser;
@@ -65,6 +68,18 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     /** Ordered condition-axis schema (multi-condition). Empty = single implicit "Condition". */
     private final List<ConditionAxis> conditionAxes = new ArrayList<ConditionAxis>();
 
+    /**
+     * Per-cell detection metadata: the auto-detection {@link Confidence}, a
+     * human-readable {@link #provenance}, and whether the user has confirmed the
+     * value ({@link #userSet}). User-set cells render neutral and are never
+     * overwritten by auto-fill (resolver / inference / fill-down across animals).
+     */
+    public static final class CellMeta {
+        public Confidence confidence = Confidence.NONE;
+        public String provenance = "";
+        public boolean userSet = false;
+    }
+
     /** Index/name pair used to populate a file's per-series rows. */
     public static final class SeriesEntry {
         public final int index;
@@ -87,6 +102,8 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         public String condition = "";
         /** Extra condition axes beyond the primary (axisId -&gt; value). */
         public final Map<String, String> conditions = new LinkedHashMap<String, String>();
+        /** Per-field detection metadata (fieldId -&gt; {@link CellMeta}). */
+        public final Map<String, CellMeta> meta = new LinkedHashMap<String, CellMeta>();
         public String notes = "";
 
         SeriesRow(int index) {
@@ -115,6 +132,8 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         public String condition = "";
         /** Extra condition axes beyond the primary (axisId -&gt; value). */
         public final Map<String, String> conditions = new LinkedHashMap<String, String>();
+        /** Per-field detection metadata (fieldId -&gt; {@link CellMeta}). */
+        public final Map<String, CellMeta> meta = new LinkedHashMap<String, CellMeta>();
         public String notes = "";
 
         Row(File source) {
@@ -502,6 +521,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             if (series != null) {
                 if (primary) series.condition = v;
                 else putOrRemove(series.conditions, norm, v);
+                touchUserSet(series.meta, norm);
             } else {
                 Row row = rows.get(fileIndexAt(idx));
                 if (isContainerSource(row.source)) continue;
@@ -512,6 +532,8 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                     putOrRemove(row.conditions, norm, v);
                     for (SeriesRow s : row.series) putOrRemove(s.conditions, norm, v);
                 }
+                touchUserSet(row.meta, norm);
+                for (SeriesRow s : row.series) touchUserSet(s.meta, norm);
             }
             if (conditionColumn >= 0) {
                 fireTableCellUpdated(idx, conditionColumn);
@@ -536,14 +558,20 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         String v = value == null ? "" : value;
         for (int idx : rowIndexes) {
             if (idx < 0 || idx >= visible.size()) continue;
+            String fid = fieldIdForColumn(column);
             SeriesRow series = seriesRowAt(idx);
             if (series != null) {
                 setSeriesValue(series, v, column);
+                touchUserSet(series.meta, fid);
             } else {
                 Row row = rows.get(fileIndexAt(idx));
                 if (isContainerSource(row.source)) continue;
                 setRowIdentity(row, column, v);
-                for (SeriesRow s : row.series) setSeriesValue(s, v, column);
+                touchUserSet(row.meta, fid);
+                for (SeriesRow s : row.series) {
+                    setSeriesValue(s, v, column);
+                    touchUserSet(s.meta, fid);
+                }
             }
             fireTableCellUpdated(idx, column);
         }
@@ -556,6 +584,181 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             case COL_REGION:     row.region = value; break;
             default:             break;
         }
+    }
+
+    // ── Per-cell detection metadata: confidence / provenance / user-set ─────
+
+    /** Field id used to key {@link CellMeta} for a column, or {@code null} for non-identity columns. */
+    private String fieldIdForColumn(int column) {
+        if (column == COL_ANIMAL) return "animal";
+        if (column == COL_HEMISPHERE) return "hemisphere";
+        if (column == COL_REGION) return "region";
+        if (isConditionColumn(column)) {
+            ConditionAxis axis = conditionAxisAtColumn(column);
+            return axis == null ? null : axis.id;
+        }
+        return null;
+    }
+
+    private Map<String, CellMeta> metaMapAt(int rowIndex) {
+        SeriesRow s = seriesRowAt(rowIndex);
+        if (s != null) return s.meta;
+        return rows.get(fileIndexAt(rowIndex)).meta;
+    }
+
+    private static CellMeta metaFor(Map<String, CellMeta> metaMap, String fieldId) {
+        CellMeta m = metaMap.get(fieldId);
+        if (m == null) {
+            m = new CellMeta();
+            metaMap.put(fieldId, m);
+        }
+        return m;
+    }
+
+    private static boolean markedUserSet(Map<String, CellMeta> metaMap, String fieldId) {
+        if (fieldId == null) return false;
+        CellMeta m = metaMap.get(fieldId);
+        return m != null && m.userSet;
+    }
+
+    /** Flag a field as user-confirmed: neutral confidence, never auto-overwritten. */
+    private static void touchUserSet(Map<String, CellMeta> metaMap, String fieldId) {
+        if (fieldId == null) return;
+        CellMeta m = metaFor(metaMap, fieldId);
+        m.userSet = true;
+        m.confidence = Confidence.NONE;
+        m.provenance = "set by you";
+    }
+
+    private static void stampAuto(Map<String, CellMeta> metaMap, String fieldId,
+                                  Confidence confidence, String provenance) {
+        if (fieldId == null) return;
+        CellMeta m = metaFor(metaMap, fieldId);
+        m.confidence = confidence == null ? Confidence.NONE : confidence;
+        m.provenance = provenance == null ? "" : provenance;
+        m.userSet = false;
+    }
+
+    /** Auto-detection confidence for a rendered cell ({@link Confidence#NONE} if none / user-set). */
+    public Confidence confidenceAt(int rowIndex, int column) {
+        if (rowIndex < 0 || rowIndex >= visible.size()) return Confidence.NONE;
+        String fid = fieldIdForColumn(column);
+        if (fid == null) return Confidence.NONE;
+        CellMeta m = metaMapAt(rowIndex).get(fid);
+        return m == null ? Confidence.NONE : m.confidence;
+    }
+
+    /** Human-readable provenance for a rendered cell (e.g. for a tooltip); {@code ""} if none. */
+    public String provenanceAt(int rowIndex, int column) {
+        if (rowIndex < 0 || rowIndex >= visible.size()) return "";
+        String fid = fieldIdForColumn(column);
+        if (fid == null) return "";
+        CellMeta m = metaMapAt(rowIndex).get(fid);
+        return m == null ? "" : nullToEmpty(m.provenance);
+    }
+
+    public boolean isUserSet(int rowIndex, int column) {
+        if (rowIndex < 0 || rowIndex >= visible.size()) return false;
+        String fid = fieldIdForColumn(column);
+        if (fid == null) return false;
+        CellMeta m = metaMapAt(rowIndex).get(fid);
+        return m != null && m.userSet;
+    }
+
+    /** Mark a rendered cell as user-confirmed (called when the user edits it). */
+    public void markUserSet(int rowIndex, int column) {
+        if (rowIndex < 0 || rowIndex >= visible.size()) return;
+        touchUserSet(metaMapAt(rowIndex), fieldIdForColumn(column));
+    }
+
+    /**
+     * Apply an auto-detected value + its confidence/provenance to a rendered
+     * cell, UNLESS the cell is user-set (then it is left untouched). File-level
+     * edits cascade to the file's series rows (also respecting their user-set
+     * flags). Used by resolver wiring and inference presets.
+     */
+    public void setAutoValue(int rowIndex, int column, String value,
+                             Confidence confidence, String provenance) {
+        if (rowIndex < 0 || rowIndex >= visible.size()) return;
+        String fid = fieldIdForColumn(column);
+        if (fid == null) return;
+        String v = value == null ? "" : value;
+        SeriesRow series = seriesRowAt(rowIndex);
+        if (series != null) {
+            if (markedUserSet(series.meta, fid)) return;
+            setSeriesValue(series, v, column);
+            stampAuto(series.meta, fid, confidence, provenance);
+        } else {
+            Row row = rows.get(fileIndexAt(rowIndex));
+            if (isContainerSource(row.source) && isIdentityColumn(column)) return;
+            if (markedUserSet(row.meta, fid)) return;
+            if (isConditionColumn(column)) {
+                setConditionValue(row, column, v);
+            } else {
+                setRowIdentity(row, column, v);
+            }
+            stampAuto(row.meta, fid, confidence, provenance);
+            for (SeriesRow s : row.series) {
+                if (markedUserSet(s.meta, fid)) continue;
+                setSeriesValue(s, v, column);
+                stampAuto(s.meta, fid, confidence, provenance);
+            }
+        }
+        fireTableCellUpdated(rowIndex, column);
+    }
+
+    /**
+     * Populate a rendered row's values + confidence/provenance grid from a
+     * resolver {@link IdentityCandidate}. Blank fields and condition axes not in
+     * the current schema are skipped; user-set cells are never overwritten.
+     */
+    public void applyResolved(int rowIndex, IdentityCandidate candidate) {
+        if (candidate == null) return;
+        applyFieldValue(rowIndex, COL_ANIMAL, candidate.getAnimal());
+        applyFieldValue(rowIndex, COL_HEMISPHERE, candidate.getHemisphere());
+        applyFieldValue(rowIndex, COL_REGION, candidate.getRegion());
+        for (Map.Entry<String, FieldValue> e : candidate.conditions().entrySet()) {
+            int col = conditionColumnForAxis(e.getKey());
+            if (col >= 0) applyFieldValue(rowIndex, col, e.getValue());
+        }
+    }
+
+    private void applyFieldValue(int rowIndex, int column, FieldValue fv) {
+        if (fv == null || fv.isBlank()) return;
+        setAutoValue(rowIndex, column, fv.value, fv.confidence, fv.provenance);
+    }
+
+    /** Index of the next rendered row (from {@code after}) with a low/none-confidence identity cell, or -1. */
+    public int nextLowConfidenceRow(int after) {
+        for (int idx = Math.max(0, after + 1); idx < visible.size(); idx++) {
+            if (rowHasLowConfidence(idx)) return idx;
+        }
+        return -1;
+    }
+
+    private boolean rowHasLowConfidence(int rowIndex) {
+        int end = notesColumn();
+        for (int c = COL_ANIMAL; c < end; c++) {
+            String fid = fieldIdForColumn(c);
+            if (fid == null) continue;
+            CellMeta m = metaMapAt(rowIndex).get(fid);
+            if (m == null || m.userSet) continue;            // unflagged / confirmed -> not "needs review"
+            if (m.confidence == Confidence.LOW || m.confidence == Confidence.NONE) {
+                // only count cells that actually carry an auto value worth reviewing
+                Object v = getValueAt(rowIndex, c);
+                if (v != null && !v.toString().trim().isEmpty()) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Count of rendered rows whose every auto-detected identity cell is HIGH confidence or user-set. */
+    public int highConfidenceRowCount() {
+        int high = 0;
+        for (int idx = 0; idx < visible.size(); idx++) {
+            if (!rowHasLowConfidence(idx)) high++;
+        }
+        return high;
     }
 
     /** Complete axis-&gt;value map for persistence; empty for single-axis projects. */
@@ -927,6 +1130,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         SeriesRow series = seriesRowAt(rowIndex);
         if (series != null) {
             setSeriesValue(series, value, columnIndex);
+            touchUserSet(series.meta, fieldIdForColumn(columnIndex));
             fireTableCellUpdated(rowIndex, columnIndex);
             // Series include changes alter the parent's "M of N" summary.
             if (columnIndex == COL_INCLUDE) {
@@ -969,6 +1173,11 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 default:
                     return;
             }
+        }
+        String editedField = fieldIdForColumn(columnIndex);
+        if (editedField != null) {
+            touchUserSet(row.meta, editedField);
+            if (cascade) for (SeriesRow s : row.series) touchUserSet(s.meta, editedField);
         }
         if (cascade && columnIndex != COL_INCLUDE && row.expanded) {
             // Refresh the now-cascaded series rows beneath this file.
