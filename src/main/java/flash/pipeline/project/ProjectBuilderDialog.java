@@ -5,6 +5,8 @@ import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.LifIO;
 import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.ConditionAssignments;
+import flash.pipeline.naming.ConditionAxis;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.wizard.RegionTableCellEditor;
 import ij.IJ;
@@ -13,6 +15,8 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JComboBox;
+import javax.swing.DefaultCellEditor;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JList;
@@ -30,6 +34,8 @@ import javax.swing.SwingWorker;
 import javax.swing.TransferHandler;
 import javax.swing.ListSelectionModel;
 import javax.swing.WindowConstants;
+import javax.swing.event.TableModelEvent;
+import javax.swing.event.TableModelListener;
 import javax.swing.filechooser.FileFilter;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellEditor;
@@ -39,6 +45,7 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.GridLayout;
 import java.awt.Window;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
@@ -52,8 +59,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -133,6 +142,7 @@ public final class ProjectBuilderDialog {
         table.setRowHeight(22);
         table.getTableHeader().setReorderingAllowed(false);
         applyColumnPreferences();
+        attachTableStructureRefresh();
         attachContextMenu();
         attachDragAndDrop();
         attachExpansionClick();
@@ -317,14 +327,81 @@ public final class ProjectBuilderDialog {
     }
 
     private void applyColumnPreferences() {
-        int[] widths = {60, 280, 110, 110, 100, 100, 110, 160};
-        for (int c = 0; c < widths.length && c < table.getColumnCount(); c++) {
-            table.getColumnModel().getColumn(c).setPreferredWidth(widths[c]);
+        for (int c = 0; c < table.getColumnCount(); c++) {
+            table.getColumnModel().getColumn(c).setPreferredWidth(preferredWidthForColumn(c));
         }
-        table.getColumnModel().getColumn(ProjectManifestTableModel.COL_REGION)
-                .setCellEditor(new RegionTableCellEditor());
-        table.getColumnModel().getColumn(ProjectManifestTableModel.COL_FILE)
-                .setCellRenderer(new FileColumnRenderer());
+        if (hasColumn(ProjectManifestTableModel.COL_HEMISPHERE)) {
+            installEditableCombo(ProjectManifestTableModel.COL_HEMISPHERE,
+                    choices("", "LH", "RH"));
+        }
+        if (hasColumn(ProjectManifestTableModel.COL_REGION)) {
+            table.getColumnModel().getColumn(ProjectManifestTableModel.COL_REGION)
+                    .setCellEditor(new RegionTableCellEditor());
+        }
+        for (int c = ProjectManifestTableModel.COL_CONDITION; c < model.notesColumn(); c++) {
+            ConditionAxis axis = model.conditionAxisAtColumn(c);
+            installEditableCombo(c, conditionChoices(axis));
+        }
+        if (hasColumn(ProjectManifestTableModel.COL_FILE)) {
+            table.getColumnModel().getColumn(ProjectManifestTableModel.COL_FILE)
+                    .setCellRenderer(new FileColumnRenderer());
+        }
+    }
+
+    private void attachTableStructureRefresh() {
+        model.addTableModelListener(new TableModelListener() {
+            @Override public void tableChanged(TableModelEvent e) {
+                if (e.getFirstRow() == TableModelEvent.HEADER_ROW) {
+                    SwingUtilities.invokeLater(new Runnable() {
+                        @Override public void run() {
+                            applyColumnPreferences();
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    private int preferredWidthForColumn(int column) {
+        if (column == ProjectManifestTableModel.COL_INCLUDE) return 60;
+        if (column == ProjectManifestTableModel.COL_FILE) return 280;
+        if (column == ProjectManifestTableModel.COL_SERIES) return 110;
+        if (column == ProjectManifestTableModel.COL_ANIMAL) return 110;
+        if (column == ProjectManifestTableModel.COL_HEMISPHERE) return 100;
+        if (column == ProjectManifestTableModel.COL_REGION) return 100;
+        if (model.isConditionColumn(column)) return 120;
+        if (column == model.notesColumn()) return 160;
+        return 100;
+    }
+
+    private boolean hasColumn(int column) {
+        return column >= 0 && column < table.getColumnCount();
+    }
+
+    private void installEditableCombo(int column, List<String> values) {
+        if (!hasColumn(column)) return;
+        JComboBox<String> combo = new JComboBox<String>(values.toArray(new String[values.size()]));
+        combo.setEditable(true);
+        table.getColumnModel().getColumn(column).setCellEditor(new DefaultCellEditor(combo));
+    }
+
+    private List<String> conditionChoices(ConditionAxis axis) {
+        LinkedHashSet<String> values = new LinkedHashSet<String>();
+        values.add("");
+        if (axis != null) {
+            values.addAll(model.distinctConditionValues(axis.id));
+        }
+        return new ArrayList<String>(values);
+    }
+
+    private static List<String> choices(String... values) {
+        List<String> out = new ArrayList<String>();
+        if (values != null) {
+            for (String value : values) {
+                out.add(value == null ? "" : value);
+            }
+        }
+        return out;
     }
 
     /**
@@ -352,10 +429,29 @@ public final class ProjectBuilderDialog {
 
     private void attachContextMenu() {
         final JPopupMenu menu = new JPopupMenu();
+        JMenuItem setAnimal = new JMenuItem("Set animal ID…");
+        JMenuItem setHemisphere = new JMenuItem("Set hemisphere…");
+        JMenuItem setRegion = new JMenuItem("Set region…");
         JMenuItem setCondition = new JMenuItem("Set condition…");
         final JMenuItem toggleSeries = new JMenuItem("Expand series");
         JMenuItem removeRow = new JMenuItem("Remove");
 
+        setAnimal.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                bulkSetIdentity(ProjectManifestTableModel.COL_ANIMAL, "animal ID", null);
+            }
+        });
+        setHemisphere.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                bulkSetIdentity(ProjectManifestTableModel.COL_HEMISPHERE, "hemisphere",
+                        new String[]{"", "LH", "RH"});
+            }
+        });
+        setRegion.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                bulkSetIdentity(ProjectManifestTableModel.COL_REGION, "region", null);
+            }
+        });
         setCondition.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
                 bulkSetCondition();
@@ -374,7 +470,11 @@ public final class ProjectBuilderDialog {
             }
         });
 
+        menu.add(setAnimal);
+        menu.add(setHemisphere);
+        menu.add(setRegion);
         menu.add(setCondition);
+        menu.addSeparator();
         menu.add(toggleSeries);
         menu.addSeparator();
         menu.add(removeRow);
@@ -546,17 +646,139 @@ public final class ProjectBuilderDialog {
         return true;
     }
 
+    /**
+     * Context-menu bulk assign for a fixed identity column (animal / hemisphere /
+     * region). When {@code options} is non-null the prompt shows a fixed dropdown
+     * (e.g. LH/RH); otherwise it is a free-text field seeded with the current
+     * value of a single selection. Works on mixed file+series selections.
+     */
+    private void bulkSetIdentity(int column, String label, String[] options) {
+        int[] sel = table.getSelectedRows();
+        if (sel.length == 0) return;
+        String preset = sel.length == 1 ? identityPreset(sel[0], column) : "";
+        String value = (String) JOptionPane.showInputDialog(dialog,
+                "Set " + label + " for " + sel.length + " selected row(s):",
+                "Set " + label,
+                JOptionPane.PLAIN_MESSAGE,
+                null, options, preset);
+        if (value == null) return;   // cancelled
+        model.setIdentityForRows(sel, column, value);
+        applyColumnPreferences();
+    }
+
+    private String identityPreset(int row, int column) {
+        Object value = model.getValueAt(row, column);
+        return value == null ? "" : value.toString();
+    }
+
     private void bulkSetCondition() {
         int[] sel = table.getSelectedRows();
         if (sel.length == 0) return;
-        String preset = sel.length == 1 ? model.get(sel[0]).condition : "";
-        String value = (String) JOptionPane.showInputDialog(dialog,
-                "Set condition for " + sel.length + " selected row(s):",
-                "Set condition",
-                JOptionPane.PLAIN_MESSAGE,
-                null, null, preset);
-        if (value == null) return;
-        model.setConditionForRows(sel, value);
+        List<ConditionAxis> axes = visibleConditionAxes();
+        if (axes.isEmpty()) return;
+        ConditionAxis initialAxis = defaultBulkConditionAxis(axes);
+        if (axes.size() == 1) {
+            String preset = bulkConditionPreset(sel, initialAxis);
+            String label = axisLabel(initialAxis);
+            String value = (String) JOptionPane.showInputDialog(dialog,
+                    "Set " + label + " for " + sel.length + " selected row(s):",
+                    "Set " + label,
+                    JOptionPane.PLAIN_MESSAGE,
+                    null, null, preset);
+            if (value == null) return;
+            model.setConditionForRows(sel, initialAxis.id, value);
+            applyColumnPreferences();
+            return;
+        }
+
+        final JComboBox<ConditionAxisChoice> axisCombo =
+                new JComboBox<ConditionAxisChoice>(axisChoices(axes));
+        axisCombo.setSelectedItem(new ConditionAxisChoice(initialAxis));
+        final JTextField valueField = new JTextField(bulkConditionPreset(sel, initialAxis), 20);
+        axisCombo.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                ConditionAxisChoice choice = (ConditionAxisChoice) axisCombo.getSelectedItem();
+                if (choice != null) {
+                    valueField.setText(bulkConditionPreset(sel, choice.axis));
+                }
+            }
+        });
+
+        JPanel panel = new JPanel(new GridLayout(0, 1, 4, 4));
+        panel.add(new JLabel("Axis:"));
+        panel.add(axisCombo);
+        panel.add(new JLabel("Value:"));
+        panel.add(valueField);
+
+        int choice = JOptionPane.showConfirmDialog(dialog, panel,
+                "Set condition", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) return;
+        ConditionAxisChoice selected = (ConditionAxisChoice) axisCombo.getSelectedItem();
+        if (selected == null) return;
+        model.setConditionForRows(sel, selected.axis.id, valueField.getText());
+        applyColumnPreferences();
+    }
+
+    private List<ConditionAxis> visibleConditionAxes() {
+        List<ConditionAxis> axes = new ArrayList<ConditionAxis>();
+        for (int c = ProjectManifestTableModel.COL_CONDITION; c < model.notesColumn(); c++) {
+            ConditionAxis axis = model.conditionAxisAtColumn(c);
+            if (axis != null) axes.add(axis);
+        }
+        return axes;
+    }
+
+    private ConditionAxis defaultBulkConditionAxis(List<ConditionAxis> axes) {
+        int selectedColumn = table.getSelectedColumn();
+        if (model.isConditionColumn(selectedColumn)) {
+            ConditionAxis axis = model.conditionAxisAtColumn(selectedColumn);
+            if (axis != null) return axis;
+        }
+        return axes.get(0);
+    }
+
+    private String bulkConditionPreset(int[] selectedRows, ConditionAxis axis) {
+        if (selectedRows == null || selectedRows.length != 1 || axis == null) return "";
+        int column = model.conditionColumnForAxis(axis.id);
+        if (column < 0) return "";
+        Object value = model.getValueAt(selectedRows[0], column);
+        return value == null ? "" : value.toString();
+    }
+
+    private static ConditionAxisChoice[] axisChoices(List<ConditionAxis> axes) {
+        ConditionAxisChoice[] choices = new ConditionAxisChoice[axes.size()];
+        for (int i = 0; i < axes.size(); i++) {
+            choices[i] = new ConditionAxisChoice(axes.get(i));
+        }
+        return choices;
+    }
+
+    private static String axisLabel(ConditionAxis axis) {
+        return axis == null || axis.label == null || axis.label.trim().isEmpty()
+                ? "Condition" : axis.label.trim();
+    }
+
+    private static final class ConditionAxisChoice {
+        final ConditionAxis axis;
+
+        ConditionAxisChoice(ConditionAxis axis) {
+            this.axis = axis;
+        }
+
+        @Override public String toString() {
+            return axisLabel(axis);
+        }
+
+        @Override public boolean equals(Object other) {
+            if (!(other instanceof ConditionAxisChoice)) return false;
+            ConditionAxisChoice o = (ConditionAxisChoice) other;
+            if (axis == null || o.axis == null) return axis == o.axis;
+            return axis.id.equals(o.axis.id);
+        }
+
+        @Override public int hashCode() {
+            return axis == null ? 0 : axis.id.hashCode();
+        }
     }
 
     private void removeSelectedRows() {
@@ -890,7 +1112,7 @@ public final class ProjectBuilderDialog {
         try {
             ConditionManifestIO.saveAssignments(
                     outputRoot.getAbsolutePath(),
-                    deriveConditionAssignments(project));
+                    deriveConditionAssignmentsModel(project));
         } catch (IOException ex) {
             IJ.log("[FLASH] Could not write Conditions.csv: " + ex.getMessage());
         }
@@ -938,8 +1160,25 @@ public final class ProjectBuilderDialog {
      * user added the rows.
      */
     static java.util.LinkedHashMap<String, String> deriveConditionAssignments(ProjectFile project) {
+        ConditionAssignments assignments = deriveConditionAssignmentsModel(project);
         java.util.LinkedHashMap<String, String> out = new java.util.LinkedHashMap<String, String>();
-        if (project == null || project.items == null) return out;
+        for (String animal : assignments.animals()) {
+            String condition = assignments.composite(animal, "_");
+            if (condition != null && !condition.trim().isEmpty()) {
+                out.put(animal, condition.trim());
+            }
+        }
+        return out;
+    }
+
+    static ConditionAssignments deriveConditionAssignmentsModel(ProjectFile project) {
+        ConditionAssignments out = new ConditionAssignments();
+        if (project == null) return out;
+        List<ConditionAxis> axes = conditionAxesForProject(project);
+        for (ConditionAxis axis : axes) {
+            out.addAxis(axis);
+        }
+        if (project.items == null) return out;
         for (ProjectFile.Item item : project.items) {
             if (item == null || !item.include) continue;
             // An expanded multi-series file contributes one (animal, condition)
@@ -947,21 +1186,53 @@ public final class ProjectBuilderDialog {
             if (item.seriesMeta != null && !item.seriesMeta.isEmpty()) {
                 for (ProjectFile.SeriesItem series : item.seriesMeta) {
                     if (series == null || !series.include) continue;
-                    putAssignment(out, series.animalId, series.condition);
+                    putAssignments(out, axes, series.animalId,
+                            series.condition, series.conditions);
                 }
             } else {
-                putAssignment(out, item.animalId, item.condition);
+                putAssignments(out, axes, item.animalId, item.condition, item.conditions);
             }
         }
         return out;
     }
 
-    private static void putAssignment(java.util.LinkedHashMap<String, String> out,
-                                      String animalId, String conditionValue) {
+    private static List<ConditionAxis> conditionAxesForProject(ProjectFile project) {
+        List<ConditionAxis> axes = new ArrayList<ConditionAxis>();
+        if (project != null && project.conditionAxes != null) {
+            for (ConditionAxis axis : project.conditionAxes) {
+                if (axis == null) continue;
+                boolean exists = false;
+                for (ConditionAxis existing : axes) {
+                    if (existing.id.equals(axis.id)) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) axes.add(axis);
+            }
+        }
+        if (axes.isEmpty()) {
+            axes.add(ConditionAxis.of("Condition"));
+        }
+        return axes;
+    }
+
+    private static void putAssignments(ConditionAssignments out, List<ConditionAxis> axes,
+                                       String animalId, String primaryCondition,
+                                       Map<String, String> conditions) {
         String animal = animalId == null ? "" : animalId.trim();
-        String condition = conditionValue == null ? "" : conditionValue.trim();
-        if (animal.isEmpty() || condition.isEmpty()) return;
-        out.put(animal, condition);
+        if (animal.isEmpty() || axes == null || axes.isEmpty()) return;
+        String primaryAxisId = axes.get(0).id;
+        for (ConditionAxis axis : axes) {
+            String value = conditions == null ? "" : conditions.get(axis.id);
+            if ((value == null || value.trim().isEmpty()) && axis.id.equals(primaryAxisId)) {
+                value = primaryCondition;
+            }
+            String condition = value == null ? "" : value.trim();
+            if (!condition.isEmpty()) {
+                out.put(animal, axis.id, condition);
+            }
+        }
     }
 
     private int countIncluded() {

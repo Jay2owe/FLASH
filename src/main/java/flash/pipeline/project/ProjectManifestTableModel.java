@@ -47,12 +47,16 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     public static final int COL_ANIMAL = 3;
     public static final int COL_HEMISPHERE = 4;
     public static final int COL_REGION = 5;
+    /** First column in the generated condition-axis block. */
     public static final int COL_CONDITION = 6;
+    /** Legacy notes column index when the table has only one condition column. */
     public static final int COL_NOTES = 7;
 
-    private static final String[] COLUMNS = {
-            "Include", "File", "Series", "Animal ID", "Hemisphere", "Region", "Condition", "Notes"
+    private static final String[] FIXED_COLUMNS = {
+            "Include", "File", "Series", "Animal ID", "Hemisphere", "Region"
     };
+    private static final String NOTES_COLUMN = "Notes";
+    private static final ConditionAxis DEFAULT_CONDITION_AXIS = ConditionAxis.of("Condition");
 
     /** File rows, in display order. */
     private final List<Row> rows = new ArrayList<Row>();
@@ -365,25 +369,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
 
     /** Bulk-assign a condition to a set of rendered rows (file or series level). */
     public void setConditionForRows(int[] rowIndexes, String condition) {
-        if (rowIndexes == null) return;
-        String value = condition == null ? "" : condition;
-        for (int idx : rowIndexes) {
-            if (idx < 0 || idx >= visible.size()) continue;
-            SeriesRow series = seriesRowAt(idx);
-            if (series != null) {
-                series.condition = value;
-            } else {
-                Row row = rows.get(fileIndexAt(idx));
-                if (isContainerSource(row.source)) {
-                    continue;
-                }
-                row.condition = value;
-                for (SeriesRow s : row.series) {
-                    s.condition = value;
-                }
-            }
-            fireTableCellUpdated(idx, COL_CONDITION);
-        }
+        setConditionForRows(rowIndexes, primaryAxisId(), condition);
     }
 
     // ── Multi-condition axes ───────────────────────────────────────────────
@@ -399,18 +385,93 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         if (axes != null) {
             for (ConditionAxis axis : axes) {
                 if (axis == null) continue;
-                boolean dup = false;
-                for (ConditionAxis a : conditionAxes) {
-                    if (a.id.equals(axis.id)) { dup = true; break; }
-                }
-                if (!dup) conditionAxes.add(axis);
+                addAxisIfMissing(axis);
             }
         }
-        fireTableDataChanged();
+        fireTableStructureChanged();
+    }
+
+    /** Add one condition axis to the visible condition block. */
+    public void addConditionAxis(ConditionAxis axis) {
+        if (axis == null || hasAxis(axis.id)) return;
+        conditionAxes.add(axis);
+        fireTableStructureChanged();
+    }
+
+    /** Remove a non-primary condition axis and its stored values. */
+    public void removeConditionAxis(String axisId) {
+        String norm = ConditionAxis.normaliseId(axisId);
+        if (norm.isEmpty() || norm.equals(primaryAxisId())) return;
+        boolean removed = false;
+        for (int i = conditionAxes.size() - 1; i >= 0; i--) {
+            if (conditionAxes.get(i).id.equals(norm)) {
+                conditionAxes.remove(i);
+                removed = true;
+            }
+        }
+        if (!removed) return;
+        for (Row row : rows) {
+            row.conditions.remove(norm);
+            for (SeriesRow series : row.series) {
+                series.conditions.remove(norm);
+            }
+        }
+        fireTableStructureChanged();
+    }
+
+    public int notesColumn() {
+        return COL_CONDITION + conditionAxisCount();
+    }
+
+    public boolean isConditionColumn(int columnIndex) {
+        return columnIndex >= COL_CONDITION && columnIndex < notesColumn();
+    }
+
+    public ConditionAxis conditionAxisAtColumn(int columnIndex) {
+        if (!isConditionColumn(columnIndex)) return null;
+        if (conditionAxes.isEmpty()) return DEFAULT_CONDITION_AXIS;
+        return conditionAxes.get(columnIndex - COL_CONDITION);
+    }
+
+    public int conditionColumnForAxis(String axisId) {
+        String norm = ConditionAxis.normaliseId(axisId);
+        if (norm.isEmpty()) norm = primaryAxisId();
+        if (conditionAxes.isEmpty()) {
+            return "condition".equals(norm) ? COL_CONDITION : -1;
+        }
+        for (int i = 0; i < conditionAxes.size(); i++) {
+            if (conditionAxes.get(i).id.equals(norm)) {
+                return COL_CONDITION + i;
+            }
+        }
+        return -1;
     }
 
     private String primaryAxisId() {
         return conditionAxes.isEmpty() ? "condition" : conditionAxes.get(0).id;
+    }
+
+    private int conditionAxisCount() {
+        return conditionAxes.isEmpty() ? 1 : conditionAxes.size();
+    }
+
+    private boolean shouldPersistAxes() {
+        if (conditionAxes.isEmpty()) return false;
+        return !(conditionAxes.size() == 1 && "condition".equals(conditionAxes.get(0).id));
+    }
+
+    private boolean hasAxis(String axisId) {
+        String norm = ConditionAxis.normaliseId(axisId);
+        for (ConditionAxis axis : conditionAxes) {
+            if (axis.id.equals(norm)) return true;
+        }
+        return false;
+    }
+
+    private void addAxisIfMissing(ConditionAxis axis) {
+        if (axis != null && !hasAxis(axis.id)) {
+            conditionAxes.add(axis);
+        }
     }
 
     /** Ordered, de-duplicated, non-blank values seen for one axis (dropdowns / merge). */
@@ -431,8 +492,10 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     public void setConditionForRows(int[] rowIndexes, String axisId, String value) {
         if (rowIndexes == null) return;
         String norm = ConditionAxis.normaliseId(axisId);
+        if (norm.isEmpty()) norm = primaryAxisId();
         boolean primary = norm.equals(primaryAxisId());
         String v = value == null ? "" : value;
+        int conditionColumn = conditionColumnForAxis(norm);
         for (int idx : rowIndexes) {
             if (idx < 0 || idx >= visible.size()) continue;
             SeriesRow series = seriesRowAt(idx);
@@ -450,22 +513,63 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                     for (SeriesRow s : row.series) putOrRemove(s.conditions, norm, v);
                 }
             }
-            if (primary) fireTableCellUpdated(idx, COL_CONDITION);
+            if (conditionColumn >= 0) {
+                fireTableCellUpdated(idx, conditionColumn);
+            } else {
+                fireTableRowsUpdated(idx, idx);
+            }
+        }
+    }
+
+    /**
+     * Bulk-assign a fixed identity field (animal ID, hemisphere, or region) to a
+     * set of rendered rows. Mirrors {@link #setConditionForRows(int[], String, String)}:
+     * container header rows are skipped (their identity is not editable and is
+     * derived from the per-series rows), and a file-level edit cascades to that
+     * file's series rows so a mixed file+series selection stays consistent.
+     *
+     * @param column one of {@link #COL_ANIMAL}, {@link #COL_HEMISPHERE}, {@link #COL_REGION}
+     */
+    public void setIdentityForRows(int[] rowIndexes, int column, String value) {
+        if (rowIndexes == null) return;
+        if (column != COL_ANIMAL && column != COL_HEMISPHERE && column != COL_REGION) return;
+        String v = value == null ? "" : value;
+        for (int idx : rowIndexes) {
+            if (idx < 0 || idx >= visible.size()) continue;
+            SeriesRow series = seriesRowAt(idx);
+            if (series != null) {
+                setSeriesValue(series, v, column);
+            } else {
+                Row row = rows.get(fileIndexAt(idx));
+                if (isContainerSource(row.source)) continue;
+                setRowIdentity(row, column, v);
+                for (SeriesRow s : row.series) setSeriesValue(s, v, column);
+            }
+            fireTableCellUpdated(idx, column);
+        }
+    }
+
+    private void setRowIdentity(Row row, int column, String value) {
+        switch (column) {
+            case COL_ANIMAL:     row.animalId = value; break;
+            case COL_HEMISPHERE: row.hemisphere = value; break;
+            case COL_REGION:     row.region = value; break;
+            default:             break;
         }
     }
 
     /** Complete axis-&gt;value map for persistence; empty for single-axis projects. */
     private Map<String, String> fullConditions(String primaryValue, Map<String, String> extras) {
         Map<String, String> full = new LinkedHashMap<String, String>();
-        if (conditionAxes.size() < 2) return full;   // single/implicit axis -> legacy field only
+        if (!shouldPersistAxes()) return full;   // implicit legacy axis -> legacy field only
         String primaryId = primaryAxisId();
-        String pv = primaryValue == null ? "" : primaryValue.trim();
-        if (!pv.isEmpty()) full.put(primaryId, pv);
-        if (extras != null) {
-            for (Map.Entry<String, String> e : extras.entrySet()) {
-                if (e.getKey() == null || e.getKey().equals(primaryId)) continue;
-                String v = e.getValue();
-                if (v != null && !v.trim().isEmpty()) full.put(e.getKey(), v.trim());
+        for (ConditionAxis axis : conditionAxes) {
+            String value = axis.id.equals(primaryId)
+                    ? primaryValue
+                    : (extras == null ? "" : extras.get(axis.id));
+            String trimmed = value == null ? "" : value.trim();
+            if (!trimmed.isEmpty()) {
+                full.put(axis.id, trimmed);
             }
         }
         return full;
@@ -505,7 +609,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         project.outputRoot = outputRoot == null ? "" : outputRoot;
         project.writerId = writerId == null ? "" : writerId;
         project.writtenAtMillis = System.currentTimeMillis();
-        if (conditionAxes.size() >= 2) {
+        if (shouldPersistAxes()) {
             project.conditionAxes = conditionAxes();
         }
         for (Row row : rows) {
@@ -597,11 +701,12 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
 
     /** Populate the model from a previously saved {@link ProjectFile}. */
     public void loadFromProjectFile(ProjectFile project) {
+        int oldColumnCount = getColumnCount();
         rows.clear();
         conditionAxes.clear();
         if (project != null && project.conditionAxes != null) {
             for (ConditionAxis axis : project.conditionAxes) {
-                if (axis != null) conditionAxes.add(axis);
+                if (axis != null) addAxisIfMissing(axis);
             }
         }
         if (project != null && project.items != null) {
@@ -645,7 +750,11 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             }
         }
         rebuildVisible();
-        fireTableDataChanged();
+        if (oldColumnCount != getColumnCount()) {
+            fireTableStructureChanged();
+        } else {
+            fireTableDataChanged();
+        }
     }
 
     private static void repairLoadedSeriesMetadata(Row file, SeriesRow series,
@@ -730,12 +839,22 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
 
     @Override
     public int getColumnCount() {
-        return COLUMNS.length;
+        return FIXED_COLUMNS.length + conditionAxisCount() + 1;
     }
 
     @Override
     public String getColumnName(int column) {
-        return COLUMNS[column];
+        if (column >= 0 && column < FIXED_COLUMNS.length) {
+            return FIXED_COLUMNS[column];
+        }
+        if (isConditionColumn(column)) {
+            ConditionAxis axis = conditionAxisAtColumn(column);
+            return axis == null || axis.label.isEmpty() ? "Condition" : axis.label;
+        }
+        if (column == notesColumn()) {
+            return NOTES_COLUMN;
+        }
+        return "";
     }
 
     @Override
@@ -751,13 +870,14 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 return false;
             }
         }
+        if (isConditionColumn(columnIndex) || columnIndex == notesColumn()) {
+            return true;
+        }
         switch (columnIndex) {
             case COL_INCLUDE:
             case COL_ANIMAL:
             case COL_HEMISPHERE:
             case COL_REGION:
-            case COL_CONDITION:
-            case COL_NOTES:
                 return true;
             default:
                 return false;
@@ -768,6 +888,12 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     public Object getValueAt(int rowIndex, int columnIndex) {
         SeriesRow series = seriesRowAt(rowIndex);
         if (series != null) {
+            if (isConditionColumn(columnIndex)) {
+                return conditionValue(series.condition, series.conditions, columnIndex);
+            }
+            if (columnIndex == notesColumn()) {
+                return series.notes;
+            }
             switch (columnIndex) {
                 case COL_INCLUDE:    return Boolean.valueOf(series.include);
                 case COL_FILE:       return series.label();
@@ -775,12 +901,16 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 case COL_ANIMAL:     return series.animalId;
                 case COL_HEMISPHERE: return series.hemisphere;
                 case COL_REGION:     return series.region;
-                case COL_CONDITION:  return series.condition;
-                case COL_NOTES:      return series.notes;
                 default:             return "";
             }
         }
         Row row = rows.get(fileIndexAt(rowIndex));
+        if (isConditionColumn(columnIndex)) {
+            return conditionValue(row.condition, row.conditions, columnIndex);
+        }
+        if (columnIndex == notesColumn()) {
+            return row.notes;
+        }
         switch (columnIndex) {
             case COL_INCLUDE:    return Boolean.valueOf(row.include);
             case COL_FILE:       return row.source == null ? "" : row.source.getName();
@@ -788,8 +918,6 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             case COL_ANIMAL:     return row.animalId;
             case COL_HEMISPHERE: return row.hemisphere;
             case COL_REGION:     return row.region;
-            case COL_CONDITION:  return row.condition;
-            case COL_NOTES:      return row.notes;
             default:             return "";
         }
     }
@@ -811,32 +939,36 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             return;
         }
         boolean cascade = !row.series.isEmpty();
-        switch (columnIndex) {
-            case COL_INCLUDE:
-                row.include = value instanceof Boolean ? ((Boolean) value).booleanValue() : false;
-                break;
-            case COL_ANIMAL:
-                row.animalId = stringValue(value);
-                if (cascade) for (SeriesRow s : row.series) s.animalId = row.animalId;
-                break;
-            case COL_HEMISPHERE:
-                row.hemisphere = stringValue(value);
-                if (cascade) for (SeriesRow s : row.series) s.hemisphere = row.hemisphere;
-                break;
-            case COL_REGION:
-                row.region = stringValue(value);
-                if (cascade) for (SeriesRow s : row.series) s.region = row.region;
-                break;
-            case COL_CONDITION:
-                row.condition = stringValue(value);
-                if (cascade) for (SeriesRow s : row.series) s.condition = row.condition;
-                break;
-            case COL_NOTES:
-                row.notes = stringValue(value);
-                if (cascade) for (SeriesRow s : row.series) s.notes = row.notes;
-                break;
-            default:
-                return;
+        if (isConditionColumn(columnIndex)) {
+            setConditionValue(row, columnIndex, stringValue(value));
+            if (cascade) {
+                for (SeriesRow s : row.series) {
+                    setConditionValue(s, columnIndex, stringValue(value));
+                }
+            }
+        } else if (columnIndex == notesColumn()) {
+            row.notes = stringValue(value);
+            if (cascade) for (SeriesRow s : row.series) s.notes = row.notes;
+        } else {
+            switch (columnIndex) {
+                case COL_INCLUDE:
+                    row.include = value instanceof Boolean ? ((Boolean) value).booleanValue() : false;
+                    break;
+                case COL_ANIMAL:
+                    row.animalId = stringValue(value);
+                    if (cascade) for (SeriesRow s : row.series) s.animalId = row.animalId;
+                    break;
+                case COL_HEMISPHERE:
+                    row.hemisphere = stringValue(value);
+                    if (cascade) for (SeriesRow s : row.series) s.hemisphere = row.hemisphere;
+                    break;
+                case COL_REGION:
+                    row.region = stringValue(value);
+                    if (cascade) for (SeriesRow s : row.series) s.region = row.region;
+                    break;
+                default:
+                    return;
+            }
         }
         if (cascade && columnIndex != COL_INCLUDE && row.expanded) {
             // Refresh the now-cascaded series rows beneath this file.
@@ -846,7 +978,15 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         }
     }
 
-    private static void setSeriesValue(SeriesRow series, Object value, int columnIndex) {
+    private void setSeriesValue(SeriesRow series, Object value, int columnIndex) {
+        if (isConditionColumn(columnIndex)) {
+            setConditionValue(series, columnIndex, stringValue(value));
+            return;
+        }
+        if (columnIndex == notesColumn()) {
+            series.notes = stringValue(value);
+            return;
+        }
         switch (columnIndex) {
             case COL_INCLUDE:
                 series.include = value instanceof Boolean ? ((Boolean) value).booleanValue() : false;
@@ -860,14 +1000,37 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             case COL_REGION:
                 series.region = stringValue(value);
                 break;
-            case COL_CONDITION:
-                series.condition = stringValue(value);
-                break;
-            case COL_NOTES:
-                series.notes = stringValue(value);
-                break;
             default:
                 break;
+        }
+    }
+
+    private String conditionValue(String primaryValue, Map<String, String> extras, int columnIndex) {
+        ConditionAxis axis = conditionAxisAtColumn(columnIndex);
+        if (axis == null) return "";
+        if (axis.id.equals(primaryAxisId())) {
+            return nullToEmpty(primaryValue);
+        }
+        return extras == null ? "" : nullToEmpty(extras.get(axis.id));
+    }
+
+    private void setConditionValue(Row row, int columnIndex, String value) {
+        ConditionAxis axis = conditionAxisAtColumn(columnIndex);
+        if (axis == null) return;
+        if (axis.id.equals(primaryAxisId())) {
+            row.condition = value;
+        } else {
+            putOrRemove(row.conditions, axis.id, value);
+        }
+    }
+
+    private void setConditionValue(SeriesRow series, int columnIndex, String value) {
+        ConditionAxis axis = conditionAxisAtColumn(columnIndex);
+        if (axis == null) return;
+        if (axis.id.equals(primaryAxisId())) {
+            series.condition = value;
+        } else {
+            putOrRemove(series.conditions, axis.id, value);
         }
     }
 
@@ -884,11 +1047,11 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         return value == null ? "" : value;
     }
 
-    private static boolean isIdentityColumn(int columnIndex) {
+    private boolean isIdentityColumn(int columnIndex) {
         return columnIndex == COL_ANIMAL
                 || columnIndex == COL_HEMISPHERE
                 || columnIndex == COL_REGION
-                || columnIndex == COL_CONDITION;
+                || isConditionColumn(columnIndex);
     }
 
     private static boolean isContainerSource(File source) {
