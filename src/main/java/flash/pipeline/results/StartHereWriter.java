@@ -2,8 +2,11 @@ package flash.pipeline.results;
 
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.IoUtils;
+import flash.pipeline.io.ResultAnimalScanner;
+import flash.pipeline.ui.wizard.ConditionReviewSupport;
 
 import java.io.File;
+import java.util.LinkedHashSet;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -71,6 +74,8 @@ public final class StartHereWriter {
         html.append("<h1>FLASH Results</h1>\n");
         html.append("<p>Open the folders below to find tables, images, quality-control reports, and run records for this project.</p>\n");
 
+        appendConditionStatus(html, layout);
+
         html.append("<h2>Main files</h2>\n<ul>\n");
         appendOptionalFile(html, layout.summaryWorkbookWriteFile(), FlashProjectLayout.SUMMARY_WORKBOOK_FILENAME);
         appendOptionalFile(html, layout.qcReportWriteFile(),
@@ -88,6 +93,26 @@ public final class StartHereWriter {
 
         html.append("</body>\n</html>\n");
         return html.toString();
+    }
+
+    /**
+     * Surface a short condition-status note only when the current assignments
+     * need review, so the landing page stays quiet for healthy projects. Uses the
+     * cheap result-table animal scan; never opens images.
+     */
+    private static void appendConditionStatus(StringBuilder html, FlashProjectLayout layout) {
+        File root = layout.projectRoot();
+        String directory = root == null ? null : root.getAbsolutePath();
+        if (directory == null) return;
+        LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
+        if (animals.isEmpty()) return;
+        ConditionReviewSupport.Health health = ConditionReviewSupport.evaluate(directory, animals);
+        if (!health.needsReview()) return;
+
+        html.append("<h2>Condition status: needs review</h2>\n<p>");
+        html.append(escape(health.summary()));
+        html.append("<br>Review <code>Tables/Project Summary/Conditions.csv</code> before using"
+                + " condition-level statistics or Excel sheets.</p>\n");
     }
 
     private static void appendOptionalFile(StringBuilder html, File file, String relativePath) {

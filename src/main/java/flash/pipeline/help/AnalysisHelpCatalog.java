@@ -554,7 +554,8 @@ public final class AnalysisHelpCatalog {
                         "Scan the configured FLASH/Results/Tables/ folders for compatible CSV files.",
                         "Read object, intensity, ROI attribute, spatial, morphometry, and line-distance tables without rerunning the upstream analyses.",
                         "Attach parsed animal, condition, image, ROI, region, hemisphere, and analysis-type metadata to compatible rows.",
-                        "Combine matching measurements into master object and intensity tables, then write the result aggregation outputs."),
+                        "Apply the current FLASH/Results/Tables/Project Summary/Conditions.csv to result rows, so conditions assigned after object, intensity, or spatial analysis still group correctly.",
+                        "Combine matching measurements into master object and intensity tables (with a Condition column), then write the result aggregation outputs."),
                 list(
                         "FLASH/Results/Tables/Project Summary/3D Objects.csv contains raw object and spatial summary rows at the selected grouping level.",
                         "FLASH/Results/Tables/Project Summary/3D Objects.csv contains volume-normalized _permm3 columns when per-mm3 output is enabled and volume data exist.",
@@ -624,6 +625,7 @@ public final class AnalysisHelpCatalog {
                         "Enough animal-level or selected grouping-level samples per condition for the configured comparisons to run."),
                 list(
                         "Confirm every animal has the intended condition label in the condition-assignment table.",
+                        "If master tables were written before conditions were fixed, apply current conditions to the master tables or rerun aggregation so grouping is up to date.",
                         "Choose or save a Statistics preset if you need paired tests, forced parametric or non-parametric routing, Tukey HSD, Dunn's test, raw p-values, or selected metrics only.",
                         "Check that the aggregation granularity matches the replicate unit you intend to compare."),
                 list(
@@ -681,6 +683,7 @@ public final class AnalysisHelpCatalog {
                         "Per-metric sheets are derived from 3D Objects.csv and Image Intensities.csv; they are not new measurements."),
                 list(
                         "Exporting before aggregation means the workbook has no master object or intensity tables to summarize.",
+                        "The workbook groups values using the current Conditions.csv. If the master table Condition column is stale, refresh it (or rerun aggregation) before sharing outputs.",
                         "The Statistics sheet is absent or stale if Statistical Analysis has not been run after the latest aggregation.",
                         "Excel export packages existing CSV values and run details; it does not recalculate segmentation, intensity, aggregation, or p-values.",
                         "Check the Summary.xlsx timestamp after rerunning if you need to confirm the workbook was refreshed.",
