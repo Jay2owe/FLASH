@@ -2418,7 +2418,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         return showGranularCustomFork(safe.names, safe.segmentationMethods,
                 showFilterParameters, showMinMax, showThreshold, showParticleSize,
                 showSegmentationMethod,
-                initialSettings, settingsStatusReference, cfg.usesZSliceSubset());
+                initialSettings, settingsStatusReference, safe.usesZSliceSubset());
     }
 
     private boolean[][] showGranularCustomFork(List<String> channelNames, List<String> segmentationMethods,

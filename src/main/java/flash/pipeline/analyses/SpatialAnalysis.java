@@ -66,6 +66,7 @@ import flash.pipeline.spatial.DensityHeatmapGenerator;
 import flash.pipeline.spatial.MorphologyExtractor;
 import flash.pipeline.spatial.SpatialStatistics;
 import flash.pipeline.spatial.VoronoiAnalysis;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 
@@ -1322,6 +1323,16 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                                                        List<String> channelNames,
                                                                        boolean lockVolumetricColoc,
                                                                        boolean lockCpcColoc) {
+        return showOptionsDialogForChainedRun(directory, channelNames,
+                lockVolumetricColoc, lockCpcColoc,
+                NextStepLabels.RUN_3D_OBJECT_ANALYSIS);
+    }
+
+    SpatialSetupConfig.DerivedConfig showOptionsDialogForChainedRun(String directory,
+                                                                       List<String> channelNames,
+                                                                       boolean lockVolumetricColoc,
+                                                                       boolean lockCpcColoc,
+                                                                       String primaryButtonLabel) {
         List<String> safeChannelNames = channelNames == null
                 ? new ArrayList<String>()
                 : new ArrayList<String>(channelNames);
@@ -1339,7 +1350,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         spatialArtifactStatus = artifactStatus;
         return showSpatialOptionsDialog(directory, safeChannelNames, existingObjectData,
                 LineDistanceAnalysis.lineSetNames(directory), artifactStatus, configuredOptions,
-                lockVolumetricColoc, lockCpcColoc);
+                lockVolumetricColoc, lockCpcColoc, primaryButtonLabel);
     }
 
     private SpatialSetupConfig.DerivedConfig showSpatialOptionsDialog(
@@ -1350,7 +1361,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             SpatialArtifactStatus artifactStatus,
             SpatialSetupConfig.DerivedConfig initialOptions) {
         return showSpatialOptionsDialog(directory, channelNames, existingObjectData,
-                availableLineSets, artifactStatus, initialOptions, false, false);
+                availableLineSets, artifactStatus, initialOptions, false, false, null);
     }
 
     private SpatialSetupConfig.DerivedConfig showSpatialOptionsDialog(
@@ -1361,7 +1372,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             SpatialArtifactStatus artifactStatus,
             SpatialSetupConfig.DerivedConfig initialOptions,
             boolean lockVolumetricColoc,
-            boolean lockCpcColoc) {
+            boolean lockCpcColoc,
+            String primaryButtonLabel) {
         if (channelNames == null || channelNames.isEmpty()) {
             return null;
         }
@@ -1404,6 +1416,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         boolean dialogDone = false;
         while (!dialogDone) {
             PipelineDialog opts = new PipelineDialog("Spatial Analysis Options", PipelineDialog.Phase.ANALYSE);
+            opts.setPrimaryButtonText(NextStepLabels.spatialOptionsPrimaryLabel(primaryButtonLabel));
             opts.addAnalysisHelpHeader("Spatial Analysis", FLASH_Pipeline.IDX_SPATIAL);
             final SpatialDialogBindings spatialBindings = new SpatialDialogBindings();
             spatialBindings.lockVolColocFromObjectAnalysis = lockVolumetricColoc;

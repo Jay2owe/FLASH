@@ -32,6 +32,7 @@ import flash.pipeline.results.RepresentativeFigureDetailsWriter;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.wizard.ConditionManifestPanel;
 import ij.IJ;
@@ -559,7 +560,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
             }
         });
         dialog.addHelpText("Existing result is only used when Statistic source is set to Existing result.");
-        dialog.setPrimaryButtonText("Continue");
+        dialog.setPrimaryButtonText(NextStepLabels.ASSIGN_CONDITIONS);
 
         if (!dialog.showDialog()) {
             return null;
@@ -641,12 +642,26 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                                 DisplayRangeChoice.ADJUST_NOW_LABEL})
                 : new String[]{DisplayRangeChoice.USE_SETUP_LABEL,
                         DisplayRangeChoice.ADJUST_NOW_LABEL};
-        dialog.addChoice("Display range setup",
+        final JComboBox<String> displayRangeChoice = dialog.addChoice("Display range setup",
                 choices,
                 hasRememberedRanges
                         ? DisplayRangeChoice.USE_REMEMBERED_LABEL
                         : DisplayRangeChoice.USE_SETUP_LABEL);
-        dialog.setPrimaryButtonText("Continue");
+        final Runnable refreshPrimaryLabel = new Runnable() {
+            @Override public void run() {
+                Object selected = displayRangeChoice.getSelectedItem();
+                boolean adjustNow = DisplayRangeChoice.ADJUST_NOW_LABEL.equals(
+                        selected == null ? null : selected.toString());
+                dialog.setPrimaryButtonText(
+                        NextStepLabels.afterRepresentativeDisplayRangeChoice(adjustNow));
+            }
+        };
+        displayRangeChoice.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                refreshPrimaryLabel.run();
+            }
+        });
+        refreshPrimaryLabel.run();
 
         if (!dialog.showDialog()) {
             return null;
@@ -780,7 +795,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 new RepresentativeSelectionPanel(previewSeries,
                         config.statistic, config.statTable, config.selection);
         dialog.addComponent(selectionPanel);
-        dialog.setPrimaryButtonText("Lock in");
+        dialog.setPrimaryButtonText(NextStepLabels.DISPLAY_RANGES);
         dialog.setPrimaryButtonEnabled(selectionPanel.hasCompleteSelection());
         selectionPanel.addSelectionListener(
                 new RepresentativeSelectionPanel.SelectionListener() {

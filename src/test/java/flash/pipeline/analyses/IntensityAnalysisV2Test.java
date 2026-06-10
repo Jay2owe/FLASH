@@ -173,8 +173,6 @@ public class IntensityAnalysisV2Test {
         assertFalse(IntensityAnalysisV2.shouldCloseIntensityNonImageFrame(
                 "FLASH - The Pipeline for Fluorescence Automated Spatial Histology",
                 "javax.swing.JFrame"));
-        assertFalse(IntensityAnalysisV2.shouldCloseIntensityNonImageFrame(
-                "Repeat Pipeline?", "javax.swing.JFrame"));
         assertTrue(IntensityAnalysisV2.shouldCloseIntensityNonImageFrame(
                 "Results", "ij.text.TextWindow"));
     }

@@ -7,6 +7,7 @@ import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageCache;
 import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.TifCache;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.config.ConfigQcContext;
 import flash.pipeline.ui.config.ConfigQcDialog;
 import flash.pipeline.ui.config.ConfigQcResult;
@@ -24,7 +25,6 @@ import javax.swing.SwingUtilities;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -38,8 +38,8 @@ import java.util.Set;
  */
 public final class RepresentativeRangeStage {
 
-    private static final String[] STAGE_PATH =
-            new String[]{"Representative Figure", "Display Ranges"};
+    private static final String STAGE_ROOT_LABEL = "Representative Figure";
+    private static final String LAYOUT_LABEL = "Layout";
 
     public boolean run(String directory,
                        RepresentativeFigureConfig config,
@@ -62,6 +62,7 @@ public final class RepresentativeRangeStage {
                 new LinkedHashMap<Integer, String>(safeConfig.customDisplayRangesByChannel);
         SourceAccess sourceAccess = new SourceAccess(directory, imageCache, useTifCache);
         try {
+            List<String> stagePath = displayRangeStagePath(channels);
             for (int i = 0; i < channels.size(); i++) {
                 ChannelRef channel = channels.get(i);
                 String seed = seedRangeForChannel(safeConfig, setupConfig, selection, channel);
@@ -70,7 +71,7 @@ public final class RepresentativeRangeStage {
                 DisplayRangeStage stage = createDisplayRangeStage(safeConfig, channel, seed);
                 ConfigQcResult result;
                 try {
-                    result = showDisplayRangeDialog(context, stage);
+                    result = showDisplayRangeDialog(context, stage, stagePath, i + 1);
                 } finally {
                     closeContextImages(context);
                 }
@@ -215,13 +216,14 @@ public final class RepresentativeRangeStage {
     }
 
     private ConfigQcResult showDisplayRangeDialog(final ConfigQcContext context,
-                                                  final DisplayRangeStage stage) {
+                                                  final DisplayRangeStage stage,
+                                                  final List<String> stagePath,
+                                                  final int stagePathIndex) {
         final List<ConfigQcStage> stages =
                 Collections.<ConfigQcStage>singletonList(stage);
-        final List<String> stagePath = Arrays.asList(STAGE_PATH);
         if (SwingUtilities.isEventDispatchThread()) {
             ConfigQcDialog dialog = ConfigQcDialog.createModeless(
-                    null, context, stages, stagePath, 1);
+                    null, context, stages, stagePath, stagePathIndex);
             return dialog.showDialog();
         }
         final ConfigQcResult[] result = new ConfigQcResult[]{ConfigQcResult.CANCEL};
@@ -229,7 +231,7 @@ public final class RepresentativeRangeStage {
             SwingUtilities.invokeAndWait(new Runnable() {
                 @Override public void run() {
                     ConfigQcDialog dialog = ConfigQcDialog.createModeless(
-                            null, context, stages, stagePath, 1);
+                            null, context, stages, stagePath, stagePathIndex);
                     result[0] = dialog.showDialog();
                 }
             });
@@ -243,6 +245,23 @@ public final class RepresentativeRangeStage {
             throw new RuntimeException("Representative display-range dialog failed.", cause);
         }
         return result[0] == null ? ConfigQcResult.CANCEL : result[0];
+    }
+
+    private static List<String> displayRangeStagePath(List<ChannelRef> channels) {
+        List<String> path = new ArrayList<String>();
+        path.add(STAGE_ROOT_LABEL);
+        if (channels != null) {
+            for (ChannelRef channel : channels) {
+                path.add(displayRangeStageLabel(channel));
+            }
+        }
+        path.add(LAYOUT_LABEL);
+        return Collections.unmodifiableList(path);
+    }
+
+    private static String displayRangeStageLabel(ChannelRef channel) {
+        String label = channel == null ? "" : channel.label();
+        return NextStepLabels.representativeDisplayRangesChannel(label);
     }
 
     private ImagePlus createProjectedChannel(BinConfig setupConfig,

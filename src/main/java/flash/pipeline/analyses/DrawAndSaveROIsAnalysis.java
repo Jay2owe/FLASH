@@ -33,6 +33,7 @@ import flash.pipeline.zslice.ZSliceOps;
 import flash.pipeline.zslice.ZSliceMode;
 
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.RoiOrientationPanel;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.wizard.RegionTextFieldSupport;
@@ -242,6 +243,16 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             roiNames.add(base);
         }
 
+        DeferredImageSupplier supplier;
+        int totalImages;
+        try {
+            supplier = ImageSourceDispatcher.createSupplier(directory);
+            totalImages = supplier.getTotalSeries();
+        } catch (Exception e) {
+            showOrLog("Draw ROIs and Orientate Images", e.getMessage());
+            return;
+        }
+
         // ── Main dialog ────────────────────────────────────────────────
         String[] roiChannelChoices = buildRoiChannelChoices(roiBinCfg);
         String defaultRoiChannelChoice = defaultRoiChannelChoice(roiBinCfg, roiChannelChoices);
@@ -282,6 +293,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         JTextField newNameField = pd.addStringField("New ROI Set Name", "SCN", 15);
         RegionTextFieldSupport.Handle newNameRegionSupport =
                 RegionTextFieldSupport.install(newNameField, null);
+        final int totalImagesForLabel = totalImages;
 
         if (hasExisting && createNewToggle != null && appendChoice != null) {
             ToggleSwitch finalCreateNewToggle = createNewToggle;
@@ -290,9 +302,16 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 boolean createNewSelected = finalCreateNewToggle.isSelected();
                 setFieldEnabled(finalAppendChoice, !createNewSelected);
                 setFieldEnabled(newNameField, createNewSelected);
+                pd.setPrimaryButtonText(NextStepLabels.afterRoiSetup(
+                        createNewSelected,
+                        existingRoiCountForSelection(finalAppendChoice, roiNames, roiFiles),
+                        totalImagesForLabel));
             };
             createNewToggle.addChangeListener(syncRoiSetMode);
+            appendChoice.addActionListener(e -> syncRoiSetMode.run());
             syncRoiSetMode.run();
+        } else {
+            pd.setPrimaryButtonText(NextStepLabels.afterRoiSetup(true, 0, totalImagesForLabel));
         }
 
         Runnable syncLineSetMode = () -> setFieldEnabled(lineSetNameField, drawLineToggle.isSelected());
@@ -337,16 +356,6 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         rm.reset();
         if (!createNew && sourceRoiZip.exists()) {
             rm.runCommand("Open", sourceRoiZip.getAbsolutePath());
-        }
-
-        DeferredImageSupplier supplier;
-        int totalImages;
-        try {
-            supplier = ImageSourceDispatcher.createSupplier(directory);
-            totalImages = supplier.getTotalSeries();
-        } catch (Exception e) {
-            showOrLog("Draw ROIs and Orientate Images", e.getMessage());
-            return;
         }
 
         ResultsTable roiProps = new ResultsTable();
@@ -437,7 +446,8 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             RoiOrientationPanel drawDialog =
                     new RoiOrientationPanel(imageJWindow, createOrientationTarget(prep),
                             "Image " + (i + 1) + "/" + totalImages, imgTitle,
-                            orientationController);
+                            orientationController, i, totalImages,
+                            NextStepLabels.roiFinalDestination(drawLineSet));
 
             try {
                 // Auto-select freehand tool and open ROI Manager
@@ -689,7 +699,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         dialog.addHelpText("Imported zips must contain one ROI per image, or an existing "
                 + "FLASH-compatible pair set with uncropped and _Cropped ROIs. ROI order "
                 + "must match the image series order.");
-        dialog.setPrimaryButtonText("Draw ROIs");
+        dialog.setPrimaryButtonText(NextStepLabels.ROI_SETUP_OPTIONS);
         JButton importButton = dialog.addRightFooterButton("Import...");
         importButton.addActionListener(e -> dialog.closeWithAction("import"));
 
@@ -727,7 +737,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         dialog.addHeader("Import ROI Zip");
         dialog.addMessage("Selected file:<br>" + htmlEscape(importZip.getName()));
         dialog.addStringField("ROI Set Name", importSetNameFromZip(importZip), 18);
-        dialog.addToggle("Preview ROIs before saving", true);
+        ToggleSwitch previewToggle = dialog.addToggle("Preview ROIs before saving", true);
         dialog.addChoice("ROI Channel", roiChannelChoices, defaultRoiChannelChoice);
         dialog.addChoice("Image Adjustment", new String[]{"None", "Automatic", "Manual"}, "None");
         if (showZSliceSourceChoice) {
@@ -738,7 +748,10 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         dialog.addHelpText("The import checks ROI count and ROI bounds against the prepared image "
                 + "series, then saves a FLASH-compatible ROI zip, cropped previews, and ROI "
                 + "properties. ROI order must match the image series order.");
-        dialog.setPrimaryButtonText("Import");
+        Runnable syncPrimaryLabel = () -> dialog.setPrimaryButtonText(
+                NextStepLabels.importRoiPrimaryLabel(previewToggle.isSelected()));
+        previewToggle.addChangeListener(syncPrimaryLabel);
+        syncPrimaryLabel.run();
 
         if (!dialog.showDialog()) {
             return null;
@@ -1125,6 +1138,24 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         name = name.replaceAll("(?i)\\s*ROIs\\.zip$", "");
         name = name.replaceAll("(?i)\\.zip$", "");
         return sanitizeRoiSetName(name);
+    }
+
+    private static int existingRoiCountForSelection(JComboBox<String> appendChoice,
+                                                    List<String> roiNames,
+                                                    List<File> roiFiles) {
+        if (appendChoice == null || roiNames == null || roiFiles == null) {
+            return 0;
+        }
+        Object selected = appendChoice.getSelectedItem();
+        if (selected == null) {
+            return 0;
+        }
+        int selectedIndex = roiNames.indexOf(selected.toString());
+        if (selectedIndex < 0 || selectedIndex >= roiFiles.size()) {
+            return 0;
+        }
+        File selectedZip = roiFiles.get(selectedIndex);
+        return RoiIO.loadRoisFromZip(selectedZip).size();
     }
 
     static String sanitizeRoiSetName(String value) {

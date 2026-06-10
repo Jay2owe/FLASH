@@ -67,6 +67,7 @@ import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.zslice.ZSliceOps;
 
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 
 import flash.pipeline.objects.CpcUtils;
@@ -246,7 +247,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             ? new LinkedHashMap<String, Double>()
                             : new LinkedHashMap<String, Double>(markerThresholds));
                     return spatialOptions.showOptionsDialogForChainedRun(
-                            directory, channelNames, lockVolumetricColoc, lockCpcColoc);
+                            directory, channelNames, lockVolumetricColoc, lockCpcColoc,
+                            NextStepLabels.RUN_3D_OBJECT_ANALYSIS);
                 }
             };
 
@@ -919,6 +921,18 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 gdOpts.addHelpText("Opens the full Spatial Analysis options next, then runs "
                         + "the selected spatial and morphometric outputs after 3D object counting.");
 
+                final Runnable updatePrimaryLabel = new Runnable() {
+                    @Override public void run() {
+                        gdOpts.setPrimaryButtonText(NextStepLabels.afterThreeDObjectMain(
+                                isSelected(objectBindings.extractProcessLengthToggle),
+                                isSelected(objectBindings.runSpatialToggle)));
+                    }
+                };
+                objectBindings.primaryLabelUpdater = updatePrimaryLabel;
+                objectBindings.extractProcessLengthToggle.addChangeListener(updatePrimaryLabel);
+                objectBindings.runSpatialToggle.addChangeListener(updatePrimaryLabel);
+                updatePrimaryLabel.run();
+
                 objectBindings.classicalCentroidFilterToggle =
                         gdOpts.addToggle("Use Centroid ROI Filtering (Classical)", classicalCentroidFilter);
                 gdOpts.addHelpText("Classical channels only. When ON, objects are counted on the "
@@ -982,6 +996,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
                 PipelineDialog gdPA = new PipelineDialog("Process Analysis", PipelineDialog.Phase.ANALYSE);
                 gdPA.enableBackButton();
+                gdPA.setPrimaryButtonText(NextStepLabels.afterThreeDObjectProcess(runSpatial));
                 gdPA.addAnalysisHelpHeader("3D Object Analysis", FLASH_Pipeline.IDX_3D_OBJECT);
                 gdPA.addSubHeader("Nuclear Marker");
                 String defaultNuclear = nuclearMarkerIndex >= 0 && nuclearMarkerIndex < names.length
@@ -1655,6 +1670,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         } finally {
             bindings.programmaticChange = false;
         }
+        if (bindings.primaryLabelUpdater != null) {
+            bindings.primaryLabelUpdater.run();
+        }
     }
 
     public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
@@ -1989,6 +2007,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         ToggleSwitch runSpatialToggle;
         ToggleSwitch classicalCentroidFilterToggle;
         List<JTextField> thresholdFields = new ArrayList<JTextField>();
+        Runnable primaryLabelUpdater;
     }
 
     private static MetadataDiagnostics.SeriesInfo firstSeriesInfoOrNull(String directory) {

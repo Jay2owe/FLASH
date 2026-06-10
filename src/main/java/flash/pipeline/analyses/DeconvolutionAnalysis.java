@@ -38,6 +38,7 @@ import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import ij.IJ;
@@ -306,8 +307,17 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         final DialogBindings bindings = new DialogBindings();
         final DeconvPresetIO presetIO = new DeconvPresetIO(new File(directory));
         final PreviewState previewState = new PreviewState();
+        final Runnable refreshPrimaryLabel = new Runnable() {
+            @Override public void run() {
+                dialog.setPrimaryButtonText(
+                        NextStepLabels.afterDeconvolutionSetup(previewState.accepted));
+            }
+        };
         final Runnable markPreviewStale = new Runnable() {
-            @Override public void run() { previewState.clear(); }
+            @Override public void run() {
+                previewState.clear();
+                refreshPrimaryLabel.run();
+            }
         };
         JButton helpButton = new JButton("?");
         styleHelpButton(helpButton);
@@ -641,8 +651,9 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                                 previewChannels);
                 if (decision == DeconvPreviewDialog.Decision.RUN_FULL_BATCH) {
                     previewState.accept(fingerprint);
-                    dialog.setTransientStatus("Preview accepted - press OK to run the full batch, "
-                            + "or keep editing to refine.");
+                    refreshPrimaryLabel.run();
+                    dialog.setTransientStatus("Preview accepted - press Run deconvolution "
+                            + "to run the full batch, or keep editing to refine.");
                 } else if (decision == DeconvPreviewDialog.Decision.CANCEL) {
                     dialog.closeWithAction("cancel");
                 }
@@ -652,6 +663,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
 
         refreshAlgorithms.run();
         refreshEnablement.run();
+        refreshPrimaryLabel.run();
 
         if (!dialog.showDialog()) {
             return null;
@@ -1248,6 +1260,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             column.add(labeledRow(channelNames[channelIndex], toggle));
         }
         picker.addComponent(column);
+        picker.setPrimaryButtonText(NextStepLabels.PREVIEW_DECONVOLUTION);
         if (!picker.showDialog()) {
             return null;
         }

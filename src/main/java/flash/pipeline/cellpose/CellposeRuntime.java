@@ -1,6 +1,7 @@
 package flash.pipeline.cellpose;
 
 import flash.pipeline.runtime.DependencyRegistry;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import ij.IJ;
 import ij.Prefs;
@@ -640,6 +641,7 @@ public final class CellposeRuntime {
         useManagedBtn.addActionListener(e -> pd.closeWithAction("use_managed_cpu"));
         useExistingBtn.addActionListener(e -> pd.closeWithAction("use_existing_install"));
         gpuHelpBtn.addActionListener(e -> pd.closeWithAction("gpu_guide"));
+        pd.setPrimaryButtonText(NextStepLabels.EXISTING_CELLPOSE_INSTALL);
         if (detection != null && detection.detected()) {
             pd.addHelpText("Detected existing install:<br><code>" + detection.pythonPath + "</code>");
             pd.addHelpText(detection.status.ready
@@ -683,6 +685,7 @@ public final class CellposeRuntime {
                     + "<code>conda create --name cellpose-3 python=3.10</code><br>"
                     + "<code>conda activate cellpose-3</code><br>"
                     + "<code>pip install \"" + SUPPORTED_CELLPOSE_PIP_SPEC + "\"</code>");
+            pd.setPrimaryButtonText(NextStepLabels.VERIFY_CELLPOSE_INSTALL);
             if (!pd.showDialog()) {
                 return pd.wasBackPressed() ? "__BACK__" : "__CANCEL__";
             }

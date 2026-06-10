@@ -53,6 +53,7 @@ import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.roi.RoiIO;
+import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceOps;
@@ -163,6 +164,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         ToggleSwitch intensitySpatialToggle;
         List<ToggleSwitch> binarizeToggles;
         List<JComboBox<String>> filterSourceChoices;
+        Runnable primaryLabelUpdater;
     }
 
     /** Live references to the nested Intensity-Spatial dialog controls. */
@@ -559,6 +561,22 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 }
                 pb.binarizeToggles = binarizeToggles;
 
+                final Runnable updatePrimaryLabel = new Runnable() {
+                    @Override public void run() {
+                        gd.setPrimaryButtonText(NextStepLabels.afterIntensityMain(
+                                anyToggleSelected(binarizeToggles),
+                                anyRois && isSelected(roiAnalysisToggle),
+                                isSelected(intensitySpatialToggle)));
+                    }
+                };
+                pb.primaryLabelUpdater = updatePrimaryLabel;
+                roiAnalysisToggle.addChangeListener(updatePrimaryLabel);
+                intensitySpatialToggle.addChangeListener(updatePrimaryLabel);
+                for (ToggleSwitch toggle : binarizeToggles) {
+                    toggle.addChangeListener(updatePrimaryLabel);
+                }
+                updatePrimaryLabel.run();
+
                 LoadFromRunButton.install(gd, "IntensityAnalysisV2", new File(directory),
                         new LoadedRunParameterApplier() {
                             @Override public LoadedRunParameters.Result applyLoadedParameters(
@@ -608,6 +626,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 // --- Secondary dialog ---
                 PipelineDialog gd2 = new PipelineDialog("ROI and Threshold Settings", PipelineDialog.Phase.ANALYSE);
                 gd2.enableBackButton();
+                gd2.setPrimaryButtonText(NextStepLabels.afterIntensityRoiThreshold(runIntensitySpatial));
                 gd2.addAnalysisHelpHeader("Fluorescence Intensity Analysis", FLASH_Pipeline.IDX_INTENSITY);
 
                 // Decide which channels need user threshold input. A channel needs
@@ -3437,6 +3456,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         while (true) {
             PipelineDialog dialog = new PipelineDialog("Intensity-Spatial Analysis",
                     PipelineDialog.Phase.ANALYSE);
+            dialog.setPrimaryButtonText(NextStepLabels.RUN_INTENSITY_ANALYSIS);
             dialog.addAnalysisHelpHeader("Intensity-Spatial Analysis", FLASH_Pipeline.IDX_INTENSITY);
             dialog.addMessage("Pick spatial metrics per mode. Each tab runs independently.");
             final IntensitySpatialPresetBindings bindings = new IntensitySpatialPresetBindings();
@@ -4144,6 +4164,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                 : savedFilterChoiceLabel(i, cfg));
             }
         }
+        if (bindings.primaryLabelUpdater != null) {
+            bindings.primaryLabelUpdater.run();
+        }
     }
 
     /**
@@ -4448,6 +4471,14 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         if (toggle != null) {
             toggle.setSelected(selected);
         }
+    }
+
+    private static boolean anyToggleSelected(List<ToggleSwitch> toggles) {
+        if (toggles == null) return false;
+        for (ToggleSwitch toggle : toggles) {
+            if (isSelected(toggle)) return true;
+        }
+        return false;
     }
 
     private static boolean anySelected(boolean[] values) {
@@ -4921,7 +4952,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         String safeClass = className == null ? "" : className.trim();
         if ("Log".equals(safeTitle)) return false;
         if ("ImageJ".equals(safeTitle) || "Fiji".equals(safeTitle)) return false;
-        if (safeTitle.startsWith("FLASH") || safeTitle.startsWith("Repeat Pipeline")) return false;
+        if (safeTitle.startsWith("FLASH")) return false;
         if ("ij.ImageJ".equals(safeClass)) return false;
         return "ij.text.TextWindow".equals(safeClass);
     }
