@@ -52,7 +52,9 @@ import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
+import flash.pipeline.orientation.OrientationImageIdentity;
 import flash.pipeline.roi.RoiIO;
+import flash.pipeline.roi.RoiSetImageBinding;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
@@ -137,6 +139,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
     private IntensitySpatialConfig intensitySpatialConfig = IntensitySpatialConfig.disabled();
     private IntensitySetupConfig.DerivedConfig configuredOptions = null;
     private AnalysisRunContext runRecordContext = null;
+    /** Per-image durable-identity binding token (index = series index); null where unresolved. */
+    private String[] imageBindTokens = null;
     private NoRoiDecisionPrompt noRoiDecisionPrompt = new NoRoiDecisionPrompt() {
         @Override
         public NoRoiDecision choose() {
@@ -977,24 +981,35 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         int outputStackDepth = likelyStackDepthForSpatialWizard(directory, cfg);
         if (headless) hideAllImageWindows();
 
-        // Strict mode: ensure each selected ROI set has exactly 2 ROIs per image
+        // Region-scoped ROIs cover an image subset and bind by durable image identity, so
+        // precompute each image's binding token and validate structure (paired drawn +
+        // cropped per token) rather than a fixed 2-per-image count.
         if (roiAnalysis) {
-            IJ.log("Validating ROI sets...");
-            int expected = totalImages * 2;
-            for (int rSet = 0; rSet < roiZips.size(); rSet++) {
-                if (!roiZipSelected[rSet] || preloadedRoiSets[rSet] == null) continue;
-                int count = preloadedRoiSets[rSet].length;
-                IJ.log("  ROI set '" + roiZipNames[rSet] + "': " + count + " ROIs (expected " + expected + ")");
-                if (count != expected) {
-                    String message = "ROI set '" + roiZipNames[rSet] + "' has " + count
-                            + " ROIs but expected " + expected + " (2 per image). "
-                            + "Strict mode requires exactly 2 ROIs per image.";
-                    IJ.error("Intensity Analysis", message);
-                    recordWarn(message);
-                    return;
+            imageBindTokens = new String[totalImages];
+            for (int t = 0; t < totalImages; t++) {
+                try {
+                    String ik = OrientationImageIdentity.fromProjectSeries(
+                            directory, t, supplier.getSeriesName(t)).imageKey;
+                    imageBindTokens[t] = (ik != null && !ik.trim().isEmpty())
+                            ? RoiSetImageBinding.token(ik) : null;
+                } catch (Exception ex) {
+                    imageBindTokens[t] = null;
+                    IJ.log("  [FLASH] No durable identity for image " + (t + 1) + ": " + ex.getMessage());
                 }
             }
-            IJ.log("  All ROI sets validated.");
+            IJ.log("Validating ROI sets (identity-based, subset coverage allowed)...");
+            for (int rSet = 0; rSet < roiZips.size(); rSet++) {
+                if (!roiZipSelected[rSet] || preloadedRoiSets[rSet] == null) continue;
+                int pairs = RoiSetImageBinding.indexByToken(
+                        java.util.Arrays.asList(preloadedRoiSets[rSet])).size();
+                IJ.log("  ROI set '" + roiZipNames[rSet] + "': " + preloadedRoiSets[rSet].length
+                        + " ROIs covering " + pairs + " image(s).");
+                if (pairs == 0) {
+                    IJ.log("  WARNING: ROI set '" + roiZipNames[rSet]
+                            + "' has no recognisable image-bound ROIs.");
+                }
+            }
+            IJ.log("  ROI sets validated.");
         }
 
         // Accumulate output tables (one per channel)
@@ -1212,15 +1227,16 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                         if (!roiZipSelected[rSet]) continue;
 
                         IJ.log("  > ROI set: " + roiZipNames[rSet]);
-                        int roiIndex = idx * 2;
-                        Roi activeRoi;
-                        if (preloadedRoiSets[rSet] == null || roiIndex >= preloadedRoiSets[rSet].length) {
-                            IJ.error("Intensity Analysis", "ROI set '" + roiZipNames[rSet]
-                                    + "' missing ROI index " + roiIndex + " for image " + (idx + 1));
-                            return;
+                        String bindToken = (imageBindTokens != null && idx < imageBindTokens.length)
+                                ? imageBindTokens[idx] : null;
+                        Roi boundRoi = findDrawnRoiByToken(preloadedRoiSets[rSet], bindToken);
+                        if (boundRoi == null) {
+                            IJ.log("    ROI set '" + roiZipNames[rSet] + "' does not cover image "
+                                    + (idx + 1) + "; skipping for this region.");
+                            continue;
                         }
-                        activeRoi = (Roi) preloadedRoiSets[rSet][roiIndex].clone();
-                        IJ.log("    ROI selected: index " + (idx * 2)
+                        Roi activeRoi = (Roi) boundRoi.clone();
+                        IJ.log("    ROI bound by image identity"
                                 + (activeRoi != null ? " (" + activeRoi.getTypeAsString() + ")" : ""));
 
                         runIntensityMeasurementsForThisImage(
@@ -1361,17 +1377,16 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                     for (int rSet = 0; rSet < roiZips.size(); rSet++) {
                                         if (!roiZipSelected[rSet]) continue;
 
-                                        // Use preloaded ROI array -- no synchronization needed
-                                        int roiIndex = idx * 2;
-                                        Roi activeRoi;
-                                        if (preloadedRois[rSet] == null || roiIndex >= preloadedRois[rSet].length) {
-                                            String message = "ROI set '" + roiZipNames[rSet]
-                                                    + "' missing ROI index " + roiIndex;
-                                            IJ.log("[" + (idx + 1) + "/" + total + "] ERROR: " + message);
-                                            recordWarn(message);
-                                            break;
+                                        // Bind ROI by durable image identity token (subset coverage allowed)
+                                        String bindToken = (imageBindTokens != null && idx < imageBindTokens.length)
+                                                ? imageBindTokens[idx] : null;
+                                        Roi boundRoi = findDrawnRoiByToken(preloadedRois[rSet], bindToken);
+                                        if (boundRoi == null) {
+                                            IJ.log("[" + (idx + 1) + "/" + total + "] ROI set '"
+                                                    + roiZipNames[rSet] + "' does not cover this image; skipping.");
+                                            continue;
                                         }
-                                        activeRoi = (Roi) preloadedRois[rSet][roiIndex].clone();
+                                        Roi activeRoi = (Roi) boundRoi.clone();
 
                                         runIntensityMeasurementsForThisImage(
                                                 parts, chans, n,
@@ -4790,6 +4805,20 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             return "Series_" + (seriesIndex + 1);
         }
         return baseName.trim();
+    }
+
+    /** Find the drawn (uncropped) ROI in a zip whose binding token matches the image. */
+    private static Roi findDrawnRoiByToken(Roi[] rois, String token) {
+        if (rois == null || token == null) return null;
+        for (Roi r : rois) {
+            if (r == null) continue;
+            String name = r.getName();
+            if (!RoiSetImageBinding.isCropped(name)
+                    && token.equals(RoiSetImageBinding.tokenOf(name))) {
+                return r;
+            }
+        }
+        return null;
     }
 
     private static String expectedSeriesTitle(File lifFile, String seriesName, int seriesIndex) {
