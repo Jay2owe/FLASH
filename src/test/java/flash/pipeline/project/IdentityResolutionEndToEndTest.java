@@ -235,6 +235,39 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void collapsingMultiAxisToLegacyCarriesOldPrimaryValueAndMeta() {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.setConditionAxes(Arrays.asList(ConditionAxis.of("Genotype"), ConditionAxis.of("Timepoint")));
+        model.addFile(new File("M1.tif"));
+        model.setValueAt("M1", 0, ProjectManifestTableModel.COL_ANIMAL);
+        model.setValueAt("hAPP", 0, ProjectManifestTableModel.COL_CONDITION);          // Genotype (primary), user-set
+        model.setValueAt("WeekFour", 0, ProjectManifestTableModel.COL_CONDITION + 1);  // Timepoint
+
+        // Collapse the schema back to a single legacy Condition axis.
+        model.setConditionAxes(java.util.Collections.<ConditionAxis>emptyList());
+
+        // The old primary value is carried into the legacy Condition slot with its meta,
+        // rather than silently dropped.
+        assertEquals("hAPP", model.getValueAt(0, ProjectManifestTableModel.COL_CONDITION));
+        assertTrue(model.isUserSet(0, ProjectManifestTableModel.COL_CONDITION));
+        assertTrue(model.conditionAxes().isEmpty());
+    }
+
+    @Test
+    public void setConditionAxesIgnoresBlankIdAxisAndKeepsValue() {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.addFile(new File("M1.tif"));
+        model.setValueAt("M1", 0, ProjectManifestTableModel.COL_ANIMAL);
+        model.setConditionForRows(new int[]{0}, "WT");   // legacy Condition value
+
+        // A blank-id axis must be ignored (not promoted to primary), leaving the value intact.
+        model.setConditionAxes(Arrays.asList(ConditionAxis.of("   ")));
+
+        assertTrue(model.conditionAxes().isEmpty());
+        assertEquals("WT", model.getValueAt(0, ProjectManifestTableModel.COL_CONDITION));
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();
