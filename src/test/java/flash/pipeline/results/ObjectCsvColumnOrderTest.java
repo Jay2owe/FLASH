@@ -128,4 +128,38 @@ public class ObjectCsvColumnOrderTest {
         assertTrue(total < best);
         assertTrue(best < flag);
     }
+
+    @Test
+    public void consolidatedBBSectionOrdersByPartnerThenMetricFor3Channels() {
+        List<String> channels = Arrays.asList("C1", "C2", "C3");
+        // Every new BB column for source C1 (partners C2, C3), shuffled, plus B-volume + neighbours.
+        List<String> input = new java.util.ArrayList<String>(Arrays.asList(
+                "C1_BBCPCPattern",
+                "C1_BBVolColoc30_C3", "C1_BBVolColoc_C3", "C1_BBVolColocTotal_C3",
+                "C1_BBCPCContains_C3", "C1_BBCPCColoc_C3", "C1_BBColoc30_C3", "C1_BBColoc_C3",
+                "C1_BBCPCTargetsHit",
+                "C1_BBVolColoc30_C2", "C1_BBVolColoc_C2", "C1_BBVolColocTotal_C2",
+                "C1_BBCPCContains_C2", "C1_BBCPCColoc_C2", "C1_BBColoc30_C2", "C1_BBColoc_C2",
+                "B-volume (micron^3)", "B-depth", "Label", "Voronoi_NumNeighbors"));
+
+        List<String> ordered = ObjectCsvColumnOrder.orderedColumns("C1", input, channels);
+
+        // The BB coloc block, contiguous, grouped by partner (C2 before C3) then metric, with the
+        // whole-object roll-ups terminating the section.
+        List<String> expectedBB = Arrays.asList(
+                "C1_BBColoc_C2", "C1_BBColoc30_C2",
+                "C1_BBCPCColoc_C2", "C1_BBCPCContains_C2",
+                "C1_BBVolColocTotal_C2", "C1_BBVolColoc_C2", "C1_BBVolColoc30_C2",
+                "C1_BBColoc_C3", "C1_BBColoc30_C3",
+                "C1_BBCPCColoc_C3", "C1_BBCPCContains_C3",
+                "C1_BBVolColocTotal_C3", "C1_BBVolColoc_C3", "C1_BBVolColoc30_C3",
+                "C1_BBCPCTargetsHit", "C1_BBCPCPattern");
+        int start = ordered.indexOf("C1_BBColoc_C2");
+        assertTrue(start >= 0);
+        assertEquals(expectedBB, ordered.subList(start, start + expectedBB.size()));
+
+        // Section placement: B-volume (box section) precedes the BB coloc block, which precedes Voronoi.
+        assertTrue(ordered.indexOf("B-volume (micron^3)") < start);
+        assertTrue(ordered.indexOf("C1_BBCPCPattern") < ordered.indexOf("Voronoi_NumNeighbors"));
+    }
 }
