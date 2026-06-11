@@ -75,6 +75,18 @@ public class GrammarInterpreterTest {
     }
 
     @Test
+    public void whitespaceConditionAxisYieldsConditionAxisAndCleanProvenance() {
+        // A whitespace-only axis label must behave like a blank one: value under the
+        // "condition" axis, and provenance must not echo the raw whitespace.
+        List<FieldRule> rules = Collections.singletonList(
+                FieldRule.alias(FieldRule.Type.CONDITION, "   ",
+                        Collections.singletonList(new ValuePattern("WT", Collections.singletonList("WT")))));
+        PartialIdentity p = new GrammarInterpreter().apply(new NamingGrammar("g", rules), "M1_WT_SCN");
+        assertEquals("WT", p.conditions().get("condition").value);
+        assertEquals("your pattern (condition)", p.conditions().get("condition").provenance);
+    }
+
+    @Test
     public void grammarBeatsVocabularyInResolver() {
         SourceRecord r = SourceRecord.looseFile("hAPP_M14_2_SCN_ZT06", null, null);
         List<SourceRecord> batch = Collections.singletonList(r);

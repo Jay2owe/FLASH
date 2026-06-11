@@ -155,6 +155,35 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void removingAxisPurgesMetaSoReimportWorksAfterReload() {
+        // Condition + Genotype; Genotype is non-primary so it is removable.
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.setConditionAxes(Arrays.asList(ConditionAxis.of("Condition"), ConditionAxis.of("Genotype")));
+        model.addFile(new File("M1.tif"));
+        model.setValueAt("M1", 0, ProjectManifestTableModel.COL_ANIMAL);
+        int genotypeCol = model.conditionColumnForAxis("genotype");
+        model.setValueAt("hAPP", 0, genotypeCol);          // user edit -> user-set
+        assertTrue(model.isUserSet(0, genotypeCol));
+
+        // Remove the Genotype axis, then save + reopen.
+        model.removeConditionAxis("genotype");
+        ProjectFile pf = model.toProjectFile("p", "/out", "w");
+        ProjectManifestTableModel reloaded = new ProjectManifestTableModel();
+        reloaded.loadFromProjectFile(pf);
+
+        // Re-import a roster that re-introduces Genotype=WT.
+        java.util.Map<String, java.util.Map<String, String>> byAnimal =
+                new java.util.LinkedHashMap<String, java.util.Map<String, String>>();
+        java.util.Map<String, String> vals = new java.util.LinkedHashMap<String, String>();
+        vals.put("genotype", "WT");
+        byAnimal.put("M1", vals);
+        reloaded.importRoster(Arrays.asList(ConditionAxis.of("Genotype")), byAnimal, false);
+
+        // The roster value lands — no stale user-set meta from the removed axis blocks it.
+        assertEquals("WT", reloaded.getValueAt(0, reloaded.conditionColumnForAxis("genotype")));
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();

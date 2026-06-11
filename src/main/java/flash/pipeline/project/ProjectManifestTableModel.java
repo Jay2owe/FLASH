@@ -426,7 +426,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         fireTableStructureChanged();
     }
 
-    /** Remove a non-primary condition axis and its stored values. */
+    /** Remove a non-primary condition axis and its stored values + detection metadata. */
     public void removeConditionAxis(String axisId) {
         String norm = ConditionAxis.normaliseId(axisId);
         if (norm.isEmpty() || norm.equals(primaryAxisId())) return;
@@ -440,8 +440,12 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         if (!removed) return;
         for (Row row : rows) {
             row.conditions.remove(norm);
+            // Purge the per-cell meta too: a left-behind user-set flag would now
+            // persist through save/load and block a later re-add/roster import.
+            row.meta.remove(norm);
             for (SeriesRow series : row.series) {
                 series.conditions.remove(norm);
+                series.meta.remove(norm);
             }
         }
         fireTableStructureChanged();

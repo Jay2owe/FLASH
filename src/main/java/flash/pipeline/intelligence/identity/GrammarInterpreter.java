@@ -54,8 +54,9 @@ public final class GrammarInterpreter {
     }
 
     private static String label(FieldRule rule) {
-        if (rule.type == FieldRule.Type.CONDITION && !rule.axisLabel.isEmpty()) {
-            return rule.axisLabel;
+        if (rule.type == FieldRule.Type.CONDITION
+                && rule.axisLabel != null && !rule.axisLabel.trim().isEmpty()) {
+            return rule.axisLabel.trim();
         }
         return rule.type.name().toLowerCase(Locale.ROOT);
     }
