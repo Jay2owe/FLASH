@@ -574,6 +574,15 @@ public final class CLIArgumentParser {
                     "object.doBBCpc", doBBCpc, false));
         }
 
+        String doBBVol = getValue(options, "object.doBBVol");
+        if (doBBVol == null) {
+            doBBVol = getValue(options, "object.do_bb_vol");
+        }
+        if (doBBVol != null) {
+            object.doBBVol = Boolean.valueOf(parseBooleanValue(
+                    "object.doBBVol", doBBVol, false));
+        }
+
         String extract = getValue(options, "object.extractProcessLength");
         if (extract == null) {
             extract = getValue(options, "object.extract_process_length");

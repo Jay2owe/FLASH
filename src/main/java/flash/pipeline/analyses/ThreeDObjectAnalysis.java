@@ -73,6 +73,7 @@ import flash.pipeline.zslice.ZSliceOps;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 
+import flash.pipeline.objects.BoundingBoxColoc;
 import flash.pipeline.objects.CpcUtils;
 import flash.pipeline.segmentation.EnhancedClassicalParameters;
 import flash.pipeline.segmentation.EnhancedClassicalRunner;
@@ -273,6 +274,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private boolean doIntensityColoc = false;
     private boolean doBBOverlap = false;
     private boolean doBBCpc = false;
+    private boolean doBBVol = false;
     private Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
     /** Per-channel bounding-box coloc threshold (%), independent of {@link #markerThresholds}. */
     private final Map<String, Double> bbThresholds = new LinkedHashMap<String, Double>();
@@ -905,6 +907,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         gdOpts.addToggle("Bounding-box centroid coincidence (BB-CPC)", doBBCpc);
                 gdOpts.addHelpText("Whether each object's centroid falls inside a partner object's "
                         + "bounding box, plus a count of partner centroids inside this object's box.");
+                objectBindings.doBBVolToggle =
+                        gdOpts.addToggle("Bounding-box volume fill (BBVolColoc)", doBBVol);
+                gdOpts.addHelpText("Partner object voxels filling this object's bounding box, as a "
+                        + "percentage of the box volume: single best partner and total of all partners.");
 
                 gdOpts.addHeader("Colocalisation Thresholds");
                 for (String chName : cfg.channelNames) {
@@ -986,6 +992,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 doIntensityColoc = gdOpts.getNextBoolean();
                 doBBOverlap = gdOpts.getNextBoolean();
                 doBBCpc = gdOpts.getNextBoolean();
+                doBBVol = gdOpts.getNextBoolean();
                 markerThresholds.clear();
                 for (String chName : cfg.channelNames) {
                     markerThresholds.put(chName, gdOpts.getNextNumber());
@@ -1268,6 +1275,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         if (doCpc) ensureAllCpcColocColumns(cfg, channelTables);
         if (doBBOverlap) ensureAllBBColocColumns(cfg, channelTables);
         if (doBBCpc) ensureAllBBCpcColocColumns(cfg, channelTables);
+        if (doBBVol) ensureAllBBVolColocColumns(cfg, channelTables);
 
         for (Map.Entry<String, ij.measure.ResultsTable> e : channelTables.entrySet()) {
             try {
@@ -1708,6 +1716,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             setToggle(bindings.doIntensityColocToggle, doIntensityColoc);
             setToggle(bindings.doBBOverlapToggle, doBBOverlap);
             setToggle(bindings.doBBCpcToggle, doBBCpc);
+            setToggle(bindings.doBBVolToggle, doBBVol);
             setToggle(bindings.extractProcessLengthToggle, wizardExtractProcessLength);
             setToggle(bindings.runSpatialToggle, wizardRunSpatial);
             setToggle(bindings.classicalCentroidFilterToggle, classicalCentroidFilter);
@@ -1982,6 +1991,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         if (object.getDoBBCpc() != null) {
             derived.doBBCpc = object.getDoBBCpc().booleanValue();
         }
+        if (object.getDoBBVol() != null) {
+            derived.doBBVol = object.getDoBBVol().booleanValue();
+        }
         if (object.getExtractProcessLength() != null) {
             derived.extractProcessLength = object.getExtractProcessLength().booleanValue();
         }
@@ -2018,6 +2030,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         doIntensityColoc = derived.doIntensityColoc;
         doBBOverlap = derived.doBBOverlap;
         doBBCpc = derived.doBBCpc;
+        doBBVol = derived.doBBVol;
         classicalCentroidFilter = derived.classicalCentroidFiltering;
         wizardExtractProcessLength = derived.extractProcessLength;
         wizardRunSpatial = derived.runSpatial;
@@ -2080,6 +2093,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         ToggleSwitch doIntensityColocToggle;
         ToggleSwitch doBBOverlapToggle;
         ToggleSwitch doBBCpcToggle;
+        ToggleSwitch doBBVolToggle;
         ToggleSwitch extractProcessLengthToggle;
         ToggleSwitch runSpatialToggle;
         ToggleSwitch classicalCentroidFilterToggle;
@@ -2276,6 +2290,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
             if (doBBCpc) {
                 appendBBCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBVol) {
+                appendBBVolColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
             }
             if (doIntensityColoc) {
@@ -3004,6 +3022,11 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             if (doBBCpc) {
                 keep.add(bbCpcColocCol(channelName, other));
                 keep.add(bbCpcContainsCol(channelName, other));
+            }
+            if (doBBVol) {
+                keep.add(bbVolPctCol(channelName, other));
+                keep.add(bbVolTotalCol(channelName, other));
+                keep.add(bbVolFlagCol(channelName, other));
             }
             if (doIntensityColoc) {
                 keep.add(objPearsonCol(channelName, other));
@@ -4097,6 +4120,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
             if (doBBCpc) {
                 appendBBCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBVol) {
+                appendBBVolColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
             }
             if (doIntensityColoc) {
@@ -5856,6 +5883,155 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 table.setValue(aChannel + "_BBCPCTargetsHit", r, targetsHit);
                 table.setValue(aChannel + "_BBCPCPattern", r, pattern.length() > 0 ? pattern.toString() : "None");
             }
+        }
+    }
+
+    // ── Bounding-Box volume signal fill (Family B: BB-Vol) ────────────
+
+    /** Single-best partner fill %: SOURCE_BBVolColoc_PARTNER. */
+    private String bbVolPctCol(String source, String partner) {
+        return source + "_BBVolColoc_" + partner;
+    }
+
+    /** All-partner fill %: SOURCE_BBVolColocTotal_PARTNER. */
+    private String bbVolTotalCol(String source, String partner) {
+        return source + "_BBVolColocTotal_" + partner;
+    }
+
+    /** Thresholded fill flag (derives from single-best): SOURCE_BBVolColocN_PARTNER. */
+    private String bbVolFlagCol(String source, String partner) {
+        int thr = (int) getBBColocThreshold(source);
+        return source + "_BBVolColoc" + thr + "_" + partner;
+    }
+
+    private void ensureAllBBVolColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String aChannel : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(aChannel);
+            if (t == null || t.size() == 0) continue;
+            for (String bChannel : cfg.channelNames) {
+                if (aChannel.equals(bChannel)) continue;
+                ensureCpcColumn(t, bbVolPctCol(aChannel, bChannel));
+                ensureCpcColumn(t, bbVolTotalCol(aChannel, bChannel));
+                ensureCpcColumn(t, bbVolFlagCol(aChannel, bChannel));
+            }
+        }
+    }
+
+    /**
+     * BB volume signal fill (Family B). For each source object, count partner-channel object voxels
+     * inside the source bounding box: single-best partner object (BBVolColoc) and all partners
+     * (BBVolColocTotal), each as a percentage of the box volume; the flag derives from single-best.
+     * Geometry delegated to {@link BoundingBoxColoc} so Spatial can reuse it.
+     */
+    private void appendBBVolColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        for (int a = 0; a < n; a++) {
+            ij.measure.ResultsTable aTable = channelTables.get(cfg.channelNames.get(a));
+            boolean aHas = channelHasObjects[a]
+                    && getRegisteredImage(cfg.channelNames.get(a) + "_objects") != null
+                    && aTable != null;
+            if (!aHas && aTable != null) {
+                for (int b = 0; b < n; b++) {
+                    if (b == a) continue;
+                    setBBVolColocZerosForThisImage(aTable, cfg.channelNames.get(a), cfg.channelNames.get(b),
+                            scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        for (int a = 0; a < n; a++) {
+            String aChannel = cfg.channelNames.get(a);
+            ImagePlus aObjImg = getRegisteredImage(aChannel + "_objects");
+            boolean aHas = channelHasObjects[a] && aObjImg != null;
+            ij.measure.ResultsTable aTable = channelTables.get(aChannel);
+
+            for (int b = a + 1; b < n; b++) {
+                String bChannel = cfg.channelNames.get(b);
+                ImagePlus bObjImg = getRegisteredImage(bChannel + "_objects");
+                boolean bHas = channelHasObjects[b] && bObjImg != null;
+                ij.measure.ResultsTable bTable = channelTables.get(bChannel);
+
+                if (!aHas || !bHas) {
+                    if (aTable != null) setBBVolColocZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBVolColocZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    String emptyChannel = !aHas
+                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
+                            : bChannel;
+                    IJ.log("    - BBVol: " + aChannel + " vs " + bChannel + " skipped (no objects in " + emptyChannel + ")");
+                    continue;
+                }
+
+                try {
+                    List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aObjImg);
+                    List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bObjImg);
+
+                    // A boxes filled by B voxels; B boxes filled by A voxels.
+                    Map<Integer, float[]> aFill = BoundingBoxColoc.fillPercents(bObjImg, objectsA);
+                    Map<Integer, float[]> bFill = BoundingBoxColoc.fillPercents(aObjImg, objectsB);
+
+                    if (aTable != null) {
+                        writeBBVolColocValuesForThisImage(aTable, aChannel, bChannel, aFill,
+                                getBBColocThreshold(aChannel), scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    if (bTable != null) {
+                        writeBBVolColocValuesForThisImage(bTable, bChannel, aChannel, bFill,
+                                getBBColocThreshold(bChannel), scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    IJ.log("    - BBVol: " + aChannel + " vs " + bChannel
+                            + " (" + objectsA.size() + " / " + objectsB.size() + " objects)");
+                } catch (Exception e) {
+                    IJ.log("    - BBVol: " + aChannel + " vs " + bChannel + " FAILED: " + e.getMessage());
+                    if (aTable != null) setBBVolColocZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBVolColocZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+    }
+
+    /** Write BBVol single-best %, total %, and threshold flag into a table, matched by Label. */
+    private void writeBBVolColocValuesForThisImage(
+            ij.measure.ResultsTable table, String sourceChannel, String partnerChannel,
+            Map<Integer, float[]> fillByLabel, double threshold,
+            int scnIndex, String animalName, String hemisphere, String region, String roiLabel
+    ) {
+        String pctCol = bbVolPctCol(sourceChannel, partnerChannel);
+        String totalCol = bbVolTotalCol(sourceChannel, partnerChannel);
+        String flagCol = bbVolFlagCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            int label = (int) table.getValue("Label", r);
+            float[] fill = fillByLabel.get(label);
+            double best = fill != null ? fill[0] : 0.0;
+            double total = fill != null ? fill[1] : 0.0;
+            table.setValue(pctCol, r, best);
+            table.setValue(totalCol, r, total);
+            table.setValue(flagCol, r, best >= threshold ? 1 : 0);
+        }
+    }
+
+    private void setBBVolColocZerosForThisImage(ij.measure.ResultsTable table, String sourceChannel,
+                                                String partnerChannel,
+                                                int scnIndex, String animalName, String hemisphere,
+                                                String region, String roiLabel) {
+        String pctCol = bbVolPctCol(sourceChannel, partnerChannel);
+        String totalCol = bbVolTotalCol(sourceChannel, partnerChannel);
+        String flagCol = bbVolFlagCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            table.setValue(pctCol, r, 0);
+            table.setValue(totalCol, r, 0);
+            table.setValue(flagCol, r, 0);
         }
     }
 

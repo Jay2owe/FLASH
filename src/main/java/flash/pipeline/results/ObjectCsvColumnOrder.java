@@ -292,6 +292,19 @@ public final class ObjectCsvColumnOrder {
         if (bbCpcContains != null) {
             return new ColumnKey(8, partnerRank(partnerRanks, bbCpcContains), 3, bbCpcContains, originalIndex);
         }
+        // BBVol: check Total before single-best before the digit-aware flag (most specific first).
+        String bbVolTotal = suffixAfter(col, channelName + "_BBVolColocTotal_");   // all partner voxels %
+        if (bbVolTotal != null) {
+            return new ColumnKey(8, partnerRank(partnerRanks, bbVolTotal), 4, bbVolTotal, originalIndex);
+        }
+        String bbVolBest = suffixAfter(col, channelName + "_BBVolColoc_");          // single-best partner %
+        if (bbVolBest != null) {
+            return new ColumnKey(8, partnerRank(partnerRanks, bbVolBest), 5, bbVolBest, originalIndex);
+        }
+        String bbVolFlag = partnerAfterThresholdDigits(col, channelName + "_BBVolColoc");  // flag (digits)
+        if (bbVolFlag != null) {
+            return new ColumnKey(8, partnerRank(partnerRanks, bbVolFlag), 6, bbVolFlag, originalIndex);
+        }
         if ((channelName + "_BBCPCTargetsHit").equals(col)) {
             return new ColumnKey(8, Integer.MAX_VALUE - 1, 0, "", originalIndex);
         }

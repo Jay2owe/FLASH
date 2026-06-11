@@ -209,6 +209,7 @@ public final class ThreeDObjectSetupConfig {
         public boolean doIntensityColoc;
         public boolean doBBOverlap;
         public boolean doBBCpc;
+        public boolean doBBVol;
         public boolean extractProcessLength;
         public boolean runSpatial;
         public boolean classicalCentroidFiltering;

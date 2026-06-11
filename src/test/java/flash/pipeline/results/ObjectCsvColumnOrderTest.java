@@ -101,4 +101,31 @@ public class ObjectCsvColumnOrderTest {
         assertTrue(targetsHit < pattern);
         assertTrue(pattern < voronoi);
     }
+
+    @Test
+    public void bbVolColumnsDoNotCrossContaminateAndOrderTotalBestFlag() {
+        List<String> input = Arrays.asList(
+                "Label",
+                "C1_BBVolColoc30_C2",     // flag (digits)
+                "C1_BBVolColoc_C2",       // single-best continuous
+                "C1_BBVolColocTotal_C2",  // total continuous
+                "C1_BBColoc_C2",          // Family C continuous (must NOT be swallowed by BBVol)
+                "C1_BBCPCColoc_C2");      // Family A (must NOT be swallowed by BBVol)
+
+        List<String> ordered = ObjectCsvColumnOrder.orderedColumns("C1", input, CHANNELS);
+
+        int overlap = ordered.indexOf("C1_BBColoc_C2");
+        int cpc = ordered.indexOf("C1_BBCPCColoc_C2");
+        int total = ordered.indexOf("C1_BBVolColocTotal_C2");
+        int best = ordered.indexOf("C1_BBVolColoc_C2");
+        int flag = ordered.indexOf("C1_BBVolColoc30_C2");
+
+        // Every distinct column is present and classified (none collapsed onto another).
+        assertTrue(overlap >= 0 && cpc >= 0 && total >= 0 && best >= 0 && flag >= 0);
+        // Family order within partner: overlap (C) < CPC (A) < BBVol (B): Total, best, flag.
+        assertTrue(overlap < cpc);
+        assertTrue(cpc < total);
+        assertTrue(total < best);
+        assertTrue(best < flag);
+    }
 }
