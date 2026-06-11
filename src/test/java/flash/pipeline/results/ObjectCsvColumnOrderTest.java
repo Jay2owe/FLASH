@@ -45,4 +45,28 @@ public class ObjectCsvColumnOrderTest {
         assertEquals(ordered.indexOf("B-depth") + 1, ordered.indexOf("B-volume (voxels)"));
         assertEquals(ordered.indexOf("B-volume (voxels)") + 1, ordered.indexOf("B-volume (micron^3)"));
     }
+
+    @Test
+    public void bbColocContinuousSortsBeforeThresholdFlag() {
+        List<String> input = Arrays.asList(
+                "Label",
+                "C1_BBColoc30_C2",      // flag
+                "C1_CPCColoc_C2",       // CPC section (earlier)
+                "Voronoi_NumNeighbors", // later section
+                "C1_BBColoc_C2",        // continuous overlap
+                "Morph_Area_um2");      // later section
+
+        List<String> ordered = ObjectCsvColumnOrder.orderedColumns("C1", input, CHANNELS);
+
+        int continuous = ordered.indexOf("C1_BBColoc_C2");
+        int flag = ordered.indexOf("C1_BBColoc30_C2");
+        int cpc = ordered.indexOf("C1_CPCColoc_C2");
+        int voronoi = ordered.indexOf("Voronoi_NumNeighbors");
+
+        // Continuous overlap immediately precedes its threshold flag (digit-aware classifier).
+        assertEquals(continuous + 1, flag);
+        // BB coloc section sits after CPC and before Voronoi/Morph.
+        assertTrue("CPC before BBColoc", cpc < continuous);
+        assertTrue("BBColoc before Voronoi", flag < voronoi);
+    }
 }

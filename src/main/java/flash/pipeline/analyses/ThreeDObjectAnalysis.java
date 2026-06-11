@@ -271,6 +271,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private boolean doVolumetric = true;
     private boolean doCpc = true;
     private boolean doIntensityColoc = false;
+    private boolean doBBOverlap = false;
     private Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
     /** Per-channel bounding-box coloc threshold (%), independent of {@link #markerThresholds}. */
     private final Map<String, Double> bbThresholds = new LinkedHashMap<String, Double>();
@@ -895,6 +896,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         gdOpts.addToggle("Intensity Colocalization", doIntensityColoc);
                 gdOpts.addHelpText("Per-object Pearson and Manders, plus Costes thresholds/significance "
                         + "at both object and image level.");
+                objectBindings.doBBOverlapToggle =
+                        gdOpts.addToggle("Bounding-box overlap (% / BBColoc)", doBBOverlap);
+                gdOpts.addHelpText("Per-object bounding-box overlap: max intersection of the object's box "
+                        + "with a partner object's box, as a percentage of the source box volume.");
 
                 gdOpts.addHeader("Colocalisation Thresholds");
                 for (String chName : cfg.channelNames) {
@@ -974,6 +979,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 doVolumetric = gdOpts.getNextBoolean();
                 doCpc = gdOpts.getNextBoolean();
                 doIntensityColoc = gdOpts.getNextBoolean();
+                doBBOverlap = gdOpts.getNextBoolean();
                 markerThresholds.clear();
                 for (String chName : cfg.channelNames) {
                     markerThresholds.put(chName, gdOpts.getNextNumber());
@@ -1254,6 +1260,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         if (doVolumetric) ensureAllColocColumns(cfg, channelTables);
         if (doIntensityColoc) ensureAllIntensityColocColumns(cfg, channelTables);
         if (doCpc) ensureAllCpcColocColumns(cfg, channelTables);
+        if (doBBOverlap) ensureAllBBColocColumns(cfg, channelTables);
 
         for (Map.Entry<String, ij.measure.ResultsTable> e : channelTables.entrySet()) {
             try {
@@ -1692,6 +1699,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             setToggle(bindings.doVolumetricToggle, doVolumetric);
             setToggle(bindings.doCpcToggle, doCpc);
             setToggle(bindings.doIntensityColocToggle, doIntensityColoc);
+            setToggle(bindings.doBBOverlapToggle, doBBOverlap);
             setToggle(bindings.extractProcessLengthToggle, wizardExtractProcessLength);
             setToggle(bindings.runSpatialToggle, wizardRunSpatial);
             setToggle(bindings.classicalCentroidFilterToggle, classicalCentroidFilter);
@@ -1960,6 +1968,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         if (object.getDoIntensityColoc() != null) {
             derived.doIntensityColoc = object.getDoIntensityColoc().booleanValue();
         }
+        if (object.getDoBBOverlap() != null) {
+            derived.doBBOverlap = object.getDoBBOverlap().booleanValue();
+        }
         if (object.getExtractProcessLength() != null) {
             derived.extractProcessLength = object.getExtractProcessLength().booleanValue();
         }
@@ -1994,6 +2005,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         doVolumetric = derived.doVolumetric;
         doCpc = derived.doCpc;
         doIntensityColoc = derived.doIntensityColoc;
+        doBBOverlap = derived.doBBOverlap;
         classicalCentroidFilter = derived.classicalCentroidFiltering;
         wizardExtractProcessLength = derived.extractProcessLength;
         wizardRunSpatial = derived.runSpatial;
@@ -2054,6 +2066,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         ToggleSwitch doVolumetricToggle;
         ToggleSwitch doCpcToggle;
         ToggleSwitch doIntensityColocToggle;
+        ToggleSwitch doBBOverlapToggle;
         ToggleSwitch extractProcessLengthToggle;
         ToggleSwitch runSpatialToggle;
         ToggleSwitch classicalCentroidFilterToggle;
@@ -2242,6 +2255,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
             if (doCpc) {
                 appendCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBOverlap) {
+                appendBBColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
             }
             if (doIntensityColoc) {
@@ -2950,6 +2967,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         keep.add("B-width");
         keep.add("B-height");
         keep.add("B-depth");
+        keep.add("B-volume (voxels)");
+        keep.add("B-volume (micron^3)");
 
         for (String other : cfg.channelNames) {
             if (other == null || other.equals(channelName)) continue;
@@ -2960,6 +2979,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             if (doCpc) {
                 keep.add(channelName + "_CPCColoc_" + other);
                 keep.add(channelName + "_CPCContains_" + other);
+            }
+            if (doBBOverlap) {
+                keep.add(bbColocPctCol(channelName, other));
+                keep.add(bbColocFlagCol(channelName, other));
             }
             if (doIntensityColoc) {
                 keep.add(objPearsonCol(channelName, other));
@@ -4041,6 +4064,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
             if (doCpc) {
                 appendCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBOverlap) {
+                appendBBColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
             }
             if (doIntensityColoc) {
@@ -5425,6 +5452,180 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private String volColocCol(String source, String partner) {
         int thr = (int) getColocThreshold(source);
         return source + "_VolColoc" + thr + "_" + partner;
+    }
+
+    // ── Bounding-Box overlap colocalization (Family C: box-vs-box) ─────
+
+    /** Continuous bounding-box overlap %: SOURCE_BBColoc_PARTNER. */
+    private String bbColocPctCol(String source, String partner) {
+        return source + "_BBColoc_" + partner;
+    }
+
+    /** Thresholded bounding-box overlap flag: SOURCE_BBColocN_PARTNER. */
+    private String bbColocFlagCol(String source, String partner) {
+        int thr = (int) getBBColocThreshold(source);
+        return source + "_BBColoc" + thr + "_" + partner;
+    }
+
+    private void ensureAllBBColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String aChannel : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(aChannel);
+            if (t == null || t.size() == 0) continue;
+            for (String bChannel : cfg.channelNames) {
+                if (aChannel.equals(bChannel)) continue;
+                ensureCpcColumn(t, bbColocPctCol(aChannel, bChannel));
+                ensureCpcColumn(t, bbColocFlagCol(aChannel, bChannel));
+            }
+        }
+    }
+
+    /**
+     * Bounding-box overlap colocalization (Family C). For each channel pair, derive both object
+     * populations (with bounding boxes) from the saved label images and, for each source object,
+     * compute the maximum box-intersection volume with any partner object divided by the source
+     * box volume (percent). Pure geometry from {@link CpcUtils.ObjectInfo}; written into each
+     * channel table matched by Label.
+     */
+    private void appendBBColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        // Zero-fill BB overlap columns for channels with no objects.
+        for (int a = 0; a < n; a++) {
+            ij.measure.ResultsTable aTable = channelTables.get(cfg.channelNames.get(a));
+            boolean aHas = channelHasObjects[a]
+                    && getRegisteredImage(cfg.channelNames.get(a) + "_objects") != null
+                    && aTable != null;
+            if (!aHas && aTable != null) {
+                for (int b = 0; b < n; b++) {
+                    if (b == a) continue;
+                    setBBColocZerosForThisImage(aTable, cfg.channelNames.get(a), cfg.channelNames.get(b),
+                            scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        for (int a = 0; a < n; a++) {
+            String aChannel = cfg.channelNames.get(a);
+            ImagePlus aObjImg = getRegisteredImage(aChannel + "_objects");
+            boolean aHas = channelHasObjects[a] && aObjImg != null;
+            ij.measure.ResultsTable aTable = channelTables.get(aChannel);
+
+            for (int b = a + 1; b < n; b++) {
+                String bChannel = cfg.channelNames.get(b);
+                ImagePlus bObjImg = getRegisteredImage(bChannel + "_objects");
+                boolean bHas = channelHasObjects[b] && bObjImg != null;
+                ij.measure.ResultsTable bTable = channelTables.get(bChannel);
+
+                if (!aHas || !bHas) {
+                    if (aTable != null) setBBColocZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBColocZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    String emptyChannel = !aHas
+                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
+                            : bChannel;
+                    IJ.log("    - BBColoc: " + aChannel + " vs " + bChannel + " skipped (no objects in " + emptyChannel + ")");
+                    continue;
+                }
+
+                try {
+                    List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aObjImg);
+                    List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bObjImg);
+
+                    Map<Integer, Float> abPercents = computeBBOverlapPercents(objectsA, objectsB);
+                    Map<Integer, Float> baPercents = computeBBOverlapPercents(objectsB, objectsA);
+
+                    if (aTable != null) {
+                        writeBBColocValuesForThisImage(aTable, aChannel, bChannel, abPercents,
+                                getBBColocThreshold(aChannel), scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    if (bTable != null) {
+                        writeBBColocValuesForThisImage(bTable, bChannel, aChannel, baPercents,
+                                getBBColocThreshold(bChannel), scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+
+                    int hitsAB = countAtOrAbove(abPercents, getBBColocThreshold(aChannel));
+                    int hitsBA = countAtOrAbove(baPercents, getBBColocThreshold(bChannel));
+                    IJ.log("    - BBColoc: " + aChannel + " vs " + bChannel
+                            + " (" + hitsAB + "/" + objectsA.size() + " fwd, "
+                            + hitsBA + "/" + objectsB.size() + " rev)");
+                } catch (Exception e) {
+                    IJ.log("    - BBColoc: " + aChannel + " vs " + bChannel + " FAILED: " + e.getMessage());
+                    if (aTable != null) setBBColocZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBColocZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+    }
+
+    /**
+     * For each source object, the maximum box-intersection volume with any partner object divided
+     * by the source box volume, as a percentage. Result keyed by source label.
+     */
+    private static Map<Integer, Float> computeBBOverlapPercents(List<CpcUtils.ObjectInfo> sources,
+                                                                List<CpcUtils.ObjectInfo> partners) {
+        Map<Integer, Float> out = new LinkedHashMap<Integer, Float>();
+        for (CpcUtils.ObjectInfo src : sources) {
+            long srcVol = src.bbVolume();
+            float pct = 0f;
+            if (srcVol > 0) {
+                long bestInter = 0L;
+                for (CpcUtils.ObjectInfo partner : partners) {
+                    long inter = src.bbIntersectionVolume(partner);
+                    if (inter > bestInter) bestInter = inter;
+                }
+                pct = (float) ((double) bestInter / (double) srcVol * 100.0);
+            }
+            out.put(src.label, pct);
+        }
+        return out;
+    }
+
+    private static int countAtOrAbove(Map<Integer, Float> percents, double threshold) {
+        int count = 0;
+        for (Float v : percents.values()) {
+            if (v != null && v.doubleValue() >= threshold) count++;
+        }
+        return count;
+    }
+
+    /** Write BB overlap continuous % + threshold flag into a table, matched by Label. */
+    private void writeBBColocValuesForThisImage(
+            ij.measure.ResultsTable table, String sourceChannel, String partnerChannel,
+            Map<Integer, Float> percentByLabel, double threshold,
+            int scnIndex, String animalName, String hemisphere, String region, String roiLabel
+    ) {
+        String pctCol = bbColocPctCol(sourceChannel, partnerChannel);
+        String flagCol = bbColocFlagCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            int label = (int) table.getValue("Label", r);
+            Float pct = percentByLabel.get(label);
+            double value = pct != null ? pct.doubleValue() : 0.0;
+            table.setValue(pctCol, r, value);
+            table.setValue(flagCol, r, value >= threshold ? 1 : 0);
+        }
+    }
+
+    private void setBBColocZerosForThisImage(ij.measure.ResultsTable table, String sourceChannel,
+                                             String partnerChannel,
+                                             int scnIndex, String animalName, String hemisphere,
+                                             String region, String roiLabel) {
+        String pctCol = bbColocPctCol(sourceChannel, partnerChannel);
+        String flagCol = bbColocFlagCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            table.setValue(pctCol, r, 0);
+            table.setValue(flagCol, r, 0);
+        }
     }
 
     private void ensureAllColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {

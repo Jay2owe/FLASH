@@ -556,6 +556,15 @@ public final class CLIArgumentParser {
                     "object.doIntensityColoc", doIntensityColoc, false));
         }
 
+        String doBBOverlap = getValue(options, "object.doBBOverlap");
+        if (doBBOverlap == null) {
+            doBBOverlap = getValue(options, "object.do_bb_overlap");
+        }
+        if (doBBOverlap != null) {
+            object.doBBOverlap = Boolean.valueOf(parseBooleanValue(
+                    "object.doBBOverlap", doBBOverlap, false));
+        }
+
         String extract = getValue(options, "object.extractProcessLength");
         if (extract == null) {
             extract = getValue(options, "object.extract_process_length");

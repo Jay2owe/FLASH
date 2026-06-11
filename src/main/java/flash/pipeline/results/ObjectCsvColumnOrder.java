@@ -274,24 +274,35 @@ public final class ObjectCsvColumnOrder {
             return new ColumnKey(7, Integer.MAX_VALUE, 0, "", originalIndex);
         }
 
+        // Bounding-box coloc family (section 8): BBColoc overlap, then (later stages) BBCPC, BBVol.
+        // Grouped per partner; within a partner, item rank orders the metrics.
+        String bbOverlap = suffixAfter(col, channelName + "_BBColoc_");            // continuous %
+        if (bbOverlap != null) {
+            return new ColumnKey(8, partnerRank(partnerRanks, bbOverlap), 0, bbOverlap, originalIndex);
+        }
+        String bbOverlapFlag = partnerAfterThresholdDigits(col, channelName + "_BBColoc");  // flag (digits)
+        if (bbOverlapFlag != null) {
+            return new ColumnKey(8, partnerRank(partnerRanks, bbOverlapFlag), 1, bbOverlapFlag, originalIndex);
+        }
+
         exact = VORONOI_ORDER.get(col);
-        if (exact != null) return new ColumnKey(8, exact, 0, "", originalIndex);
-        if ("Cluster".equals(col)) return new ColumnKey(9, 0, 0, "", originalIndex);
+        if (exact != null) return new ColumnKey(9, exact, 0, "", originalIndex);
+        if ("Cluster".equals(col)) return new ColumnKey(10, 0, 0, "", originalIndex);
 
         exact = MORPH_2D_ORDER.get(col);
-        if (exact != null) return new ColumnKey(10, exact, 0, "", originalIndex);
-        exact = MORPH_3D_ORDER.get(col);
         if (exact != null) return new ColumnKey(11, exact, 0, "", originalIndex);
-        exact = MORPH_COMPOSITE_ORDER.get(col);
+        exact = MORPH_3D_ORDER.get(col);
         if (exact != null) return new ColumnKey(12, exact, 0, "", originalIndex);
-        exact = MORPH_POPULATION_ORDER.get(col);
+        exact = MORPH_COMPOSITE_ORDER.get(col);
         if (exact != null) return new ColumnKey(13, exact, 0, "", originalIndex);
-        exact = MORPH_SPATIAL_ORDER.get(col);
+        exact = MORPH_POPULATION_ORDER.get(col);
         if (exact != null) return new ColumnKey(14, exact, 0, "", originalIndex);
-        if (col.startsWith("Morph_")) return new ColumnKey(15, 0, 0, col, originalIndex);
+        exact = MORPH_SPATIAL_ORDER.get(col);
+        if (exact != null) return new ColumnKey(15, exact, 0, "", originalIndex);
+        if (col.startsWith("Morph_")) return new ColumnKey(16, 0, 0, col, originalIndex);
         exact = MORPH_TEXTURE_ORDER.get(col);
-        if (exact != null) return new ColumnKey(16, exact, 0, "", originalIndex);
-        if (col.startsWith("MorphTexture_")) return new ColumnKey(17, 0, 0, col, originalIndex);
+        if (exact != null) return new ColumnKey(17, exact, 0, "", originalIndex);
+        if (col.startsWith("MorphTexture_")) return new ColumnKey(18, 0, 0, col, originalIndex);
 
         return new ColumnKey(100, 0, 0, "", originalIndex);
     }
@@ -393,6 +404,23 @@ public final class ObjectCsvColumnOrder {
         String tail = col.substring(prefix.length());
         int split = tail.indexOf('_');
         if (split < 0 || split == tail.length() - 1) return null;
+        return tail.substring(split + 1);
+    }
+
+    /**
+     * Like {@link #partnerAfterThreshold} but only matches when the characters between the prefix
+     * and the partner-separating {@code _} are all digits (a numeric threshold). This prevents the
+     * threshold rule from swallowing continuous stems that share the prefix, e.g. {@code _BBColoc_}
+     * or {@code _BBVolColocTotal_}, which have a non-digit (or empty) segment there.
+     */
+    private static String partnerAfterThresholdDigits(String col, String prefix) {
+        if (!col.startsWith(prefix)) return null;
+        String tail = col.substring(prefix.length());
+        int split = tail.indexOf('_');
+        if (split <= 0 || split == tail.length() - 1) return null;
+        for (int i = 0; i < split; i++) {
+            if (!Character.isDigit(tail.charAt(i))) return null;
+        }
         return tail.substring(split + 1);
     }
 
