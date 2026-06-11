@@ -268,6 +268,38 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void insertingNewPrimaryAxisKeepsOldPrimaryValueWithItsAxis() {
+        // Old primary (Genotype) SURVIVES as a non-primary axis when a new front axis is
+        // inserted; its value+meta must stay with Genotype, not migrate to the new primary.
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.setConditionAxes(Arrays.asList(ConditionAxis.of("Genotype"), ConditionAxis.of("Timepoint")));
+        model.addFile(new File("M1.tif"));
+        model.setValueAt("M1", 0, ProjectManifestTableModel.COL_ANIMAL);
+        model.setValueAt("hAPP", 0, ProjectManifestTableModel.COL_CONDITION);          // Genotype (primary), user-set
+        model.setValueAt("WeekFour", 0, ProjectManifestTableModel.COL_CONDITION + 1);  // Timepoint
+
+        model.setConditionAxes(Arrays.asList(
+                ConditionAxis.of("Sex"), ConditionAxis.of("Genotype"), ConditionAxis.of("Timepoint")));
+
+        int sexCol = model.conditionColumnForAxis("sex");
+        int genoCol = model.conditionColumnForAxis("genotype");
+        int tpCol = model.conditionColumnForAxis("timepoint");
+        assertEquals(ProjectManifestTableModel.COL_CONDITION, sexCol);   // Sex is the new primary
+        assertEquals("", model.getValueAt(0, sexCol));                  // new axis starts empty
+        assertEquals("hAPP", model.getValueAt(0, genoCol));            // genotype value stayed with genotype
+        assertTrue(model.isUserSet(0, genoCol));                        // and so did its user-set meta
+        assertEquals("WeekFour", model.getValueAt(0, tpCol));
+    }
+
+    @Test
+    public void addConditionAxisIgnoresBlankId() {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.addFile(new File("M1.tif"));
+        model.addConditionAxis(ConditionAxis.of("   "));
+        assertTrue(model.conditionAxes().isEmpty());
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();

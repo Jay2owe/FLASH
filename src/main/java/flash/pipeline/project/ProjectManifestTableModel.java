@@ -466,11 +466,15 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         boolean carriedOldPrimary = false;
         if (byId.containsKey(newPrimary)) {
             newPrimaryValue = byId.get(newPrimary);                 // reorder / same primary
-        } else if (byId.containsKey(oldPrimary)) {
-            newPrimaryValue = byId.get(oldPrimary);                 // collapse: carry old primary forward
+        } else if (!keep.contains(oldPrimary) && byId.containsKey(oldPrimary)) {
+            // The old primary axis is being DROPPED and the new primary is brand new:
+            // carry the old primary value forward so a collapse does not lose it. If the
+            // old primary survives as a non-primary axis, its value must stay with it, so
+            // this branch must NOT fire (otherwise an inserted front axis would steal it).
+            newPrimaryValue = byId.get(oldPrimary);
             carriedOldPrimary = true;
         } else {
-            newPrimaryValue = "";
+            newPrimaryValue = "";                                   // brand-new primary starts empty
         }
 
         if (conditions != null) {
@@ -503,9 +507,9 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         }
     }
 
-    /** Add one condition axis to the visible condition block. */
+    /** Add one condition axis to the visible condition block (blank-id axes ignored). */
     public void addConditionAxis(ConditionAxis axis) {
-        if (axis == null || hasAxis(axis.id)) return;
+        if (axis == null || axis.id.isEmpty() || hasAxis(axis.id)) return;
         conditionAxes.add(axis);
         fireTableStructureChanged();
     }
