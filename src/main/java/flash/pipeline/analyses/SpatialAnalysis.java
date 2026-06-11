@@ -23,6 +23,7 @@ import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.intelligence.JunkFileFilter;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.naming.ChannelFilenameCodec;
+import flash.pipeline.objects.BoundingBoxColoc;
 import flash.pipeline.objects.CpcUtils;
 
 import flash.pipeline.help.SpatialHelpCatalog;
@@ -283,6 +284,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         private boolean doSpatialStats;
         private boolean doCpc;
         private boolean doVolumetric;
+        private boolean doBBOverlap;
+        private boolean doBBCpc;
+        private boolean doBBVol;
         private boolean doVoronoi;
         private boolean doHeatmaps;
         private boolean doPhenotyping;
@@ -1041,6 +1045,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         context.doSpatialStats = doSpatialStats;
         context.doCpc = doCpc;
         context.doVolumetric = doVolumetric;
+        context.doBBOverlap = doBBOverlap;
+        context.doBBCpc = doBBCpc;
+        context.doBBVol = doBBVol;
         context.doVoronoi = doVoronoi;
         context.doHeatmaps = doHeatmaps;
         context.doPhenotyping = doPhenotyping;
@@ -1126,6 +1133,12 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         if (context.doCpc) {
             runCpcIfNeeded(directory, context.channels, context.channelNames,
                     context.existingObjectData, provider);
+        }
+
+        if (context.doBBOverlap || context.doBBCpc || context.doBBVol) {
+            runBBColocIfNeeded(directory, context.channels, context.channelNames,
+                    context.existingObjectData, provider,
+                    context.doBBOverlap, context.doBBCpc, context.doBBVol);
         }
 
         if (context.doHeatmaps) {
@@ -3048,6 +3061,211 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
      * If CPC columns are missing from the object CSVs, compute them retroactively
      * by loading saved label images from the object image-output folders and running CPC.
      */
+    /**
+     * Recompute bounding-box colocalization columns from saved label images when they are missing,
+     * mirroring {@link #runCpcIfNeeded}. The producer (3D Object Analysis) normally writes these; this
+     * is the standalone-Spatial safety net so the BB toggles are not a no-op. Geometry is delegated to
+     * the shared {@link CpcUtils} / {@link BoundingBoxColoc} helpers. Threshold flags are then refreshed
+     * by {@link #refreshBBColocFlags}.
+     */
+    private void runBBColocIfNeeded(String directory, Map<String, ChannelData> channels, List<String> channelNames,
+                                    SpatialObjectDataAvailability detectedData, LabelImageProvider provider,
+                                    boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
+        if (channelNames.size() < 2) return;
+        if (!isForceRerunActive() && detectedData != null
+                && allBBFamiliesDetected(detectedData, channelNames, doBBOverlap, doBBCpc, doBBVol)) {
+            IJ.log("--- Reusing existing bounding-box columns from 3D Object Analysis; skipping recomputation ---");
+            return;
+        }
+        IJ.log("--- Computing bounding-box colocalization from saved label images ---");
+
+        for (String ch : channelNames) {
+            ChannelData cd = channels.get(ch);
+            if (cd == null) continue;
+            for (String other : channelNames) {
+                if (other.equals(ch)) continue;
+                if (doBBOverlap) {
+                    cd.addColumn(ch + "_BBColoc_" + other);
+                    cd.addColumn(ch + "_BBColoc" + (int) getBBThreshold(ch) + "_" + other);
+                }
+                if (doBBCpc) {
+                    cd.addColumn(ch + "_BBCPCColoc_" + other);
+                    cd.addColumn(ch + "_BBCPCContains_" + other);
+                }
+                if (doBBVol) {
+                    cd.addColumn(ch + "_BBVolColoc_" + other);
+                    cd.addColumn(ch + "_BBVolColocTotal_" + other);
+                    cd.addColumn(ch + "_BBVolColoc" + (int) getBBThreshold(ch) + "_" + other);
+                }
+            }
+            if (doBBCpc) {
+                cd.addColumn(ch + "_BBCPCTargetsHit");
+                cd.addColumn(ch + "_BBCPCPattern");
+            }
+        }
+
+        Map<String, Map<SectionKey, List<Integer>>> sectionsByChannel =
+                buildCpcSectionGroups(directory, channels, channelNames, "BB");
+        for (int a = 0; a < channelNames.size(); a++) {
+            for (int b = a + 1; b < channelNames.size(); b++) {
+                String nameA = channelNames.get(a);
+                String nameB = channelNames.get(b);
+                ChannelData cdA = channels.get(nameA);
+                ChannelData cdB = channels.get(nameB);
+                if (cdA == null || cdB == null) continue;
+                Map<SectionKey, List<Integer>> sectionsA = sectionsByChannel.get(nameA);
+                Map<SectionKey, List<Integer>> sectionsB = sectionsByChannel.get(nameB);
+                if (sectionsA == null || sectionsB == null) continue;
+                Set<SectionKey> allSections = new LinkedHashSet<SectionKey>();
+                allSections.addAll(sectionsA.keySet());
+                allSections.addAll(sectionsB.keySet());
+                for (SectionKey section : allSections) {
+                    List<Integer> rowsA = sectionsA.get(section);
+                    List<Integer> rowsB = sectionsB.get(section);
+                    processBBSection(nameA, nameB, cdA, cdB,
+                            rowsA == null ? java.util.Collections.<Integer>emptyList() : rowsA,
+                            rowsB == null ? java.util.Collections.<Integer>emptyList() : rowsB,
+                            section, provider, doBBOverlap, doBBCpc, doBBVol);
+                }
+            }
+        }
+
+        if (doBBCpc) {
+            for (String ch : channelNames) {
+                ChannelData cd = channels.get(ch);
+                if (cd == null) continue;
+                List<String> partners = new ArrayList<String>();
+                for (String other : channelNames) {
+                    if (!other.equals(ch)) partners.add(other);
+                }
+                for (int r = 0; r < cd.rows.size(); r++) {
+                    int hits = 0;
+                    StringBuilder pattern = new StringBuilder();
+                    for (String partner : partners) {
+                        if ("1".equals(cd.get(r, ch + "_BBCPCColoc_" + partner))) {
+                            hits++;
+                            if (pattern.length() > 0) pattern.append(" + ");
+                            pattern.append(partner);
+                        }
+                    }
+                    cd.set(r, ch + "_BBCPCTargetsHit", String.valueOf(hits));
+                    cd.set(r, ch + "_BBCPCPattern", hits > 0 ? pattern.toString() : "None");
+                }
+            }
+        }
+        IJ.log("--- Bounding-box colocalization computation complete ---");
+    }
+
+    private static boolean allBBFamiliesDetected(SpatialObjectDataAvailability detectedData,
+                                                 List<String> channelNames,
+                                                 boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
+        for (int a = 0; a < channelNames.size(); a++) {
+            for (int b = a + 1; b < channelNames.size(); b++) {
+                String x = channelNames.get(a);
+                String y = channelNames.get(b);
+                if (doBBOverlap && !detectedData.hasBBOverlapPair(x, y)) return false;
+                if (doBBCpc && !detectedData.hasBBCpcPair(x, y)) return false;
+                if (doBBVol && !detectedData.hasBBVolPair(x, y)) return false;
+            }
+        }
+        return true;
+    }
+
+    /** One BB section (one animal/region) for a single channel pair. Writes both directions by Label. */
+    private void processBBSection(String nameA, String nameB, ChannelData cdA, ChannelData cdB,
+                                  List<Integer> rowsA, List<Integer> rowsB, SectionKey section,
+                                  LabelImageProvider provider,
+                                  boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
+        ImagePlus aImg = provider.get(nameA, section);
+        ImagePlus bImg = provider.get(nameB, section);
+        if (aImg == null || bImg == null) {
+            closeLabelImage(aImg, provider, nameA, section);
+            closeLabelImage(bImg, provider, nameB, section);
+            return;
+        }
+        try {
+            List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aImg);
+            List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bImg);
+            writeBBSectionDirection(cdA, rowsA, aImg, nameA, nameB, objectsA, objectsB, bImg,
+                    doBBOverlap, doBBCpc, doBBVol);
+            writeBBSectionDirection(cdB, rowsB, bImg, nameB, nameA, objectsB, objectsA, aImg,
+                    doBBOverlap, doBBCpc, doBBVol);
+        } catch (Exception e) {
+            IJ.log("    Warning: bounding-box recompute failed for " + section + ": " + e.getMessage());
+        } finally {
+            closeLabelImage(aImg, provider, nameA, section);
+            closeLabelImage(bImg, provider, nameB, section);
+        }
+    }
+
+    private void writeBBSectionDirection(ChannelData cd, List<Integer> rows, ImagePlus srcImg,
+                                         String src, String partner,
+                                         List<CpcUtils.ObjectInfo> sources, List<CpcUtils.ObjectInfo> partners,
+                                         ImagePlus partnerImg,
+                                         boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
+        if (cd == null || rows.isEmpty()) return;
+        double threshold = getBBThreshold(src);
+        int thr = (int) threshold;
+        Map<Integer, CpcUtils.ObjectInfo> byLabel = new LinkedHashMap<Integer, CpcUtils.ObjectInfo>();
+        for (CpcUtils.ObjectInfo o : sources) byLabel.put(o.label, o);
+
+        Map<Integer, Float> overlap = null;
+        Map<Integer, float[]> fill = null;
+        Map<Integer, Integer> contains = null;
+        List<CpcUtils.ObjectInfo> coloc = null;
+        if (doBBOverlap) {
+            overlap = new LinkedHashMap<Integer, Float>();
+            for (CpcUtils.ObjectInfo s : sources) {
+                long vol = s.bbVolume();
+                long best = 0L;
+                if (vol > 0) {
+                    for (CpcUtils.ObjectInfo p : partners) {
+                        long inter = s.bbIntersectionVolume(p);
+                        if (inter > best) best = inter;
+                    }
+                }
+                overlap.put(s.label, vol > 0 ? (float) ((double) best / vol * 100.0) : 0f);
+            }
+        }
+        if (doBBVol) {
+            fill = BoundingBoxColoc.fillPercents(partnerImg, sources);
+        }
+        if (doBBCpc) {
+            coloc = CpcUtils.copyObjects(sources);
+            CpcUtils.testBoundingBoxCoincidence(coloc, partners);
+            contains = CpcUtils.countCentroidsInBoxes(sources, partners);
+        }
+        Map<Integer, Boolean> colocByLabel = new LinkedHashMap<Integer, Boolean>();
+        if (coloc != null) {
+            for (CpcUtils.ObjectInfo o : coloc) colocByLabel.put(o.label, o.isColocalized());
+        }
+
+        boolean hasLabel = cd.colIdx.containsKey("Label");
+        for (int rowIdx : rows) {
+            int label = resolveRowLabel(cd, rowIdx, hasLabel, srcImg);
+            if (label <= 0) continue;
+            if (doBBOverlap) {
+                double v = overlap.containsKey(label) ? overlap.get(label) : 0.0;
+                cd.set(rowIdx, src + "_BBColoc_" + partner, String.valueOf(v));
+                cd.set(rowIdx, src + "_BBColoc" + thr + "_" + partner, v >= threshold ? "1" : "0");
+            }
+            if (doBBVol) {
+                float[] f = fill.get(label);
+                double best = f != null ? f[0] : 0.0;
+                double total = f != null ? f[1] : 0.0;
+                cd.set(rowIdx, src + "_BBVolColoc_" + partner, String.valueOf(best));
+                cd.set(rowIdx, src + "_BBVolColocTotal_" + partner, String.valueOf(total));
+                cd.set(rowIdx, src + "_BBVolColoc" + thr + "_" + partner, best >= threshold ? "1" : "0");
+            }
+            if (doBBCpc) {
+                Boolean c = colocByLabel.get(label);
+                cd.set(rowIdx, src + "_BBCPCColoc_" + partner, (c != null && c) ? "1" : "0");
+                Integer cc = contains.get(label);
+                cd.set(rowIdx, src + "_BBCPCContains_" + partner, String.valueOf(cc != null ? cc : 0));
+            }
+        }
+    }
+
     private void runCpcIfNeeded(String directory, Map<String, ChannelData> channels, List<String> channelNames,
                                 SpatialObjectDataAvailability detectedData, LabelImageProvider provider) {
         if (channelNames.size() < 2) return;
