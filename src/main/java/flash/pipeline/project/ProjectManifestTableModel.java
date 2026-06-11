@@ -409,13 +409,13 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
 
     /**
      * Replace the condition-axis schema (de-duplicated by id; blank-id axes ignored).
-     * Existing per-row values and per-cell meta are migrated by axis id: the value for
-     * whichever axis becomes primary moves into the primary slot ({@code row.condition}),
-     * surviving non-primary values stay keyed by id, and values/meta for dropped axes are
-     * discarded. When the new primary axis is brand new (e.g. collapsing a multi-axis
-     * schema back to a single {@code Condition}), the OLD primary value (and its meta) is
-     * carried into the new primary slot rather than lost. This keeps any schema edit
-     * (reorder, drop, collapse) from scrambling or silently dropping the table.
+     * Values and per-cell meta belong to their axis id: the value for whichever axis
+     * becomes primary moves into the primary slot ({@code row.condition}), surviving
+     * non-primary values stay keyed by id, and values + meta for dropped axes are
+     * discarded. A brand-new primary axis starts blank. This keeps any schema edit
+     * (reorder, drop, insert, collapse) from scrambling or mis-attributing the table;
+     * a removed axis's value is intentionally dropped rather than folded into an
+     * unrelated column (which would be data corruption, not preservation).
      */
     public void setConditionAxes(List<ConditionAxis> axes) {
         String oldPrimary = primaryAxisId();
@@ -432,12 +432,12 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         if (keep.isEmpty()) keep.add("condition");   // implicit primary stays active
 
         for (Row row : rows) {
-            row.condition = migrateConditionStorage(row.condition, row.conditions, row.meta,
+            row.condition = remapConditionStorage(row.condition, row.conditions,
                     oldPrimary, newPrimary, keep);
             retainMetaAxes(row.meta, keep);
             for (SeriesRow series : row.series) {
-                series.condition = migrateConditionStorage(series.condition, series.conditions,
-                        series.meta, oldPrimary, newPrimary, keep);
+                series.condition = remapConditionStorage(series.condition, series.conditions,
+                        oldPrimary, newPrimary, keep);
                 retainMetaAxes(series.meta, keep);
             }
         }
@@ -448,50 +448,28 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     }
 
     /**
-     * Migrate one row/series' condition values AND per-cell meta for a (possibly
-     * reordered, dropped, or collapsed) schema. The old primary value lives in
-     * {@code primaryValue}; non-primary values are in {@code conditions} (keyed by id).
-     * Mutates {@code conditions}/{@code meta} in place to hold the surviving non-primary
-     * entries and returns the value for the new primary axis. If the new primary axis is
-     * not among the existing values, the old primary value (and meta) is carried into it.
+     * Redistribute one row/series' condition values for a (possibly reordered, dropped,
+     * inserted, or collapsed) schema. The old primary value lives in {@code primaryValue};
+     * non-primary values are in {@code conditions} (keyed by id). Each value stays with its
+     * axis id: mutates {@code conditions} in place to hold the surviving non-primary values
+     * and returns the value for the new primary axis ({@code ""} if that axis had none).
+     * Values for dropped axes are discarded (their meta is purged separately by
+     * {@link #retainMetaAxes}).
      */
-    private static String migrateConditionStorage(String primaryValue, Map<String, String> conditions,
-                                                  Map<String, CellMeta> meta, String oldPrimary,
-                                                  String newPrimary, java.util.Set<String> keep) {
+    private static String remapConditionStorage(String primaryValue, Map<String, String> conditions,
+                                                String oldPrimary, String newPrimary,
+                                                java.util.Set<String> keep) {
         Map<String, String> byId = new LinkedHashMap<String, String>();
         if (primaryValue != null && !primaryValue.trim().isEmpty()) byId.put(oldPrimary, primaryValue);
         if (conditions != null) byId.putAll(conditions);
-
-        String newPrimaryValue;
-        boolean carriedOldPrimary = false;
-        if (byId.containsKey(newPrimary)) {
-            newPrimaryValue = byId.get(newPrimary);                 // reorder / same primary
-        } else if (!keep.contains(oldPrimary) && byId.containsKey(oldPrimary)) {
-            // The old primary axis is being DROPPED and the new primary is brand new:
-            // carry the old primary value forward so a collapse does not lose it. If the
-            // old primary survives as a non-primary axis, its value must stay with it, so
-            // this branch must NOT fire (otherwise an inserted front axis would steal it).
-            newPrimaryValue = byId.get(oldPrimary);
-            carriedOldPrimary = true;
-        } else {
-            newPrimaryValue = "";                                   // brand-new primary starts empty
-        }
-
+        String newPrimaryValue = byId.containsKey(newPrimary) ? byId.get(newPrimary) : "";
         if (conditions != null) {
             conditions.clear();
             for (Map.Entry<String, String> e : byId.entrySet()) {
                 String id = e.getKey();
-                if (id == null || id.equals(newPrimary)) continue;                 // -> primary slot
-                if (carriedOldPrimary && id.equals(oldPrimary)) continue;          // moved to primary slot
-                if (keep.contains(id)) conditions.put(id, e.getValue());           // surviving non-primary
+                if (id == null || id.equals(newPrimary)) continue;        // primary -> dedicated slot
+                if (keep.contains(id)) conditions.put(id, e.getValue());  // surviving non-primary axis
             }
-        }
-
-        // When the old primary value was carried into a different new primary id, move its
-        // meta too so a user-set flag follows the value into the new primary column.
-        if (meta != null && carriedOldPrimary && !newPrimary.equals(oldPrimary)) {
-            CellMeta carried = meta.remove(oldPrimary);
-            if (carried != null) meta.put(newPrimary, carried);
         }
         return newPrimaryValue == null ? "" : newPrimaryValue;
     }
@@ -589,7 +567,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     }
 
     private void addAxisIfMissing(ConditionAxis axis) {
-        if (axis != null && !hasAxis(axis.id)) {
+        if (axis != null && !axis.id.isEmpty() && !hasAxis(axis.id)) {
             conditionAxes.add(axis);
         }
     }

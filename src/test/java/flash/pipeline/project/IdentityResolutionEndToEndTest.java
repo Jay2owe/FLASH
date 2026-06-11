@@ -235,22 +235,40 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
-    public void collapsingMultiAxisToLegacyCarriesOldPrimaryValueAndMeta() {
+    public void collapsingMultiAxisToLegacyDropsRemovedAxisValues() {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
         model.setConditionAxes(Arrays.asList(ConditionAxis.of("Genotype"), ConditionAxis.of("Timepoint")));
         model.addFile(new File("M1.tif"));
         model.setValueAt("M1", 0, ProjectManifestTableModel.COL_ANIMAL);
-        model.setValueAt("hAPP", 0, ProjectManifestTableModel.COL_CONDITION);          // Genotype (primary), user-set
+        model.setValueAt("hAPP", 0, ProjectManifestTableModel.COL_CONDITION);          // Genotype (primary)
         model.setValueAt("WeekFour", 0, ProjectManifestTableModel.COL_CONDITION + 1);  // Timepoint
 
-        // Collapse the schema back to a single legacy Condition axis.
+        // Collapse to a single legacy Condition axis. Values belong to their axis id, so
+        // both removed axes' values are dropped and the new Condition axis starts blank
+        // (folding genotype into "Condition" would be mis-attribution, not preservation).
         model.setConditionAxes(java.util.Collections.<ConditionAxis>emptyList());
 
-        // The old primary value is carried into the legacy Condition slot with its meta,
-        // rather than silently dropped.
-        assertEquals("hAPP", model.getValueAt(0, ProjectManifestTableModel.COL_CONDITION));
-        assertTrue(model.isUserSet(0, ProjectManifestTableModel.COL_CONDITION));
         assertTrue(model.conditionAxes().isEmpty());
+        assertEquals("", model.getValueAt(0, ProjectManifestTableModel.COL_CONDITION));
+        assertFalse(model.isUserSet(0, ProjectManifestTableModel.COL_CONDITION));
+    }
+
+    @Test
+    public void droppingPrimaryAxisToExistingBlankAxisDoesNotMisCarry() {
+        // Drop the primary Genotype, promoting an existing Timepoint that is BLANK for the
+        // row: the genotype value must NOT leak into the Timepoint column.
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.setConditionAxes(Arrays.asList(ConditionAxis.of("Genotype"), ConditionAxis.of("Timepoint")));
+        model.addFile(new File("M1.tif"));
+        model.setValueAt("M1", 0, ProjectManifestTableModel.COL_ANIMAL);
+        model.setValueAt("hAPP", 0, ProjectManifestTableModel.COL_CONDITION);          // Genotype only
+
+        model.setConditionAxes(Arrays.asList(ConditionAxis.of("Timepoint")));
+
+        int tpCol = model.conditionColumnForAxis("timepoint");
+        assertEquals(ProjectManifestTableModel.COL_CONDITION, tpCol);
+        assertEquals("", model.getValueAt(0, tpCol));               // genotype's hAPP did not leak in
+        assertFalse(model.isUserSet(0, tpCol));
     }
 
     @Test
