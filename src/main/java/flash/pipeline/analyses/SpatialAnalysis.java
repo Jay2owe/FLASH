@@ -1169,6 +1169,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                            SpatialExecutionContext context,
                                            LabelImageProvider provider) {
         if (!context.doCpc && !context.doHeatmaps
+                && !context.doBBOverlap && !context.doBBCpc && !context.doBBVol
                 && !context.doMorphology && !context.do3DShapeFeatures
                 && !context.doObjectGLCM && !context.doObjectFractal
                 && !context.doObjectTextureClass && !context.doNative3DTexture) {
@@ -3072,8 +3073,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                     SpatialObjectDataAvailability detectedData, LabelImageProvider provider,
                                     boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
         if (channelNames.size() < 2) return;
-        if (!isForceRerunActive() && detectedData != null
-                && allBBFamiliesDetected(detectedData, channelNames, doBBOverlap, doBBCpc, doBBVol)) {
+        if (!isForceRerunActive()
+                && allBBFamiliesDetected(channels, channelNames, doBBOverlap, doBBCpc, doBBVol)) {
             IJ.log("--- Reusing existing bounding-box columns from 3D Object Analysis; skipping recomputation ---");
             return;
         }
@@ -3156,18 +3157,34 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         IJ.log("--- Bounding-box colocalization computation complete ---");
     }
 
-    private static boolean allBBFamiliesDetected(SpatialObjectDataAvailability detectedData,
+    /**
+     * Strict completeness: every selected family's CONTINUOUS (and BBCPC contains) columns must
+     * already exist in both directions, so we don't false-skip when only a threshold flag is present
+     * (threshold flags are regenerated cheaply by {@link #refreshBBColocFlags}).
+     */
+    private static boolean allBBFamiliesDetected(Map<String, ChannelData> channels,
                                                  List<String> channelNames,
                                                  boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
         for (int a = 0; a < channelNames.size(); a++) {
             for (int b = a + 1; b < channelNames.size(); b++) {
                 String x = channelNames.get(a);
                 String y = channelNames.get(b);
-                if (doBBOverlap && !detectedData.hasBBOverlapPair(x, y)) return false;
-                if (doBBCpc && !detectedData.hasBBCpcPair(x, y)) return false;
-                if (doBBVol && !detectedData.hasBBVolPair(x, y)) return false;
+                if (!bbDirectionComplete(channels, x, y, doBBOverlap, doBBCpc, doBBVol)) return false;
+                if (!bbDirectionComplete(channels, y, x, doBBOverlap, doBBCpc, doBBVol)) return false;
             }
         }
+        return true;
+    }
+
+    private static boolean bbDirectionComplete(Map<String, ChannelData> channels, String src, String partner,
+                                               boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
+        ChannelData cd = channels.get(src);
+        if (cd == null) return false;
+        if (doBBOverlap && !hasUsableColumn(cd, src + "_BBColoc_" + partner)) return false;
+        if (doBBVol && (!hasUsableColumn(cd, src + "_BBVolColoc_" + partner)
+                || !hasUsableColumn(cd, src + "_BBVolColocTotal_" + partner))) return false;
+        if (doBBCpc && (!hasUsableColumn(cd, src + "_BBCPCColoc_" + partner)
+                || !hasUsableColumn(cd, src + "_BBCPCContains_" + partner))) return false;
         return true;
     }
 
@@ -3178,18 +3195,22 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                   boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
         ImagePlus aImg = provider.get(nameA, section);
         ImagePlus bImg = provider.get(nameB, section);
-        if (aImg == null || bImg == null) {
-            closeLabelImage(aImg, provider, nameA, section);
-            closeLabelImage(bImg, provider, nameB, section);
-            return;
-        }
         try {
-            List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aImg);
-            List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bImg);
-            writeBBSectionDirection(cdA, rowsA, aImg, nameA, nameB, objectsA, objectsB, bImg,
-                    doBBOverlap, doBBCpc, doBBVol);
-            writeBBSectionDirection(cdB, rowsB, bImg, nameB, nameA, objectsB, objectsA, aImg,
-                    doBBOverlap, doBBCpc, doBBVol);
+            // A missing partner image leaves the partner population empty, which the writer turns
+            // into zeros - matching the producer's empty-channel zero-fill. Only the source image is
+            // required (for row-label resolution), so each direction is written independently.
+            List<CpcUtils.ObjectInfo> objectsA = aImg != null
+                    ? CpcUtils.extractObjects(aImg) : new ArrayList<CpcUtils.ObjectInfo>();
+            List<CpcUtils.ObjectInfo> objectsB = bImg != null
+                    ? CpcUtils.extractObjects(bImg) : new ArrayList<CpcUtils.ObjectInfo>();
+            if (aImg != null) {
+                writeBBSectionDirection(cdA, rowsA, aImg, nameA, nameB, objectsA, objectsB, bImg,
+                        doBBOverlap, doBBCpc, doBBVol);
+            }
+            if (bImg != null) {
+                writeBBSectionDirection(cdB, rowsB, bImg, nameB, nameA, objectsB, objectsA, aImg,
+                        doBBOverlap, doBBCpc, doBBVol);
+            }
         } catch (Exception e) {
             IJ.log("    Warning: bounding-box recompute failed for " + section + ": " + e.getMessage());
         } finally {
