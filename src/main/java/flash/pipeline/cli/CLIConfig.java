@@ -238,6 +238,12 @@ public class CLIConfig {
         appendBoolean(parts, "spatial.stats", spatial.doSpatialStats);
         appendBoolean(parts, "spatial.volumetric", spatial.doVolColoc);
         appendBoolean(parts, "spatial.cpc", spatial.doCpc);
+        appendBoolean(parts, "spatial.bb_overlap", spatial.doBBOverlap);
+        appendBoolean(parts, "spatial.bb_cpc", spatial.doBBCpc);
+        appendBoolean(parts, "spatial.bb_vol", spatial.doBBVol);
+        if (spatial.bbColocThresholdPercent != null) {
+            parts.add("spatial.bb_threshold=" + formatDouble(spatial.bbColocThresholdPercent.doubleValue()));
+        }
         appendBoolean(parts, "spatial.voronoi", spatial.doVoronoi);
         appendBoolean(parts, "spatial.heatmaps", spatial.doHeatmaps);
         appendBoolean(parts, "spatial.phenotyping", spatial.doPhenotyping);
@@ -698,6 +704,10 @@ public class CLIConfig {
         Boolean doSpatialStats = null;
         Boolean doVolColoc = null;
         Boolean doCpc = null;
+        Boolean doBBOverlap = null;
+        Boolean doBBCpc = null;
+        Boolean doBBVol = null;
+        Double bbColocThresholdPercent = null;
         Boolean doVoronoi = null;
         Boolean doHeatmaps = null;
         Boolean doPhenotyping = null;
@@ -721,6 +731,10 @@ public class CLIConfig {
         public Boolean getDoSpatialStats() { return doSpatialStats; }
         public Boolean getDoVolColoc() { return doVolColoc; }
         public Boolean getDoCpc() { return doCpc; }
+        public Boolean getDoBBOverlap() { return doBBOverlap; }
+        public Boolean getDoBBCpc() { return doBBCpc; }
+        public Boolean getDoBBVol() { return doBBVol; }
+        public Double getBBColocThresholdPercent() { return bbColocThresholdPercent; }
         public Boolean getDoVoronoi() { return doVoronoi; }
         public Boolean getDoHeatmaps() { return doHeatmaps; }
         public Boolean getDoPhenotyping() { return doPhenotyping; }
@@ -749,6 +763,10 @@ public class CLIConfig {
                     || doSpatialStats != null
                     || doVolColoc != null
                     || doCpc != null
+                    || doBBOverlap != null
+                    || doBBCpc != null
+                    || doBBVol != null
+                    || bbColocThresholdPercent != null
                     || doVoronoi != null
                     || doHeatmaps != null
                     || doPhenotyping != null

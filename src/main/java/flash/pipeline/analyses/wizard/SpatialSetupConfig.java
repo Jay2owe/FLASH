@@ -353,6 +353,9 @@ public final class SpatialSetupConfig {
         public boolean doSpatialStats;
         public boolean doVolColoc;
         public boolean doCpc;
+        public boolean doBBOverlap;
+        public boolean doBBCpc;
+        public boolean doBBVol;
         public boolean doVoronoi;
         public boolean doHeatmaps;
         public boolean doPhenotyping;
@@ -372,6 +375,7 @@ public final class SpatialSetupConfig {
         public int clusterK = 0;
         public int textureClassK = 4;
         public double colocThresholdPercent = 30.0;
+        public double bbColocThresholdPercent = 30.0;
         public final Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
 
         public boolean anyEarlyPhaseToggleOn() {

@@ -51,6 +51,23 @@ public final class SpatialHelpCatalog {
                     "CPC is asymmetric: 'A's centroid in B' is not the same as 'B's centroid in A'.",
                     "CPC is sensitive to one-voxel segmentation noise at the centroid location."));
 
+    public static final SetupHelpTopic BB_COLOCALIZATION = topic(
+            "spatial-bb-colocalization",
+            "Bounding-Box Colocalization",
+            "Bounding-box (BB) colocalization families produced by 3D Object Analysis: box-vs-box overlap, "
+                    + "centroid-in-box coincidence, and box volume fill. Reuses saved BB columns; missing "
+                    + "threshold flags are derived from the saved continuous columns.",
+            section("Sub-analyses",
+                    "Bounding-box overlap: max intersection of an object's box with a partner box, as a percent of the source box (BBColoc).",
+                    "Bounding-box centroid coincidence (BB-CPC): the object's centroid lies inside a partner object's bounding box (box is a superset of the object).",
+                    "Bounding-box volume fill: partner voxels filling the object's box - single best partner and total of all partners (BBVolColoc / BBVolColocTotal)."),
+            section("Requires",
+                    "Saved BB columns from 3D Object Analysis, or label images to recompute.",
+                    "A per-channel BB Coloc Threshold (%), independent of the volumetric threshold."),
+            section("Watch out",
+                    "BB metrics use bounding boxes, not voxels, so they are more permissive than volumetric/CPC colocalization.",
+                    "Threshold fields are enabled only while a BB toggle is on and not locked from 3D Object Analysis."));
+
     public static final SetupHelpTopic VORONOI = topic(
             "spatial-voronoi",
             "Voronoi Tessellation",
@@ -141,7 +158,7 @@ public final class SpatialHelpCatalog {
     private static Map<String, SetupHelpTopic> buildIndex() {
         Map<String, SetupHelpTopic> map = new LinkedHashMap<String, SetupHelpTopic>();
         SetupHelpTopic[] entries = new SetupHelpTopic[] {
-                DISTANCES, COLOCALIZATION, VORONOI, MORPHOMETRY, PHENOTYPING, HEATMAPS };
+                DISTANCES, COLOCALIZATION, BB_COLOCALIZATION, VORONOI, MORPHOMETRY, PHENOTYPING, HEATMAPS };
         for (SetupHelpTopic t : entries) {
             if (map.put(t.key, t) != null) {
                 throw new IllegalStateException("Duplicate spatial helper key: " + t.key);

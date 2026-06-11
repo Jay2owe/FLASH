@@ -233,8 +233,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         SpatialSetupConfig.DerivedConfig launch(String directory,
                                                    List<String> channelNames,
                                                    Map<String, Double> markerThresholds,
+                                                   Map<String, Double> bbThresholds,
                                                    boolean lockVolumetricColoc,
-                                                   boolean lockCpcColoc);
+                                                   boolean lockCpcColoc,
+                                                   boolean lockBBOverlap,
+                                                   boolean lockBBCpc,
+                                                   boolean lockBBVol);
     }
 
     private static final SpatialOptionsDialogLauncher DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER =
@@ -243,15 +247,23 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                                   List<String> channelNames,
                                                                   Map<String, Double> markerThresholds,
+                                                                  Map<String, Double> bbThresholds,
                                                                   boolean lockVolumetricColoc,
-                                                                  boolean lockCpcColoc) {
+                                                                  boolean lockCpcColoc,
+                                                                  boolean lockBBOverlap,
+                                                                  boolean lockBBCpc,
+                                                                  boolean lockBBVol) {
                     SpatialAnalysis spatialOptions = new SpatialAnalysis();
                     spatialOptions.setSuppressDialogs(false);
                     spatialOptions.setMarkerThresholds(markerThresholds == null
                             ? new LinkedHashMap<String, Double>()
                             : new LinkedHashMap<String, Double>(markerThresholds));
+                    spatialOptions.setBBThresholds(bbThresholds == null
+                            ? new LinkedHashMap<String, Double>()
+                            : new LinkedHashMap<String, Double>(bbThresholds));
                     return spatialOptions.showOptionsDialogForChainedRun(
                             directory, channelNames, lockVolumetricColoc, lockCpcColoc,
+                            lockBBOverlap, lockBBCpc, lockBBVol,
                             NextStepLabels.RUN_3D_OBJECT_ANALYSIS);
                 }
             };
@@ -899,18 +911,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         gdOpts.addToggle("Intensity Colocalization", doIntensityColoc);
                 gdOpts.addHelpText("Per-object Pearson and Manders, plus Costes thresholds/significance "
                         + "at both object and image level.");
-                objectBindings.doBBOverlapToggle =
-                        gdOpts.addToggle("Bounding-box overlap (% / BBColoc)", doBBOverlap);
-                gdOpts.addHelpText("Per-object bounding-box overlap: max intersection of the object's box "
-                        + "with a partner object's box, as a percentage of the source box volume.");
-                objectBindings.doBBCpcToggle =
-                        gdOpts.addToggle("Bounding-box centroid coincidence (BB-CPC)", doBBCpc);
-                gdOpts.addHelpText("Whether each object's centroid falls inside a partner object's "
-                        + "bounding box, plus a count of partner centroids inside this object's box.");
-                objectBindings.doBBVolToggle =
-                        gdOpts.addToggle("Bounding-box volume fill (BBVolColoc)", doBBVol);
-                gdOpts.addHelpText("Partner object voxels filling this object's bounding box, as a "
-                        + "percentage of the box volume: single best partner and total of all partners.");
 
                 gdOpts.addHeader("Colocalisation Thresholds");
                 for (String chName : cfg.channelNames) {
@@ -920,7 +920,20 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             prev != null ? prev : 30.0, 0));
                 }
 
-                gdOpts.addHeader("Bounding-box Coloc Thresholds");
+                // Dedicated section: voxel-vs-box semantics kept separate from Volumetric/CPC.
+                gdOpts.addHeader("Bounding-Box Colocalisation");
+                objectBindings.doBBOverlapToggle =
+                        gdOpts.addToggle("Bounding-box overlap (% / BBColoc)", doBBOverlap);
+                gdOpts.addHelpText("Box overlap: max intersection of the object's box with a partner "
+                        + "object's box, as a percentage of the source box volume.");
+                objectBindings.doBBCpcToggle =
+                        gdOpts.addToggle("Bounding-box centroid coincidence (BB-CPC)", doBBCpc);
+                gdOpts.addHelpText("Centroid-in-box: whether each object's centroid falls inside a partner "
+                        + "object's bounding box, plus a count of partner centroids inside this object's box.");
+                objectBindings.doBBVolToggle =
+                        gdOpts.addToggle("Bounding-box volume fill (BBVolColoc)", doBBVol);
+                gdOpts.addHelpText("Box fill: partner object voxels filling this object's bounding box, as a "
+                        + "percentage of the box volume: single best partner and total of all partners.");
                 for (String chName : cfg.channelNames) {
                     Double prevBB = bbThresholds.get(chName);
                     objectBindings.bbThresholdFields.add(gdOpts.addNumericField(
@@ -1923,7 +1936,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         }
         SpatialSetupConfig.DerivedConfig spatialConfig =
                 spatialOptionsDialogLauncher.launch(
-                        directory, channelNames, markerThresholds, doVolumetric, doCpc);
+                        directory, channelNames, markerThresholds, bbThresholds,
+                        doVolumetric, doCpc, doBBOverlap, doBBCpc, doBBVol);
         if (spatialConfig == null) {
             IJ.log("[FLASH] 3D Object Analysis cancelled because Spatial Analysis options were cancelled.");
             if (canShowGuiDecisionDialog()) {

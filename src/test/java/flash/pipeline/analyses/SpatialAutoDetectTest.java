@@ -80,6 +80,43 @@ public class SpatialAutoDetectTest {
         assertTrue(detected.colocalizationHelperText().contains("No saved colocalization/contact"));
     }
 
+    @Test
+    public void detectsBoundingBoxColocColumns() throws Exception {
+        File objectsDir = temp.newFolder("objects-bb");
+        writeChannel(objectsDir, "A.csv",
+                "Label,A_BBColoc_B,A_BBColoc30_B,A_BBCPCColoc_B,A_BBCPCContains_B,"
+                        + "A_BBVolColoc_B,A_BBVolColocTotal_B,A_BBVolColoc30_B",
+                "1,25,0,1,2,40,60,1");
+        writeChannel(objectsDir, "B.csv",
+                "Label,B_BBColoc_A,B_BBColoc30_A,B_BBCPCColoc_A,B_BBCPCContains_A,"
+                        + "B_BBVolColoc_A,B_BBVolColocTotal_A,B_BBVolColoc30_A",
+                "1,100,1,1,1,100,100,1");
+
+        SpatialAnalysis.SpatialObjectDataAvailability detected = detect(objectsDir);
+
+        assertTrue(detected.hasBBOverlapPair("A", "B"));
+        assertTrue(detected.hasBBCpcPair("A", "B"));
+        assertTrue(detected.hasBBVolPair("A", "B"));
+        String help = detected.bbColocalizationHelperText();
+        assertTrue(help.contains("bounding-box overlap"));
+        assertTrue(help.contains("BB-CPC"));
+        assertTrue(help.contains("volume-fill"));
+    }
+
+    @Test
+    public void treatsAbsentBoundingBoxColumnsAsMissing() throws Exception {
+        File objectsDir = temp.newFolder("objects-no-bb");
+        writeChannel(objectsDir, "A.csv", "Label,XM,YM,ZM", "1,1,2,3");
+        writeChannel(objectsDir, "B.csv", "Label,XM,YM,ZM", "1,2,2,3");
+
+        SpatialAnalysis.SpatialObjectDataAvailability detected = detect(objectsDir);
+
+        assertFalse(detected.hasBBOverlapPair("A", "B"));
+        assertFalse(detected.hasBBCpcPair("A", "B"));
+        assertFalse(detected.hasBBVolPair("A", "B"));
+        assertTrue(detected.bbColocalizationHelperText().contains("No saved bounding-box"));
+    }
+
     private SpatialAnalysis.SpatialObjectDataAvailability detect(File objectsDir) {
         Map<String, ChannelData> channels = new LinkedHashMap<String, ChannelData>();
         channels.put("A", CsvTableIO.loadChannelCsv(new File(objectsDir, "A.csv"), "A"));

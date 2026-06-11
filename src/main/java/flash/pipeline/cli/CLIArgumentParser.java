@@ -651,6 +651,20 @@ public final class CLIArgumentParser {
         spatial.doVolColoc = parseNullableBoolean(options, "spatial.volumetric", spatial.doVolColoc);
         spatial.doVolColoc = parseNullableBoolean(options, "spatial.vol_coloc", spatial.doVolColoc);
         spatial.doCpc = parseNullableBoolean(options, "spatial.cpc", spatial.doCpc);
+        spatial.doBBOverlap = parseNullableBoolean(options, "spatial.bb_overlap", spatial.doBBOverlap);
+        spatial.doBBOverlap = parseNullableBoolean(options, "spatial.bbOverlap", spatial.doBBOverlap);
+        spatial.doBBCpc = parseNullableBoolean(options, "spatial.bb_cpc", spatial.doBBCpc);
+        spatial.doBBCpc = parseNullableBoolean(options, "spatial.bbCpc", spatial.doBBCpc);
+        spatial.doBBVol = parseNullableBoolean(options, "spatial.bb_vol", spatial.doBBVol);
+        spatial.doBBVol = parseNullableBoolean(options, "spatial.bbVol", spatial.doBBVol);
+        String bbThreshold = getValue(options, "spatial.bb_threshold");
+        if (bbThreshold == null) {
+            bbThreshold = getValue(options, "spatial.bbThreshold");
+        }
+        if (bbThreshold != null) {
+            spatial.bbColocThresholdPercent = Double.valueOf(parseDoubleValue(
+                    "spatial.bb_threshold", bbThreshold, 30.0, 0.0, 100.0));
+        }
         spatial.doVoronoi = parseNullableBoolean(options, "spatial.voronoi", spatial.doVoronoi);
         spatial.doHeatmaps = parseNullableBoolean(options, "spatial.heatmaps", spatial.doHeatmaps);
         spatial.doPhenotyping = parseNullableBoolean(options, "spatial.phenotyping", spatial.doPhenotyping);

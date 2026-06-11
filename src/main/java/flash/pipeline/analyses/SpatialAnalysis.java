@@ -224,6 +224,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     };
 
     private Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
+    /** Per-channel bounding-box coloc threshold (%), independent of {@link #markerThresholds}. */
+    private final Map<String, Double> bbThresholds = new LinkedHashMap<String, Double>();
     private final Map<String, ScnParityFallbackSummary> scnParityFallbackCache =
             new HashMap<String, ScnParityFallbackSummary>();
     private final Set<String> scnParityFallbackWarnings = new LinkedHashSet<String>();
@@ -323,6 +325,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         private final Set<String> volumetricFlagPairs = new LinkedHashSet<String>();
         private final Set<String> volumetricContainsPairs = new LinkedHashSet<String>();
         private final Set<String> cpcPairs = new LinkedHashSet<String>();
+        private final Set<String> bbOverlapPairs = new LinkedHashSet<String>();
+        private final Set<String> bbCpcPairs = new LinkedHashSet<String>();
+        private final Set<String> bbVolPairs = new LinkedHashSet<String>();
 
         private SpatialObjectDataAvailability(Map<String, ChannelData> channels, List<String> channelNames) {
             this.channels = channels;
@@ -375,6 +380,15 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                         volumetricContainsPairs.add(key);
                     }
                     if (hasDirectedCpc(source, partner)) cpcPairs.add(key);
+                    if (hasAnyUsableColumnWithPrefixSuffix(cd, source + "_BBColoc", "_" + partner)) {
+                        bbOverlapPairs.add(key);
+                    }
+                    if (hasUsableColumn(cd, source + "_BBCPCColoc_" + partner)) {
+                        bbCpcPairs.add(key);
+                    }
+                    if (hasAnyUsableColumnWithPrefixSuffix(cd, source + "_BBVolColoc", "_" + partner)) {
+                        bbVolPairs.add(key);
+                    }
                 }
             }
         }
@@ -408,6 +422,30 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             }
             return "Detected saved " + joinSummary(parts)
                     + ". Existing matching columns will be reused; missing selected outputs will be computed.";
+        }
+
+        String bbColocalizationHelperText() {
+            List<String> parts = new ArrayList<String>();
+            if (!bbOverlapPairs.isEmpty()) parts.add("bounding-box overlap columns");
+            if (!bbCpcPairs.isEmpty()) parts.add("bounding-box centroid (BB-CPC) columns");
+            if (!bbVolPairs.isEmpty()) parts.add("bounding-box volume-fill columns");
+            if (parts.isEmpty()) {
+                return "No saved bounding-box colocalization columns were detected. Selected outputs will be computed.";
+            }
+            return "Detected saved " + joinSummary(parts)
+                    + ". Existing matching columns will be reused; missing selected outputs will be computed.";
+        }
+
+        boolean hasBBOverlapPair(String a, String b) {
+            return bbOverlapPairs.contains(directedKey(a, b)) && bbOverlapPairs.contains(directedKey(b, a));
+        }
+
+        boolean hasBBCpcPair(String a, String b) {
+            return bbCpcPairs.contains(directedKey(a, b)) && bbCpcPairs.contains(directedKey(b, a));
+        }
+
+        boolean hasBBVolPair(String a, String b) {
+            return bbVolPairs.contains(directedKey(a, b)) && bbVolPairs.contains(directedKey(b, a));
         }
 
         String morphometryHelperText() {
@@ -680,8 +718,20 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         }
     }
 
+    public void setBBThresholds(Map<String, Double> thresholds) {
+        if (thresholds != null) {
+            this.bbThresholds.clear();
+            this.bbThresholds.putAll(thresholds);
+        }
+    }
+
     private double getThreshold(String markerName) {
         Double t = markerThresholds.get(markerName);
+        return (t != null) ? t : DEFAULT_COLOC_THRESHOLD;
+    }
+
+    private double getBBThreshold(String markerName) {
+        Double t = bbThresholds.get(markerName);
         return (t != null) ? t : DEFAULT_COLOC_THRESHOLD;
     }
 
@@ -811,6 +861,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         boolean doSpatialStats = false;
         boolean doCpc = true;
         boolean doVolumetric = false;
+        boolean doBBOverlap = false;
+        boolean doBBCpc = false;
+        boolean doBBVol = false;
         boolean doVoronoi = false;
         boolean doHeatmaps = false;
         boolean doPhenotyping = false;
@@ -849,6 +902,12 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             doSpatialStats = effectiveOptions.doSpatialStats;
             doVolumetric = effectiveOptions.doVolColoc;
             doCpc = effectiveOptions.doCpc;
+            doBBOverlap = effectiveOptions.doBBOverlap;
+            doBBCpc = effectiveOptions.doBBCpc;
+            doBBVol = effectiveOptions.doBBVol;
+            for (String chName : channelNames) {
+                bbThresholds.put(chName, Double.valueOf(effectiveOptions.bbColocThresholdPercent));
+            }
             doVoronoi = effectiveOptions.doVoronoi;
             doHeatmaps = effectiveOptions.doHeatmaps;
             doPhenotyping = effectiveOptions.doPhenotyping;
@@ -996,6 +1055,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         context.clusterK = clusterK;
         context.textureClassK = textureClassK;
 
+        if (doBBOverlap || doBBVol) {
+            refreshBBColocFlags(channels, channelNames, context.existingObjectData, doBBOverlap, doBBVol);
+        }
         if (doVolumetric) {
             refreshVolumetricColocFlags(channels, channelNames, context.existingObjectData);
             context.existingObjectData = SpatialObjectDataAvailability.detect(channels, channelNames);
@@ -1324,7 +1386,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                                                        boolean lockVolumetricColoc,
                                                                        boolean lockCpcColoc) {
         return showOptionsDialogForChainedRun(directory, channelNames,
-                lockVolumetricColoc, lockCpcColoc,
+                lockVolumetricColoc, lockCpcColoc, false, false, false,
                 NextStepLabels.RUN_3D_OBJECT_ANALYSIS);
     }
 
@@ -1332,6 +1394,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                                                        List<String> channelNames,
                                                                        boolean lockVolumetricColoc,
                                                                        boolean lockCpcColoc,
+                                                                       boolean lockBBOverlap,
+                                                                       boolean lockBBCpc,
+                                                                       boolean lockBBVol,
                                                                        String primaryButtonLabel) {
         List<String> safeChannelNames = channelNames == null
                 ? new ArrayList<String>()
@@ -1350,7 +1415,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         spatialArtifactStatus = artifactStatus;
         return showSpatialOptionsDialog(directory, safeChannelNames, existingObjectData,
                 LineDistanceAnalysis.lineSetNames(directory), artifactStatus, configuredOptions,
-                lockVolumetricColoc, lockCpcColoc, primaryButtonLabel);
+                lockVolumetricColoc, lockCpcColoc, lockBBOverlap, lockBBCpc, lockBBVol, primaryButtonLabel);
     }
 
     private SpatialSetupConfig.DerivedConfig showSpatialOptionsDialog(
@@ -1361,7 +1426,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             SpatialArtifactStatus artifactStatus,
             SpatialSetupConfig.DerivedConfig initialOptions) {
         return showSpatialOptionsDialog(directory, channelNames, existingObjectData,
-                availableLineSets, artifactStatus, initialOptions, false, false, null);
+                availableLineSets, artifactStatus, initialOptions,
+                false, false, false, false, false, null);
     }
 
     private SpatialSetupConfig.DerivedConfig showSpatialOptionsDialog(
@@ -1373,6 +1439,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             SpatialSetupConfig.DerivedConfig initialOptions,
             boolean lockVolumetricColoc,
             boolean lockCpcColoc,
+            boolean lockBBOverlap,
+            boolean lockBBCpc,
+            boolean lockBBVol,
             String primaryButtonLabel) {
         if (channelNames == null || channelNames.isEmpty()) {
             return null;
@@ -1387,11 +1456,23 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         boolean doSpatialStats = initialOptions != null && initialOptions.doSpatialStats;
         boolean doCpc = initialOptions == null ? true : initialOptions.doCpc;
         boolean doVolumetric = initialOptions != null && initialOptions.doVolColoc;
+        boolean doBBOverlap = initialOptions != null && initialOptions.doBBOverlap;
+        boolean doBBCpc = initialOptions != null && initialOptions.doBBCpc;
+        boolean doBBVol = initialOptions != null && initialOptions.doBBVol;
         if (lockVolumetricColoc) {
             doVolumetric = true;
         }
         if (lockCpcColoc) {
             doCpc = true;
+        }
+        if (lockBBOverlap) {
+            doBBOverlap = true;
+        }
+        if (lockBBCpc) {
+            doBBCpc = true;
+        }
+        if (lockBBVol) {
+            doBBVol = true;
         }
         boolean doVoronoi = initialOptions != null && initialOptions.doVoronoi;
         boolean doHeatmaps = initialOptions != null && initialOptions.doHeatmaps;
@@ -1421,6 +1502,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             final SpatialDialogBindings spatialBindings = new SpatialDialogBindings();
             spatialBindings.lockVolColocFromObjectAnalysis = lockVolumetricColoc;
             spatialBindings.lockCpcFromObjectAnalysis = lockCpcColoc;
+            spatialBindings.lockBBOverlapFromObjectAnalysis = lockBBOverlap;
+            spatialBindings.lockBBCpcFromObjectAnalysis = lockBBCpc;
+            spatialBindings.lockBBVolFromObjectAnalysis = lockBBVol;
             spatialBindings.jtsLock = dependencyLock(
                     DependencyId.JTS_CORE, "Voronoi territory analysis");
             spatialBindings.mcib3dLock = dependencyLock(
@@ -1498,6 +1582,43 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             opts.addHelpText(existingObjectData.colocalizationHelperText());
             applyLockedColocalizationControls(spatialBindings);
 
+            opts.addSetupHelpHeader("Bounding-Box Colocalization", SpatialHelpCatalog.BB_COLOCALIZATION);
+            spatialBindings.doBBOverlapToggle = opts.addToggle("Bounding-box overlap", doBBOverlap);
+            opts.addHelpText("Box-vs-box overlap percentage. Reuses saved BBColoc columns from 3D Object Analysis.");
+            if (lockBBOverlap) {
+                opts.addHelpText("Already selected in 3D Object Analysis. The previous setting is locked here.");
+            }
+            spatialBindings.doBBCpcToggle = opts.addToggle("Bounding-box centroid coincidence (BB-CPC)", doBBCpc);
+            opts.addHelpText("Centroid-in-partner-box colocalization. Reuses saved BBCPC columns when present.");
+            if (lockBBCpc) {
+                opts.addHelpText("Already selected in 3D Object Analysis. The previous setting is locked here.");
+            }
+            spatialBindings.doBBVolToggle = opts.addToggle("Bounding-box volume fill", doBBVol);
+            opts.addHelpText("Partner voxels filling the bounding box. Reuses saved BBVolColoc columns when present.");
+            if (lockBBVol) {
+                opts.addHelpText("Already selected in 3D Object Analysis. The previous setting is locked here.");
+            }
+            final boolean anyBBLock = lockBBOverlap || lockBBCpc || lockBBVol;
+            final List<JTextField> bbThresholdFields = new ArrayList<JTextField>();
+            for (String chName : channelNames) {
+                JTextField tf = opts.addNumericField(chName + " BB Coloc Threshold (%)",
+                        getBBThreshold(chName), 0);
+                tf.setEnabled((doBBOverlap || doBBCpc || doBBVol) && !anyBBLock);
+                bbThresholdFields.add(tf);
+            }
+            spatialBindings.bbThresholdFields = bbThresholdFields;
+            Runnable bbEnablementUpdater = new Runnable() {
+                @Override
+                public void run() {
+                    updateBBThresholdEnablement(spatialBindings);
+                }
+            };
+            spatialBindings.doBBOverlapToggle.addChangeListener(bbEnablementUpdater);
+            spatialBindings.doBBCpcToggle.addChangeListener(bbEnablementUpdater);
+            spatialBindings.doBBVolToggle.addChangeListener(bbEnablementUpdater);
+            opts.addHelpText(existingObjectData.bbColocalizationHelperText());
+            applyLockedBBColocalizationControls(spatialBindings);
+
             opts.beginAdvancedSection("spatial");
             opts.addSetupHelpHeader("Voronoi Tessellation", SpatialHelpCatalog.VORONOI);
             spatialBindings.doVoronoiToggle = addDependencyAwareToggle(opts,
@@ -1525,6 +1646,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
             applySpatialDependencyLocks(spatialBindings);
             updateVolumetricThresholdEnablement(spatialBindings);
+            updateBBThresholdEnablement(spatialBindings);
             updateMorphometricDependencyControls(spatialBindings);
 
             LoadFromRunButton.install(opts, "SpatialAnalysis", new File(directory),
@@ -1553,11 +1675,23 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             doSpatialStats = opts.getNextBoolean();
             doVolumetric = opts.getNextBoolean();
             doCpc = opts.getNextBoolean();
+            doBBOverlap = opts.getNextBoolean();
+            doBBCpc = opts.getNextBoolean();
+            doBBVol = opts.getNextBoolean();
             if (lockVolumetricColoc) {
                 doVolumetric = true;
             }
             if (lockCpcColoc) {
                 doCpc = true;
+            }
+            if (lockBBOverlap) {
+                doBBOverlap = true;
+            }
+            if (lockBBCpc) {
+                doBBCpc = true;
+            }
+            if (lockBBVol) {
+                doBBVol = true;
             }
             doVoronoi = opts.getNextBoolean();
             doMorphology = opts.getNextBoolean();
@@ -1573,6 +1707,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             doHeatmaps = opts.getNextBoolean();
             for (String chName : channelNames) {
                 markerThresholds.put(chName, opts.getNextNumber());
+            }
+            for (String chName : channelNames) {
+                bbThresholds.put(chName, opts.getNextNumber());
             }
             textureClassK = clampObjectTextureClassK((int) Math.round(opts.getNextNumber()));
             clusterK = (int) opts.getNextNumber();
@@ -1599,6 +1736,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         config.doSpatialStats = doSpatialStats;
         config.doVolColoc = doVolumetric;
         config.doCpc = doCpc;
+        config.doBBOverlap = doBBOverlap;
+        config.doBBCpc = doBBCpc;
+        config.doBBVol = doBBVol;
         config.doVoronoi = doVoronoi;
         config.doHeatmaps = doHeatmaps;
         config.doPhenotyping = doPhenotyping;
@@ -1617,8 +1757,19 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         config.clusterK = clusterK;
         config.textureClassK = textureClassK;
         config.colocThresholdPercent = firstConfiguredThreshold(channelNames);
+        config.bbColocThresholdPercent = firstConfiguredBBThreshold(channelNames);
         config.markerThresholds.putAll(markerThresholds);
         return config;
+    }
+
+    private double firstConfiguredBBThreshold(List<String> channelNames) {
+        if (channelNames != null) {
+            for (String chName : channelNames) {
+                Double t = bbThresholds.get(chName);
+                if (t != null) return t.doubleValue();
+            }
+        }
+        return DEFAULT_COLOC_THRESHOLD;
     }
 
     private void applyConfiguredMarkerThresholds(SpatialSetupConfig.DerivedConfig config,
@@ -1631,6 +1782,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             markerThresholds.put(chName, threshold == null
                     ? Double.valueOf(config.colocThresholdPercent)
                     : threshold);
+            bbThresholds.put(chName, Double.valueOf(config.bbColocThresholdPercent));
         }
     }
 
@@ -2311,6 +2463,46 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     cd.set(row, colocCol, overlap > threshold ? "1" : "0");
                 }
             }
+        }
+    }
+
+    /**
+     * Derives missing bounding-box threshold flag columns from the saved continuous BB columns,
+     * mirroring {@link #refreshVolumetricColocFlags}. BBColoc{thr} from BBColoc; BBVolColoc{thr}
+     * from BBVolColoc (single best). BB-CPC is already binary so it needs no flag derivation.
+     */
+    private void refreshBBColocFlags(Map<String, ChannelData> channels, List<String> channelNames,
+                                     SpatialObjectDataAvailability detectedData,
+                                     boolean doBBOverlap, boolean doBBVol) {
+        for (String source : channelNames) {
+            ChannelData cd = channels.get(source);
+            if (cd == null) continue;
+            int threshold = (int) getBBThreshold(source);
+            for (String partner : channelNames) {
+                if (source.equals(partner)) continue;
+                if (doBBOverlap) {
+                    deriveBBFlagColumn(cd, source + "_BBColoc_" + partner,
+                            source + "_BBColoc" + threshold + "_" + partner, threshold);
+                }
+                if (doBBVol) {
+                    deriveBBFlagColumn(cd, source + "_BBVolColoc_" + partner,
+                            source + "_BBVolColoc" + threshold + "_" + partner, threshold);
+                }
+            }
+        }
+    }
+
+    private static void deriveBBFlagColumn(ChannelData cd, String continuousCol, String flagCol,
+                                           int threshold) {
+        if (hasUsableColumn(cd, flagCol)) {
+            IJ.log("  Reusing existing bounding-box flag: " + flagCol);
+            return;
+        }
+        if (!hasUsableColumn(cd, continuousCol)) return;
+        cd.addColumn(flagCol);
+        for (int row = 0; row < cd.rows.size(); row++) {
+            double value = cd.getDouble(row, continuousCol);
+            cd.set(row, flagCol, value >= threshold ? "1" : "0");
         }
     }
 
@@ -6139,6 +6331,15 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             if (!bindings.lockCpcFromObjectAnalysis) {
                 setToggle(bindings.doCpcToggle, config.doCpc);
             }
+            if (!bindings.lockBBOverlapFromObjectAnalysis) {
+                setToggle(bindings.doBBOverlapToggle, config.doBBOverlap);
+            }
+            if (!bindings.lockBBCpcFromObjectAnalysis) {
+                setToggle(bindings.doBBCpcToggle, config.doBBCpc);
+            }
+            if (!bindings.lockBBVolFromObjectAnalysis) {
+                setToggle(bindings.doBBVolToggle, config.doBBVol);
+            }
             setToggle(bindings.doVoronoiToggle, config.doVoronoi);
             setToggle(bindings.doHeatmapsToggle, config.doHeatmaps);
             setToggle(bindings.doPhenotypingToggle, config.doPhenotyping);
@@ -6180,12 +6381,24 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     }
                 }
             }
+            boolean anyBBLock = bindings.lockBBOverlapFromObjectAnalysis
+                    || bindings.lockBBCpcFromObjectAnalysis
+                    || bindings.lockBBVolFromObjectAnalysis;
+            if (bindings.bbThresholdFields != null && !anyBBLock) {
+                for (JTextField field : bindings.bbThresholdFields) {
+                    if (field != null) {
+                        field.setText(numericText(config.bbColocThresholdPercent, 0));
+                    }
+                }
+            }
         } finally {
             bindings.programmaticChange = false;
         }
         applyLockedColocalizationControls(bindings);
+        applyLockedBBColocalizationControls(bindings);
         applySpatialDependencyLocks(bindings);
         updateVolumetricThresholdEnablement(bindings);
+        updateBBThresholdEnablement(bindings);
         updateMorphometricDependencyControls(bindings);
     }
 
@@ -6228,6 +6441,41 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         if (bindings.lockCpcFromObjectAnalysis && bindings.doCpcToggle != null) {
             bindings.doCpcToggle.setSelected(true);
             bindings.doCpcToggle.setEnabled(false);
+        }
+    }
+
+    private static void updateBBThresholdEnablement(SpatialDialogBindings bindings) {
+        if (bindings == null || bindings.bbThresholdFields == null) {
+            return;
+        }
+        boolean anyLock = bindings.lockBBOverlapFromObjectAnalysis
+                || bindings.lockBBCpcFromObjectAnalysis
+                || bindings.lockBBVolFromObjectAnalysis;
+        boolean anyOn = (bindings.doBBOverlapToggle != null && bindings.doBBOverlapToggle.isSelected())
+                || (bindings.doBBCpcToggle != null && bindings.doBBCpcToggle.isSelected())
+                || (bindings.doBBVolToggle != null && bindings.doBBVolToggle.isSelected());
+        for (JTextField field : bindings.bbThresholdFields) {
+            if (field != null) {
+                field.setEnabled(anyOn && !anyLock);
+            }
+        }
+    }
+
+    private static void applyLockedBBColocalizationControls(SpatialDialogBindings bindings) {
+        if (bindings == null) {
+            return;
+        }
+        if (bindings.lockBBOverlapFromObjectAnalysis && bindings.doBBOverlapToggle != null) {
+            bindings.doBBOverlapToggle.setSelected(true);
+            bindings.doBBOverlapToggle.setEnabled(false);
+        }
+        if (bindings.lockBBCpcFromObjectAnalysis && bindings.doBBCpcToggle != null) {
+            bindings.doBBCpcToggle.setSelected(true);
+            bindings.doBBCpcToggle.setEnabled(false);
+        }
+        if (bindings.lockBBVolFromObjectAnalysis && bindings.doBBVolToggle != null) {
+            bindings.doBBVolToggle.setSelected(true);
+            bindings.doBBVolToggle.setEnabled(false);
         }
     }
 
@@ -6691,6 +6939,12 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         if (spatial.getDoSpatialStats() != null) config.doSpatialStats = spatial.getDoSpatialStats().booleanValue();
         if (spatial.getDoVolColoc() != null) config.doVolColoc = spatial.getDoVolColoc().booleanValue();
         if (spatial.getDoCpc() != null) config.doCpc = spatial.getDoCpc().booleanValue();
+        if (spatial.getDoBBOverlap() != null) config.doBBOverlap = spatial.getDoBBOverlap().booleanValue();
+        if (spatial.getDoBBCpc() != null) config.doBBCpc = spatial.getDoBBCpc().booleanValue();
+        if (spatial.getDoBBVol() != null) config.doBBVol = spatial.getDoBBVol().booleanValue();
+        if (spatial.getBBColocThresholdPercent() != null) {
+            config.bbColocThresholdPercent = spatial.getBBColocThresholdPercent().doubleValue();
+        }
         if (spatial.getDoVoronoi() != null) config.doVoronoi = spatial.getDoVoronoi().booleanValue();
         if (spatial.getDoHeatmaps() != null) config.doHeatmaps = spatial.getDoHeatmaps().booleanValue();
         if (spatial.getDoPhenotyping() != null) config.doPhenotyping = spatial.getDoPhenotyping().booleanValue();
@@ -6736,6 +6990,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         boolean programmaticChange;
         boolean lockVolColocFromObjectAnalysis;
         boolean lockCpcFromObjectAnalysis;
+        boolean lockBBOverlapFromObjectAnalysis;
+        boolean lockBBCpcFromObjectAnalysis;
+        boolean lockBBVolFromObjectAnalysis;
         SpatialDependencyLock jtsLock;
         SpatialDependencyLock mcib3dLock;
         JComboBox<String> presetCombo;
@@ -6745,6 +7002,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         ToggleSwitch doSpatialStatsToggle;
         ToggleSwitch doVolColocToggle;
         ToggleSwitch doCpcToggle;
+        ToggleSwitch doBBOverlapToggle;
+        ToggleSwitch doBBCpcToggle;
+        ToggleSwitch doBBVolToggle;
         ToggleSwitch doVoronoiToggle;
         ToggleSwitch doHeatmapsToggle;
         ToggleSwitch doPhenotypingToggle;
@@ -6758,6 +7018,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         ToggleSwitch doObjectTextureClassToggle;
         ToggleSwitch doNative3DTextureToggle;
         List<JTextField> thresholdFields = new ArrayList<JTextField>();
+        List<JTextField> bbThresholdFields = new ArrayList<JTextField>();
         JTextField kdeBandwidthField;
         JTextField textureClassKField;
         JComboBox<String> heatmapLutChoice;

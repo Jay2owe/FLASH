@@ -253,8 +253,12 @@ public class ThreeDObjectAnalysisTest {
             public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
                                                               Map<String, Double> markerThresholds,
+                                                              Map<String, Double> bbThresholds,
                                                               boolean lockVolumetricColoc,
-                                                              boolean lockCpcColoc) {
+                                                              boolean lockCpcColoc,
+                                                              boolean lockBBOverlap,
+                                                              boolean lockBBCpc,
+                                                              boolean lockBBVol) {
                 launches.incrementAndGet();
                 launchedChannels.set(channelNames);
                 thresholds.set(markerThresholds);
@@ -283,17 +287,30 @@ public class ThreeDObjectAnalysisTest {
         analysis.setGuiDecisionDialogsAvailableForTest(Boolean.TRUE);
         setField(analysis, "doVolumetric", Boolean.FALSE);
         setField(analysis, "doCpc", Boolean.TRUE);
+        setField(analysis, "doBBOverlap", Boolean.TRUE);
+        setField(analysis, "doBBCpc", Boolean.FALSE);
+        setField(analysis, "doBBVol", Boolean.TRUE);
         final AtomicReference<Boolean> lockVolumetric = new AtomicReference<Boolean>();
         final AtomicReference<Boolean> lockCpc = new AtomicReference<Boolean>();
+        final AtomicReference<Boolean> lockBBOverlapRef = new AtomicReference<Boolean>();
+        final AtomicReference<Boolean> lockBBCpcRef = new AtomicReference<Boolean>();
+        final AtomicReference<Boolean> lockBBVolRef = new AtomicReference<Boolean>();
         analysis.setSpatialOptionsDialogLauncherForTest(new ThreeDObjectAnalysis.SpatialOptionsDialogLauncher() {
             @Override
             public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
                                                               Map<String, Double> markerThresholds,
+                                                              Map<String, Double> bbThresholds,
                                                               boolean lockVolumetricColoc,
-                                                              boolean lockCpcColoc) {
+                                                              boolean lockCpcColoc,
+                                                              boolean lockBBOverlap,
+                                                              boolean lockBBCpc,
+                                                              boolean lockBBVol) {
                 lockVolumetric.set(Boolean.valueOf(lockVolumetricColoc));
                 lockCpc.set(Boolean.valueOf(lockCpcColoc));
+                lockBBOverlapRef.set(Boolean.valueOf(lockBBOverlap));
+                lockBBCpcRef.set(Boolean.valueOf(lockBBCpc));
+                lockBBVolRef.set(Boolean.valueOf(lockBBVol));
                 return new SpatialSetupConfig.DerivedConfig();
             }
         });
@@ -305,6 +322,10 @@ public class ThreeDObjectAnalysisTest {
 
         assertEquals(Boolean.FALSE, lockVolumetric.get());
         assertEquals(Boolean.TRUE, lockCpc.get());
+        // Each BB toggle ticked in 3D Object Analysis is forwarded as a lock to the chained Spatial dialog.
+        assertEquals(Boolean.TRUE, lockBBOverlapRef.get());
+        assertEquals(Boolean.FALSE, lockBBCpcRef.get());
+        assertEquals(Boolean.TRUE, lockBBVolRef.get());
     }
 
     @Test
@@ -317,8 +338,12 @@ public class ThreeDObjectAnalysisTest {
             public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
                                                               Map<String, Double> markerThresholds,
+                                                              Map<String, Double> bbThresholds,
                                                               boolean lockVolumetricColoc,
-                                                              boolean lockCpcColoc) {
+                                                              boolean lockCpcColoc,
+                                                              boolean lockBBOverlap,
+                                                              boolean lockBBCpc,
+                                                              boolean lockBBVol) {
                 launches.incrementAndGet();
                 return null;
             }
@@ -536,8 +561,12 @@ public class ThreeDObjectAnalysisTest {
             public SpatialSetupConfig.DerivedConfig launch(String directory,
                                                               List<String> channelNames,
                                                               Map<String, Double> markerThresholds,
+                                                              Map<String, Double> bbThresholds,
                                                               boolean lockVolumetricColoc,
-                                                              boolean lockCpcColoc) {
+                                                              boolean lockCpcColoc,
+                                                              boolean lockBBOverlap,
+                                                              boolean lockBBCpc,
+                                                              boolean lockBBVol) {
                 launches.incrementAndGet();
                 return new SpatialSetupConfig.DerivedConfig();
             }
