@@ -228,6 +228,20 @@ public class ConditionManifestIOMultiAxisTest {
         assertEquals("hAPP", back.get("M1", "genotype"));
     }
 
+    @Test
+    public void duplicateConditionColumnFirstWins() throws Exception {
+        File f = temp.newFile("dupe.csv");
+        PrintWriter pw = new PrintWriter(new FileWriter(f));
+        pw.println("AnimalName,Condition_Genotype,Genotype");   // both columns -> axis id "genotype"
+        pw.println("M1,hAPP,WT");
+        pw.close();
+
+        ConditionAssignments back = ConditionManifestIO.readAssignments(f);
+        assertEquals(1, back.axes().size());                   // de-duplicated to one axis
+        assertEquals("genotype", back.axes().get(0).id);
+        assertEquals("hAPP", back.get("M1", "genotype"));      // first column wins, not WT
+    }
+
     private static String readAll(File f) throws Exception {
         Scanner sc = new Scanner(f, "UTF-8").useDelimiter("\\A");
         try {

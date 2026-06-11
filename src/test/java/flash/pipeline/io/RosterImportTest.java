@@ -69,6 +69,15 @@ public class RosterImportTest {
     }
 
     @Test
+    public void duplicateAxisColumnsFirstWins() {
+        // Two headers normalise to the same axis id; the first column's value must win.
+        RosterIO.Roster r = RosterIO.parse("Animal,Condition_Genotype,Genotype\nM1,hAPP,WT\n");
+        assertEquals(1, r.axes.size());
+        assertEquals("genotype", r.axes.get(0).id);
+        assertEquals("hAPP", r.byAnimal.get("M1").get("genotype"));   // not WT
+    }
+
+    @Test
     public void tsvParsesToo() {
         RosterIO.Roster r = RosterIO.parse("AnimalID\tGenotype\nM1\thAPP\n");
         assertEquals("hAPP", r.byAnimal.get("M1").get("genotype"));

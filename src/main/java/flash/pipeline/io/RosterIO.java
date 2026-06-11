@@ -131,8 +131,9 @@ public final class RosterIO {
             if (raw.isEmpty()) continue;
             ConditionAxis axis = ConditionAxis.of(axisLabelFromHeader(raw));
             if (axis.id.isEmpty()) continue;
+            if (!seenAxisIds.add(axis.id)) continue;   // duplicate axis column: first column wins
             axisForCol[c] = axis;
-            if (seenAxisIds.add(axis.id)) roster.axes.add(axis);
+            roster.axes.add(axis);
         }
         if (animalCol < 0) {
             // No recognised animal header — fall back to the first column as the

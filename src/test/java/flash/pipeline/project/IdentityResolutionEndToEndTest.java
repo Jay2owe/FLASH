@@ -318,6 +318,25 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void loadIgnoresOrphanedConditionValueForAbsentAxis() {
+        // A persisted condition value for an axis NOT in the schema (orphan from a
+        // corrupt/legacy file) must not surface if that axis is added later.
+        ProjectFile pf = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = new File("M1.tif").getAbsolutePath();
+        item.include = true;
+        item.animalId = "M1";
+        item.conditions.put("genotype", "hAPP");   // no Genotype axis in pf.conditionAxes
+        pf.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(pf);
+        model.addConditionAxis(ConditionAxis.of("Genotype"));
+
+        assertEquals("", model.getValueAt(0, model.conditionColumnForAxis("genotype")));
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();

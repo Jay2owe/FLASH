@@ -469,10 +469,19 @@ public final class ConditionManifestIO {
             String[] cols = CsvSupport.parseRecord(header.text);
 
             List<ConditionAxis> axes = new ArrayList<ConditionAxis>();
+            List<Integer> axisColumn = new ArrayList<Integer>();   // source column for each kept axis
+            java.util.Set<String> seenAxisIds = new java.util.LinkedHashSet<String>();
             for (int i = 1; i < cols.length; i++) {
-                ConditionAxis axis = new ConditionAxis(null, axisLabelFromColumn(cols[i]), i - 1);
+                ConditionAxis axis = new ConditionAxis(null, axisLabelFromColumn(cols[i]), axes.size());
+                if (axis.id.isEmpty()) continue;
+                if (!seenAxisIds.add(axis.id)) {
+                    IJ.log("Warning: duplicate condition column '" + cols[i]
+                            + "' ignored (axis '" + axis.id + "' already defined); first column wins.");
+                    continue;
+                }
                 out.addAxis(axis);
                 axes.add(axis);
+                axisColumn.add(Integer.valueOf(i));
             }
 
             CsvSupport.Record record;
@@ -481,11 +490,11 @@ public final class ConditionManifestIO {
                 String[] row = CsvSupport.parseRecord(record.text);
                 String animal = row.length > 0 ? row[0].trim() : "";
                 if (animal.isEmpty()) continue;
-                for (int i = 0; i < axes.size(); i++) {
-                    int colIdx = i + 1;
+                for (int a = 0; a < axes.size(); a++) {
+                    int colIdx = axisColumn.get(a).intValue();
                     String value = colIdx < row.length ? row[colIdx].trim() : "";
                     if (!value.isEmpty()) {
-                        out.put(animal, axes.get(i).id, value);
+                        out.put(animal, axes.get(a).id, value);
                     }
                 }
             }

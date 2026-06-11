@@ -1291,9 +1291,12 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             if (e.getKey() == null || e.getValue() == null) continue;
             if (e.getKey().equals(primaryId)) {
                 if (primary.isEmpty()) primary = e.getValue();
-            } else {
+            } else if (conditionColumnForAxis(e.getKey()) >= 0) {
                 targetExtras.put(e.getKey(), e.getValue());
             }
+            // else: a persisted value for an axis not in the loaded schema (orphan from a
+            // corrupt/legacy file) — dropped so it cannot surface if that axis is added later
+            // (value-side twin of the orphan-meta filter in applyDtoMeta).
         }
         return primary;
     }
