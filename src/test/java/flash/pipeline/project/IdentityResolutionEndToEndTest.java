@@ -104,6 +104,57 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void rosterImportPromotesImplicitConditionInsteadOfCorrupting() {
+        // Legacy implicit single-Condition project with a primary value already set.
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.addFile(new File("M1.tif"));
+        model.setValueAt("M1", 0, ProjectManifestTableModel.COL_ANIMAL);
+        model.setConditionForRows(new int[]{0}, "Control");
+        assertTrue(model.conditionAxes().isEmpty());
+
+        // Roster introduces a NEW Genotype axis for the same animal.
+        java.util.Map<String, java.util.Map<String, String>> byAnimal =
+                new java.util.LinkedHashMap<String, java.util.Map<String, String>>();
+        java.util.Map<String, String> vals = new java.util.LinkedHashMap<String, String>();
+        vals.put("genotype", "WT");
+        byAnimal.put("M1", vals);
+        model.importRoster(Arrays.asList(ConditionAxis.of("Genotype")), byAnimal, false);
+
+        // The legacy Control value stays under the primary Condition column...
+        assertEquals("Control", model.getValueAt(0, ProjectManifestTableModel.COL_CONDITION));
+        // ...and WT lands under a NEW Genotype column, not on top of Control.
+        int genotypeCol = model.conditionColumnForAxis("genotype");
+        assertTrue(genotypeCol > ProjectManifestTableModel.COL_CONDITION);
+        assertEquals("WT", model.getValueAt(0, genotypeCol));
+    }
+
+    @Test
+    public void userSetCellMetaSurvivesSaveReloadAndBlocksReResolve() {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.addFile(new File("M14_LH_SCN.tif"));
+        model.resolveIdentities();
+
+        // User overrides the auto-detected region; this marks the cell user-set.
+        model.setValueAt("Hippocampus", 0, ProjectManifestTableModel.COL_REGION);
+        assertTrue(model.isUserSet(0, ProjectManifestTableModel.COL_REGION));
+
+        // Save + reopen.
+        ProjectFile pf = model.toProjectFile("p", "/out", "w");
+        ProjectManifestTableModel reloaded = new ProjectManifestTableModel();
+        reloaded.loadFromProjectFile(pf);
+
+        // The user-set flag and value survive the round trip...
+        assertTrue("user-set flag must persist across save/reopen",
+                reloaded.isUserSet(0, ProjectManifestTableModel.COL_REGION));
+        assertEquals("Hippocampus", reloaded.getValueAt(0, ProjectManifestTableModel.COL_REGION));
+
+        // ...so a later auto-resolve (e.g. after adding more files) does NOT clobber it.
+        reloaded.resolveIdentities();
+        assertEquals("Hippocampus", reloaded.getValueAt(0, ProjectManifestTableModel.COL_REGION));
+        assertTrue(reloaded.isUserSet(0, ProjectManifestTableModel.COL_REGION));
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();

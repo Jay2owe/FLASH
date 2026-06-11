@@ -38,6 +38,10 @@ public final class ProjectFileCodec {
     private static final String K_INDEX = "index";
     private static final String K_CONDITIONS = "conditions";
     private static final String K_CONDITION_AXES = "conditionAxes";
+    private static final String K_META = "meta";
+    private static final String K_CONFIDENCE = "confidence";
+    private static final String K_PROVENANCE = "provenance";
+    private static final String K_USER_SET = "userSet";
 
     private ProjectFileCodec() {
     }
@@ -116,6 +120,10 @@ public final class ProjectFileCodec {
             if (item.seriesMeta != null && !item.seriesMeta.isEmpty()) {
                 row.put(K_SERIES_META, seriesMetaToJson(item.seriesMeta));
             }
+            Map<String, Object> itemMeta = metaToJson(item.meta);
+            if (!itemMeta.isEmpty()) {
+                row.put(K_META, itemMeta);
+            }
             appendUnknown(row, item.extras);
             rows.add(row);
         }
@@ -140,6 +148,7 @@ public final class ProjectFileCodec {
             item.conditions = conditionsFromJson(row.get(K_CONDITIONS));
             item.notes = JsonIO.stringValue(row.get(K_NOTES));
             item.seriesMeta = seriesMetaFromJson(JsonIO.asList(row.get(K_SERIES_META)));
+            item.meta = metaFromJson(row.get(K_META));
             item.extras = extras(row, itemKnownKeys());
             items.add(item);
         }
@@ -168,6 +177,10 @@ public final class ProjectFileCodec {
                 row.put(K_CONDITIONS, conditionsToJson(series.conditions));
             }
             row.put(K_NOTES, series.notes);
+            Map<String, Object> seriesMetaJson = metaToJson(series.meta);
+            if (!seriesMetaJson.isEmpty()) {
+                row.put(K_META, seriesMetaJson);
+            }
             appendUnknown(row, series.extras);
             out.add(row);
         }
@@ -191,6 +204,7 @@ public final class ProjectFileCodec {
             series.condition = JsonIO.stringValue(row.get(K_CONDITION));
             series.conditions = conditionsFromJson(row.get(K_CONDITIONS));
             series.notes = JsonIO.stringValue(row.get(K_NOTES));
+            series.meta = metaFromJson(row.get(K_META));
             series.extras = extras(row, seriesItemKnownKeys());
             out.add(series);
         }
@@ -298,6 +312,47 @@ public final class ProjectFileCodec {
         return out;
     }
 
+    private static Map<String, Object> metaToJson(Map<String, ProjectFile.CellMetaData> meta) {
+        Map<String, Object> obj = JsonIO.object();
+        if (meta == null) return obj;
+        for (Map.Entry<String, ProjectFile.CellMetaData> entry : meta.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) continue;
+            ProjectFile.CellMetaData m = entry.getValue();
+            String confidence = m.confidence == null ? "" : m.confidence.trim();
+            String provenance = m.provenance == null ? "" : m.provenance;
+            // Only persist cells that carry information worth restoring.
+            boolean meaningful = m.userSet
+                    || (!confidence.isEmpty() && !"NONE".equals(confidence))
+                    || !provenance.trim().isEmpty();
+            if (!meaningful) continue;
+            Map<String, Object> cell = JsonIO.object();
+            cell.put(K_CONFIDENCE, confidence.isEmpty() ? "NONE" : confidence);
+            if (!provenance.isEmpty()) cell.put(K_PROVENANCE, provenance);
+            cell.put(K_USER_SET, Boolean.valueOf(m.userSet));
+            obj.put(entry.getKey(), cell);
+        }
+        return obj;
+    }
+
+    private static Map<String, ProjectFile.CellMetaData> metaFromJson(Object value) {
+        Map<String, ProjectFile.CellMetaData> out = new LinkedHashMap<String, ProjectFile.CellMetaData>();
+        if (value == null) return out;
+        Map<String, Object> obj = JsonIO.asObject(value);
+        if (obj == null) return out;
+        for (Map.Entry<String, Object> entry : obj.entrySet()) {
+            if (entry.getKey() == null) continue;
+            Map<String, Object> cell = JsonIO.asObject(entry.getValue());
+            if (cell == null) continue;
+            ProjectFile.CellMetaData m = new ProjectFile.CellMetaData();
+            String confidence = JsonIO.stringValue(cell.get(K_CONFIDENCE));
+            m.confidence = (confidence == null || confidence.isEmpty()) ? "NONE" : confidence;
+            m.provenance = JsonIO.stringValue(cell.get(K_PROVENANCE));
+            m.userSet = JsonIO.booleanValue(cell.get(K_USER_SET), false);
+            out.put(entry.getKey(), m);
+        }
+        return out;
+    }
+
     private static Map<String, Object> extras(Map<String, Object> source, Map<String, Boolean> knownKeys) {
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         if (source == null) {
@@ -352,6 +407,7 @@ public final class ProjectFileCodec {
         keys.put(K_CONDITIONS, Boolean.TRUE);
         keys.put(K_NOTES, Boolean.TRUE);
         keys.put(K_SERIES_META, Boolean.TRUE);
+        keys.put(K_META, Boolean.TRUE);
         return keys;
     }
 
@@ -366,6 +422,7 @@ public final class ProjectFileCodec {
         keys.put(K_CONDITION, Boolean.TRUE);
         keys.put(K_CONDITIONS, Boolean.TRUE);
         keys.put(K_NOTES, Boolean.TRUE);
+        keys.put(K_META, Boolean.TRUE);
         return keys;
     }
 

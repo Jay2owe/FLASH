@@ -25,7 +25,14 @@ public final class GrammarInterpreter {
                 case ANIMAL:     p.animal(value, Confidence.HIGH, prov); break;
                 case HEMISPHERE: p.hemisphere(value, Confidence.HIGH, prov); break;
                 case REGION:     p.region(value, Confidence.HIGH, prov); break;
-                case CONDITION:  p.condition(rule.axisLabel, value, Confidence.HIGH, prov); break;
+                case CONDITION:
+                    // A blank axis label means the implicit primary Condition axis;
+                    // default it so the captured value is not silently dropped (matches
+                    // NthTokenFieldStrategy, which also defaults a blank axis to "Condition").
+                    String condAxis = rule.axisLabel == null || rule.axisLabel.trim().isEmpty()
+                            ? "Condition" : rule.axisLabel;
+                    p.condition(condAxis, value, Confidence.HIGH, prov);
+                    break;
                 default: break;
             }
         }

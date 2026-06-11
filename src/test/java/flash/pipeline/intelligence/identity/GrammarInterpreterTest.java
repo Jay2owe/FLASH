@@ -63,6 +63,18 @@ public class GrammarInterpreterTest {
     }
 
     @Test
+    public void blankConditionAxisDefaultsToConditionInsteadOfDropping() {
+        // A CONDITION rule with a blank axis label must map to the implicit primary
+        // "condition" axis, not be silently discarded (matches NthTokenFieldStrategy).
+        List<FieldRule> rules = Collections.singletonList(
+                FieldRule.alias(FieldRule.Type.CONDITION, "",
+                        Collections.singletonList(new ValuePattern("WT", Collections.singletonList("WT")))));
+        PartialIdentity p = new GrammarInterpreter().apply(new NamingGrammar("g", rules), "M1_WT_SCN");
+        assertEquals(1, p.conditions().size());
+        assertEquals("WT", p.conditions().get("condition").value);
+    }
+
+    @Test
     public void grammarBeatsVocabularyInResolver() {
         SourceRecord r = SourceRecord.looseFile("hAPP_M14_2_SCN_ZT06", null, null);
         List<SourceRecord> batch = Collections.singletonList(r);

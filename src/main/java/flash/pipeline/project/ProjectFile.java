@@ -37,6 +37,18 @@ public final class ProjectFile {
     public List<ConditionAxis> conditionAxes = new ArrayList<ConditionAxis>();
     public Map<String, Object> extras = new LinkedHashMap<String, Object>();
 
+    /**
+     * Persisted per-cell detection metadata (keyed by field id:
+     * {@code animal}/{@code hemisphere}/{@code region}/condition axis id). Stored
+     * so a user-confirmed cell survives save/reopen and is not clobbered by a later
+     * auto-resolve; confidence/provenance are restored for the review UI.
+     */
+    public static final class CellMetaData {
+        public String confidence = "NONE";
+        public String provenance = "";
+        public boolean userSet = false;
+    }
+
     public static final class Item {
         /** Absolute path to the source file (LIF, TIF, CZI, ...). */
         public String path;
@@ -63,6 +75,8 @@ public final class ProjectFile {
          * Bio-Formats series; the file-level fields are then only seeds/defaults.
          */
         public List<SeriesItem> seriesMeta = new ArrayList<SeriesItem>();
+        /** Per-cell detection metadata (field id -&gt; meta) for the file-level row. */
+        public Map<String, CellMetaData> meta = new LinkedHashMap<String, CellMetaData>();
         public Map<String, Object> extras = new LinkedHashMap<String, Object>();
     }
 
@@ -83,6 +97,8 @@ public final class ProjectFile {
         /** Multi-axis condition values (axisId -&gt; value); empty in single-condition mode. */
         public Map<String, String> conditions = new LinkedHashMap<String, String>();
         public String notes;
+        /** Per-cell detection metadata (field id -&gt; meta) for this series row. */
+        public Map<String, CellMetaData> meta = new LinkedHashMap<String, CellMetaData>();
         public Map<String, Object> extras = new LinkedHashMap<String, Object>();
     }
 }

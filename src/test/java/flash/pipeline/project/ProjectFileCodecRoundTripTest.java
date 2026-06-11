@@ -192,6 +192,59 @@ public class ProjectFileCodecRoundTripTest {
     }
 
     @Test
+    public void cellMetaRoundTrip() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = "X.tif";
+        item.region = "Hippocampus";
+
+        ProjectFile.CellMetaData userSet = new ProjectFile.CellMetaData();
+        userSet.confidence = "NONE";
+        userSet.provenance = "set by you";
+        userSet.userSet = true;
+        item.meta.put("region", userSet);
+
+        ProjectFile.CellMetaData auto = new ProjectFile.CellMetaData();
+        auto.confidence = "HIGH";
+        auto.provenance = "name parse";
+        auto.userSet = false;
+        item.meta.put("animal", auto);
+
+        // A default/empty meta entry carries nothing worth restoring -> not persisted.
+        item.meta.put("hemisphere", new ProjectFile.CellMetaData());
+
+        ProjectFile.SeriesItem s = new ProjectFile.SeriesItem();
+        s.index = 0;
+        s.name = "S0";
+        ProjectFile.CellMetaData sMeta = new ProjectFile.CellMetaData();
+        sMeta.confidence = "MEDIUM";
+        s.meta.put("region", sMeta);
+        item.seriesMeta.add(s);
+        project.items.add(item);
+
+        String json = ProjectFileCodec.encode(project);
+        assertTrue(json.contains("\"meta\""));
+        ProjectFile.Item back = ProjectFileCodec.decode(json).items.get(0);
+
+        assertEquals(2, back.meta.size());                       // empty hemisphere entry dropped
+        assertTrue(back.meta.get("region").userSet);
+        assertEquals("set by you", back.meta.get("region").provenance);
+        assertEquals("HIGH", back.meta.get("animal").confidence);
+        assertFalse(back.meta.containsKey("hemisphere"));
+        assertEquals("MEDIUM", back.seriesMeta.get(0).meta.get("region").confidence);
+    }
+
+    @Test
+    public void absentMetaDecodesToEmptyMap() throws Exception {
+        String json = "{\"schemaVersion\":1,\"items\":[{\"path\":\"X.lif\"}]}";
+
+        ProjectFile decoded = ProjectFileCodec.decode(json);
+
+        assertNotNull(decoded.items.get(0).meta);
+        assertTrue(decoded.items.get(0).meta.isEmpty());
+    }
+
+    @Test
     public void decodeOrNullReturnsNullOnGarbage() {
         assertNull(ProjectFileCodec.decodeOrNull("{not json"));
     }

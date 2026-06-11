@@ -2813,7 +2813,9 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
 
     private void saveManualAssignments(String directory, LinkedHashMap<String, String> assignments) {
         try {
-            ConditionManifestIO.saveAssignments(directory, assignments);
+            // Composite-only assignments: preserve an existing multi-axis Conditions.csv
+            // instead of collapsing its per-axis columns into a single Condition column.
+            ConditionManifestIO.saveAssignmentsPreservingMultiAxis(directory, assignments);
         } catch (IOException e) {
             IJ.log("Warning: could not save manual condition assignments: " + e.getMessage());
         }

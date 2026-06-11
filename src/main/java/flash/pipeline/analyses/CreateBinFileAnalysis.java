@@ -5200,7 +5200,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             }
         }
         if (!conditionAssignments.equals(existingConditionAssignments)) {
-            ConditionManifestIO.saveAssignments(directory, conditionAssignments);
+            // Preserve a multi-axis Conditions.csv: this review table only carries the
+            // composite label, so a plain save would collapse per-axis columns into one.
+            ConditionManifestIO.saveAssignmentsPreservingMultiAxis(directory, conditionAssignments);
         }
 
         List<OrientationManifestRow> existingRows =

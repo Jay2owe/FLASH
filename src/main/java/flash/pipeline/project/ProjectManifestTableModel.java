@@ -831,8 +831,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         boolean structureChanged = false;
         // Promote the implicit single axis to an explicit primary Condition so its
         // values stay primary while the new axes are appended after it.
-        if (conditionAxes.isEmpty()) {
-            conditionAxes.add(DEFAULT_CONDITION_AXIS);
+        if (promoteImplicitPrimaryForNonCondition(detected)) {
             structureChanged = true;
         }
         for (String id : detected) {
@@ -848,6 +847,25 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     private static String labelForAxisId(String id) {
         if (id == null || id.isEmpty()) return "Condition";
         return Character.toUpperCase(id.charAt(0)) + id.substring(1);
+    }
+
+    /**
+     * If the schema is still the implicit legacy single Condition axis (no explicit
+     * axes) and {@code incomingAxisIds} introduces any non-Condition axis, promote
+     * the implicit primary to an explicit {@code Condition} axis first so existing
+     * {@code row.condition} values keep their primary meaning instead of being
+     * reinterpreted as the newly-added first axis. Returns true if a promotion
+     * happened. Does NOT fire a structure event — the caller appends axes and fires.
+     */
+    private boolean promoteImplicitPrimaryForNonCondition(java.util.Collection<String> incomingAxisIds) {
+        if (!conditionAxes.isEmpty() || incomingAxisIds == null) return false;
+        for (String id : incomingAxisIds) {
+            if (id != null && !"condition".equals(ConditionAxis.normaliseId(id))) {
+                conditionAxes.add(DEFAULT_CONDITION_AXIS);
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Index of the next rendered row (from {@code after}) with a low/none-confidence identity cell, or -1. */
@@ -1058,7 +1076,16 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                             Map<String, Map<String, String>> byAnimal,
                             boolean overwriteConfirmed) {
         if (byAnimal == null) return 0;
-        if (rosterAxes != null) {
+        if (rosterAxes != null && !rosterAxes.isEmpty()) {
+            List<String> incomingIds = new ArrayList<String>();
+            for (ConditionAxis axis : rosterAxes) {
+                if (axis != null) incomingIds.add(axis.id);
+            }
+            // Promote a legacy implicit single Condition axis to an explicit primary
+            // before appending roster axes, so an existing row.condition value keeps
+            // its meaning under Condition instead of being reinterpreted as the new
+            // first axis (mirrors the resolver's ensureAxesForCandidates promotion).
+            promoteImplicitPrimaryForNonCondition(incomingIds);
             for (ConditionAxis axis : rosterAxes) addConditionAxis(axis);
         }
         int changed = 0;
@@ -1105,6 +1132,47 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             if (group.size() > 1) groups.add(group);
         }
         return groups;
+    }
+
+    /** Serialise a row/series {@link CellMeta} grid to the persistable DTO map. */
+    private static Map<String, ProjectFile.CellMetaData> cellMetaToDto(Map<String, CellMeta> meta) {
+        Map<String, ProjectFile.CellMetaData> out =
+                new LinkedHashMap<String, ProjectFile.CellMetaData>();
+        if (meta == null) return out;
+        for (Map.Entry<String, CellMeta> e : meta.entrySet()) {
+            CellMeta m = e.getValue();
+            if (e.getKey() == null || m == null) continue;
+            ProjectFile.CellMetaData dto = new ProjectFile.CellMetaData();
+            dto.confidence = (m.confidence == null ? Confidence.NONE : m.confidence).name();
+            dto.provenance = nullToEmpty(m.provenance);
+            dto.userSet = m.userSet;
+            out.put(e.getKey(), dto);
+        }
+        return out;
+    }
+
+    /** Restore a persisted DTO meta map into a fresh row/series {@link CellMeta} grid. */
+    private static void applyDtoMeta(Map<String, CellMeta> target,
+                                    Map<String, ProjectFile.CellMetaData> dto) {
+        if (target == null || dto == null) return;
+        for (Map.Entry<String, ProjectFile.CellMetaData> e : dto.entrySet()) {
+            ProjectFile.CellMetaData d = e.getValue();
+            if (e.getKey() == null || d == null) continue;
+            CellMeta m = new CellMeta();
+            m.confidence = parseConfidence(d.confidence);
+            m.provenance = nullToEmpty(d.provenance);
+            m.userSet = d.userSet;
+            target.put(e.getKey(), m);
+        }
+    }
+
+    private static Confidence parseConfidence(String name) {
+        if (name == null) return Confidence.NONE;
+        try {
+            return Confidence.valueOf(name.trim());
+        } catch (IllegalArgumentException ex) {
+            return Confidence.NONE;
+        }
     }
 
     /** Complete axis-&gt;value map for persistence; empty for single-axis projects. */
@@ -1178,6 +1246,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 item.condition = "";
             }
             item.notes = row.notes;
+            item.meta = cellMetaToDto(row.meta);
             if (row.series.isEmpty()) {
                 item.series.addAll(row.selectedSeries);
             } else {
@@ -1194,6 +1263,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                     meta.condition = s.condition;
                     meta.conditions = fullConditions(s.condition, s.conditions);
                     meta.notes = s.notes;
+                    meta.meta = cellMetaToDto(s.meta);
                     item.seriesMeta.add(meta);
                     if (s.include) included.add(Integer.valueOf(s.index));
                 }
@@ -1271,6 +1341,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                     row.condition = applyLoadedConditions(row.conditions, item.conditions, row.condition);
                 }
                 row.notes = nullToEmpty(item.notes);
+                applyDtoMeta(row.meta, item.meta);
                 if (item.series != null) {
                     row.selectedSeries.addAll(item.series);
                 }
@@ -1290,6 +1361,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                         series.condition = nullToEmpty(meta.condition);
                         series.condition = applyLoadedConditions(series.conditions, meta.conditions, series.condition);
                         series.notes = nullToEmpty(meta.notes);
+                        applyDtoMeta(series.meta, meta.meta);
                         repairLoadedSeriesMetadata(row, series, loadedFileCondition);
                         row.series.add(series);
                     }
