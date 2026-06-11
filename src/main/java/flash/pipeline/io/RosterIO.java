@@ -119,30 +119,29 @@ public final class RosterIO {
         boolean tsv = lines[h].indexOf('\t') >= 0;
         String[] header = splitLine(lines[h], tsv);
 
-        int animalCol = -1;
         ConditionAxis[] axisForCol = new ConditionAxis[header.length];
         Set<String> seenAxisIds = new LinkedHashSet<String>();
+        // Pass 1: identify the animal column (first recognised header, else fall back to
+        // column 0). Deciding this first avoids misclassifying column 0 as an axis and then
+        // dropping a later duplicate of that axis when column 0 is reclassified as animal.
+        int animalCol = -1;
         for (int c = 0; c < header.length; c++) {
             String raw = header[c] == null ? "" : header[c].trim();
-            if (animalCol < 0 && ANIMAL_HEADERS.contains(normalise(raw))) {
+            if (ANIMAL_HEADERS.contains(normalise(raw))) {
                 animalCol = c;
-                continue;
+                break;
             }
+        }
+        if (animalCol < 0) animalCol = 0;   // no recognised animal header -> first column is the animal id
+        // Pass 2: build condition axes from the remaining columns (first column per id wins).
+        for (int c = 0; c < header.length; c++) {
+            if (c == animalCol) continue;
+            String raw = header[c] == null ? "" : header[c].trim();
             if (raw.isEmpty()) continue;
             ConditionAxis axis = ConditionAxis.of(axisLabelFromHeader(raw));
-            if (axis.id.isEmpty()) continue;
-            if (!seenAxisIds.add(axis.id)) continue;   // duplicate axis column: first column wins
+            if (axis.id.isEmpty() || !seenAxisIds.add(axis.id)) continue;   // blank/duplicate column ignored
             axisForCol[c] = axis;
             roster.axes.add(axis);
-        }
-        if (animalCol < 0) {
-            // No recognised animal header — fall back to the first column as the
-            // animal id, and drop the bogus condition axis it was misclassified as.
-            animalCol = 0;
-            if (axisForCol.length > 0 && axisForCol[0] != null) {
-                roster.axes.remove(axisForCol[0]);
-                axisForCol[0] = null;
-            }
         }
 
         Set<String> seenAnimals = new LinkedHashSet<String>();

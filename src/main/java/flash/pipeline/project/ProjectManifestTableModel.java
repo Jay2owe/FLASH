@@ -488,6 +488,13 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     /** Add one condition axis to the visible condition block (blank-id axes ignored). */
     public void addConditionAxis(ConditionAxis axis) {
         if (axis == null || axis.id.isEmpty() || hasAxis(axis.id)) return;
+        // Promote the implicit primary Condition first when adding a non-condition axis to a
+        // legacy single-condition table, so existing row.condition values keep their meaning
+        // instead of being reinterpreted as the newly-added (now primary) axis. Makes this
+        // public API safe for direct callers, matching importRoster/ensureAxesForCandidates.
+        if (conditionAxes.isEmpty() && !"condition".equals(axis.id)) {
+            conditionAxes.add(DEFAULT_CONDITION_AXIS);
+        }
         conditionAxes.add(axis);
         fireTableStructureChanged();
     }
@@ -1159,17 +1166,54 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             for (ConditionAxis axis : rosterAxes) addConditionAxis(axis);
         }
         int changed = 0;
-        for (int idx = 0; idx < visible.size(); idx++) {
-            String animal = stringValue(getValueAt(idx, COL_ANIMAL)).trim();
-            Map<String, String> values = animal.isEmpty() ? null : byAnimal.get(animal);
-            if (values == null) continue;
-            for (Map.Entry<String, String> e : values.entrySet()) {
-                int col = conditionColumnForAxis(e.getKey());
-                if (col < 0) continue;
-                if (!overwriteConfirmed && isUserSet(idx, col)) continue;
-                setValueAt(e.getValue(), idx, col);
-                changed++;
+        for (Row row : rows) {
+            if (!isContainerSource(row.source)) {
+                String[] primary = new String[]{ row.condition };
+                changed += applyRosterToConditions(row.animalId, primary, row.conditions, row.meta,
+                        byAnimal, overwriteConfirmed);
+                row.condition = primary[0];
             }
+            // Iterate the model's series directly (not the rendered `visible` list) so a
+            // collapsed multi-series container's hidden series are filled too.
+            for (SeriesRow series : row.series) {
+                String[] primary = new String[]{ series.condition };
+                changed += applyRosterToConditions(series.animalId, primary, series.conditions, series.meta,
+                        byAnimal, overwriteConfirmed);
+                series.condition = primary[0];
+            }
+        }
+        if (changed > 0) fireTableDataChanged();
+        return changed;
+    }
+
+    /**
+     * Apply roster axis values to one row/series by animal id. Honours user-set cells
+     * (unless {@code overwriteConfirmed}) and only writes axes in the current schema. The
+     * primary axis value is returned via {@code primaryHolder[0]}; non-primary values go
+     * into {@code conditions}. Operates on the model directly so hidden (collapsed) series
+     * are filled, not only rendered rows. Returns the number of cells changed.
+     */
+    private int applyRosterToConditions(String animalId, String[] primaryHolder,
+                                        Map<String, String> conditions, Map<String, CellMeta> meta,
+                                        Map<String, Map<String, String>> byAnimal,
+                                        boolean overwriteConfirmed) {
+        String animal = animalId == null ? "" : animalId.trim();
+        if (animal.isEmpty()) return 0;
+        Map<String, String> values = byAnimal.get(animal);
+        if (values == null) return 0;
+        String primaryId = primaryAxisId();
+        int changed = 0;
+        for (Map.Entry<String, String> e : values.entrySet()) {
+            String norm = ConditionAxis.normaliseId(e.getKey());
+            if (norm.isEmpty() || conditionColumnForAxis(norm) < 0) continue;   // axis not in schema
+            if (!overwriteConfirmed && markedUserSet(meta, norm)) continue;     // protect user edits
+            if (norm.equals(primaryId)) {
+                primaryHolder[0] = e.getValue();
+            } else {
+                putOrRemove(conditions, norm, e.getValue());
+            }
+            touchUserSet(meta, norm);
+            changed++;
         }
         return changed;
     }

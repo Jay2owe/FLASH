@@ -78,6 +78,15 @@ public class RosterImportTest {
     }
 
     @Test
+    public void duplicateNonAnimalHeaderWithFallbackKeepsSecondColumn() {
+        // No recognised animal header -> first column is the animal. A duplicate of a later
+        // axis header must not be dropped: column 1 (second "Cage") survives as the axis.
+        RosterIO.Roster r = RosterIO.parse("Cage,Cage,Genotype\nM1,A12,WT\n");
+        assertEquals("A12", r.byAnimal.get("M1").get("cage"));
+        assertEquals("WT", r.byAnimal.get("M1").get("genotype"));
+    }
+
+    @Test
     public void tsvParsesToo() {
         RosterIO.Roster r = RosterIO.parse("AnimalID\tGenotype\nM1\thAPP\n");
         assertEquals("hAPP", r.byAnimal.get("M1").get("genotype"));

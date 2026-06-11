@@ -472,6 +472,7 @@ public final class ConditionManifestIO {
             List<Integer> axisColumn = new ArrayList<Integer>();   // source column for each kept axis
             java.util.Set<String> seenAxisIds = new java.util.LinkedHashSet<String>();
             for (int i = 1; i < cols.length; i++) {
+                if (cols[i] == null || cols[i].trim().isEmpty()) continue;   // skip blank header columns
                 ConditionAxis axis = new ConditionAxis(null, axisLabelFromColumn(cols[i]), axes.size());
                 if (axis.id.isEmpty()) continue;
                 if (!seenAxisIds.add(axis.id)) {

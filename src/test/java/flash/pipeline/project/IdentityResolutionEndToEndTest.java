@@ -337,6 +337,57 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void importRosterFillsCollapsedSeriesRows() {
+        // Container (LIF) with two series; loads collapsed (expanded defaults to false), so
+        // the series are NOT in the rendered `visible` list. Roster import must still fill them.
+        ProjectFile pf = new ProjectFile();
+        pf.conditionAxes = Arrays.asList(ConditionAxis.of("Genotype"));
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = new File("slide.lif").getAbsolutePath();
+        item.include = true;
+        ProjectFile.SeriesItem s0 = new ProjectFile.SeriesItem();
+        s0.index = 0; s0.include = true; s0.name = "M1_LH_SCN"; s0.animalId = "M1";
+        ProjectFile.SeriesItem s1 = new ProjectFile.SeriesItem();
+        s1.index = 1; s1.include = true; s1.name = "M2_RH_PVN"; s1.animalId = "M2";
+        item.seriesMeta.add(s0);
+        item.seriesMeta.add(s1);
+        pf.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(pf);
+
+        java.util.Map<String, java.util.Map<String, String>> byAnimal =
+                new java.util.LinkedHashMap<String, java.util.Map<String, String>>();
+        java.util.Map<String, String> v1 = new java.util.LinkedHashMap<String, String>();
+        v1.put("genotype", "WT"); byAnimal.put("M1", v1);
+        java.util.Map<String, String> v2 = new java.util.LinkedHashMap<String, String>();
+        v2.put("genotype", "KO"); byAnimal.put("M2", v2);
+
+        int changed = model.importRoster(Arrays.asList(ConditionAxis.of("Genotype")), byAnimal, false);
+
+        assertEquals(2, changed);   // both hidden series were updated
+        ConditionAssignments ca = model.toConditionAssignments();
+        assertEquals("WT", ca.get("M1", "genotype"));
+        assertEquals("KO", ca.get("M2", "genotype"));
+    }
+
+    @Test
+    public void addConditionAxisPromotesImplicitPrimaryForExistingValue() {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.addFile(new File("M1.tif"));
+        model.setValueAt("M1", 0, ProjectManifestTableModel.COL_ANIMAL);
+        model.setConditionForRows(new int[]{0}, "Control");   // legacy primary Condition value
+
+        model.addConditionAxis(ConditionAxis.of("Genotype"));   // direct API on a populated legacy table
+
+        // Control stays under the primary Condition column; Genotype is a new, empty column.
+        assertEquals("Control", model.getValueAt(0, ProjectManifestTableModel.COL_CONDITION));
+        int genoCol = model.conditionColumnForAxis("genotype");
+        assertTrue(genoCol > ProjectManifestTableModel.COL_CONDITION);
+        assertEquals("", model.getValueAt(0, genoCol));
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();

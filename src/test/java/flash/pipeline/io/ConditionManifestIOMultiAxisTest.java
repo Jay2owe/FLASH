@@ -242,6 +242,22 @@ public class ConditionManifestIOMultiAxisTest {
         assertEquals("hAPP", back.get("M1", "genotype"));      // first column wins, not WT
     }
 
+    @Test
+    public void blankManifestHeaderColumnIsIgnored() throws Exception {
+        // A blank header column must not masquerade as a "Condition" axis and swallow the
+        // real Condition column.
+        File f = temp.newFile("blankhdr.csv");
+        PrintWriter pw = new PrintWriter(new FileWriter(f));
+        pw.println("AnimalName,,Condition");
+        pw.println("M1,ghost,real");
+        pw.close();
+
+        ConditionAssignments back = ConditionManifestIO.readAssignments(f);
+        assertEquals(1, back.axes().size());
+        assertEquals("condition", back.axes().get(0).id);
+        assertEquals("real", back.get("M1", "condition"));   // the real column, not "ghost"
+    }
+
     private static String readAll(File f) throws Exception {
         Scanner sc = new Scanner(f, "UTF-8").useDelimiter("\\A");
         try {
