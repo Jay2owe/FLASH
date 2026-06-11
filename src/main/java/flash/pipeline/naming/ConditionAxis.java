@@ -55,6 +55,12 @@ public final class ConditionAxis {
     public String csvColumnName() {
         String base = label.isEmpty() ? id : label;
         String token = base.replaceAll("\\s+", "_");
+        // The header must normalise back to this axis's canonical id on read. When an
+        // explicit id diverges from the label, fall back to the id as the token so the
+        // round-trip preserves identity (readable label token otherwise).
+        if (!normaliseId(token).equals(id)) {
+            token = id;
+        }
         return "Condition_" + token;
     }
 

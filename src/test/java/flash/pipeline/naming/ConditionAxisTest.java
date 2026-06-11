@@ -36,9 +36,20 @@ public class ConditionAxisTest {
     }
 
     @Test
-    public void csvColumnName_prefixesAndStripsWhitespace() {
+    public void csvColumnName_prefixesAndCollapsesWhitespaceToUnderscore() {
         assertEquals("Condition_Genotype", ConditionAxis.of("Genotype").csvColumnName());
-        assertEquals("Condition_TimePoint", ConditionAxis.of("Time Point").csvColumnName());
+        // whitespace -> "_" so the header normalises back to the same id (time_point)
+        assertEquals("Condition_Time_Point", ConditionAxis.of("Time Point").csvColumnName());
+    }
+
+    @Test
+    public void csvColumnName_usesIdWhenLabelDoesNotNormaliseToId() {
+        // explicit id that diverges from the label: the header must encode the id so
+        // the CSV round-trips to the canonical id, not the label's normalisation.
+        ConditionAxis a = ConditionAxis.of("zt", "Time Point", 0);
+        assertEquals("Condition_zt", a.csvColumnName());
+        assertEquals("zt", ConditionAxis.normaliseId(
+                a.csvColumnName().substring("Condition_".length())));
     }
 
     @Test

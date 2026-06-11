@@ -214,6 +214,27 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void setConditionAxesReorderMigratesPrimaryValueAndMeta() {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.setConditionAxes(Arrays.asList(ConditionAxis.of("Genotype"), ConditionAxis.of("Timepoint")));
+        model.addFile(new File("M1.tif"));
+        model.setValueAt("M1", 0, ProjectManifestTableModel.COL_ANIMAL);
+        model.setValueAt("hAPP", 0, ProjectManifestTableModel.COL_CONDITION);        // Genotype (primary)
+        model.setValueAt("WeekFour", 0, ProjectManifestTableModel.COL_CONDITION + 1); // Timepoint
+
+        // Reorder so Timepoint becomes the primary axis.
+        model.setConditionAxes(Arrays.asList(ConditionAxis.of("Timepoint"), ConditionAxis.of("Genotype")));
+
+        int tpCol = model.conditionColumnForAxis("timepoint");
+        int genoCol = model.conditionColumnForAxis("genotype");
+        assertEquals(ProjectManifestTableModel.COL_CONDITION, tpCol);   // timepoint now primary
+        assertEquals("WeekFour", model.getValueAt(0, tpCol));           // value followed its axis
+        assertEquals("hAPP", model.getValueAt(0, genoCol));            // genotype value preserved
+        // user-set meta follows the axis id, not the primary slot
+        assertTrue(model.isUserSet(0, genoCol));
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();

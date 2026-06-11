@@ -408,23 +408,77 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     }
 
     /**
-     * Replace the condition-axis schema (de-duplicated by id).
-     *
-     * <p><b>Note:</b> for an empty or additive schema change. It does not migrate
-     * existing primary values (which live in {@code row.condition}) or per-cell meta
-     * when the PRIMARY axis changes, so it must not be used to reorder the primary
-     * axis of a populated model. No production caller does; use {@link #addConditionAxis}
-     * / {@link #removeConditionAxis} for incremental edits.
+     * Replace the condition-axis schema (de-duplicated by id). Existing per-row
+     * values and per-cell meta are migrated by axis id: the value for whichever axis
+     * becomes primary moves into the primary slot ({@code row.condition}), surviving
+     * non-primary values stay keyed by id, and values/meta for dropped axes are
+     * discarded. This keeps reorders (and any future schema edit) from scrambling
+     * the table, since the old primary value lives in {@code row.condition} rather
+     * than keyed by its axis id.
      */
     public void setConditionAxes(List<ConditionAxis> axes) {
-        conditionAxes.clear();
+        String oldPrimary = primaryAxisId();
+        List<ConditionAxis> next = new ArrayList<ConditionAxis>();
+        LinkedHashSet<String> keep = new LinkedHashSet<String>();
         if (axes != null) {
             for (ConditionAxis axis : axes) {
-                if (axis == null) continue;
-                addAxisIfMissing(axis);
+                if (axis == null || keep.contains(axis.id)) continue;
+                next.add(axis);
+                keep.add(axis.id);
             }
         }
+        String newPrimary = next.isEmpty() ? "condition" : next.get(0).id;
+        if (keep.isEmpty()) keep.add("condition");   // implicit primary stays active
+
+        for (Row row : rows) {
+            row.condition = remapConditionStorage(row.condition, row.conditions,
+                    oldPrimary, newPrimary, keep);
+            retainMetaAxes(row.meta, keep);
+            for (SeriesRow series : row.series) {
+                series.condition = remapConditionStorage(series.condition, series.conditions,
+                        oldPrimary, newPrimary, keep);
+                retainMetaAxes(series.meta, keep);
+            }
+        }
+
+        conditionAxes.clear();
+        conditionAxes.addAll(next);
         fireTableStructureChanged();
+    }
+
+    /**
+     * Redistribute one row/series' condition values for a (possibly reordered) schema.
+     * The old primary value lives in {@code primaryValue}; non-primary values are in
+     * {@code conditions} (keyed by id). Mutates {@code conditions} in place to hold the
+     * surviving non-primary values and returns the value for the new primary axis.
+     */
+    private static String remapConditionStorage(String primaryValue, Map<String, String> conditions,
+                                                String oldPrimary, String newPrimary,
+                                                java.util.Set<String> keep) {
+        Map<String, String> byId = new LinkedHashMap<String, String>();
+        if (primaryValue != null && !primaryValue.trim().isEmpty()) byId.put(oldPrimary, primaryValue);
+        if (conditions != null) byId.putAll(conditions);
+        String newPrimaryValue = byId.containsKey(newPrimary) ? byId.get(newPrimary) : "";
+        if (conditions != null) {
+            conditions.clear();
+            for (Map.Entry<String, String> e : byId.entrySet()) {
+                String id = e.getKey();
+                if (id == null || id.equals(newPrimary)) continue;   // primary -> dedicated slot
+                if (keep.contains(id)) conditions.put(id, e.getValue());  // surviving non-primary axis
+            }
+        }
+        return newPrimaryValue;
+    }
+
+    /** Drop per-cell meta for condition axes no longer in the schema; keep identity fields. */
+    private static void retainMetaAxes(Map<String, CellMeta> meta, java.util.Set<String> keepAxisIds) {
+        if (meta == null) return;
+        java.util.Iterator<String> it = meta.keySet().iterator();
+        while (it.hasNext()) {
+            String fid = it.next();
+            if ("animal".equals(fid) || "hemisphere".equals(fid) || "region".equals(fid)) continue;
+            if (!keepAxisIds.contains(fid)) it.remove();
+        }
     }
 
     /** Add one condition axis to the visible condition block. */
