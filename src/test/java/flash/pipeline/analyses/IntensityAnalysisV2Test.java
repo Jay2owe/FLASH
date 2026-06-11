@@ -34,6 +34,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.PrintStream;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -483,6 +484,19 @@ public class IntensityAnalysisV2Test {
 
         assertTrue(summary.contains("Threshold: Enter on next dialogue"));
         assertFalse(summary.contains("not needed"));
+    }
+
+    @Test
+    public void intensitySpatialDefaultsOnlyEnableCostThreeOrBelowMetrics() throws Exception {
+        assertEquals(EnumSet.of(
+                        IntensitySpatialConfig.AnalysisKey.NULLMODEL,
+                        IntensitySpatialConfig.AnalysisKey.GLCM),
+                defaultSpatialSet("DEFAULT_PERSLICE_ANALYSES"));
+        assertEquals(EnumSet.of(
+                        IntensitySpatialConfig.AnalysisKey.PATCHINESS,
+                        IntensitySpatialConfig.AnalysisKey.GLCM),
+                defaultSpatialSet("DEFAULT_MIP_ANALYSES"));
+        assertTrue(defaultSpatialSet("DEFAULT_NATIVE_3D_ANALYSES").isEmpty());
     }
 
     @Test
@@ -1156,6 +1170,13 @@ public class IntensityAnalysisV2Test {
                 int.class, BinConfig.class, String[].class, String[].class, boolean[].class);
         method.setAccessible(true);
         return (String) method.invoke(null, channelIndex, cfg, channelNames, filterSources, binarization);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<IntensitySpatialConfig.AnalysisKey> defaultSpatialSet(String fieldName) throws Exception {
+        Field field = IntensityAnalysisV2.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return (Set<IntensitySpatialConfig.AnalysisKey>) field.get(null);
     }
 
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,

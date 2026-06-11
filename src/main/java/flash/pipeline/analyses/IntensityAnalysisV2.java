@@ -237,19 +237,15 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D,
             IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D
     };
-    // Default-on per mode: analyses that are fast (estimatedCost <= 5) AND well suited to that mode.
+    // Default-on per mode: analyses that are fast (estimatedCost <= 3) AND well suited to that mode.
     private static final Set<IntensitySpatialConfig.AnalysisKey> DEFAULT_PERSLICE_ANALYSES =
             Collections.unmodifiableSet(EnumSet.of(
                     IntensitySpatialConfig.AnalysisKey.NULLMODEL,
-                    IntensitySpatialConfig.AnalysisKey.DEPTH_PROFILE,
-                    IntensitySpatialConfig.AnalysisKey.GLCM,
-                    IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE));
+                    IntensitySpatialConfig.AnalysisKey.GLCM));
     private static final Set<IntensitySpatialConfig.AnalysisKey> DEFAULT_MIP_ANALYSES =
             Collections.unmodifiableSet(EnumSet.of(
                     IntensitySpatialConfig.AnalysisKey.PATCHINESS,
-                    IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN,
-                    IntensitySpatialConfig.AnalysisKey.GLCM,
-                    IntensitySpatialConfig.AnalysisKey.ANISOTROPY));
+                    IntensitySpatialConfig.AnalysisKey.GLCM));
     private static final Set<IntensitySpatialConfig.AnalysisKey> DEFAULT_NATIVE_3D_ANALYSES =
             Collections.unmodifiableSet(EnumSet.noneOf(IntensitySpatialConfig.AnalysisKey.class));
 
