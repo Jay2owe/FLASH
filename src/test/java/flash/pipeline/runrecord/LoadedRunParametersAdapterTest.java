@@ -91,6 +91,35 @@ public class LoadedRunParametersAdapterTest {
     }
 
     @Test
+    public void spatialAdapterRestoresBoundingBoxTogglesFromRunRecord() {
+        Map<String, Object> spatial = map(
+                "doBBOverlap", Boolean.TRUE,
+                "doBBCpc", Boolean.TRUE,
+                "doBBVol", Boolean.FALSE,
+                "bbColocThresholdPercent", Double.valueOf(45.0),
+                "unknown", "ignored");
+
+        LoadedRunParameters.PresetLoad<SpatialPreset> load =
+                LoadedRunParameters.spatialPreset(spatial);
+
+        assertTrue(load.payload.isDoBBOverlap());
+        assertTrue(load.payload.isDoBBCpc());
+        assertFalse(load.payload.isDoBBVol());
+        assertEquals(45.0, load.payload.getBBColocThresholdPercent(), 0.0001);
+        // The BB keys must be recognised (applied), not reported as ignored.
+        assertTrue(load.result.getAppliedKeys().contains("doBBOverlap"));
+        assertTrue(load.result.getAppliedKeys().contains("bbColocThresholdPercent"));
+        assertTrue(load.result.getIgnoredKeys().contains("unknown"));
+
+        flash.pipeline.analyses.wizard.SpatialSetupConfig.DerivedConfig derived =
+                flash.pipeline.analyses.wizard.SpatialSetupConfig.fromPreset(load.payload);
+        assertTrue(derived.doBBOverlap);
+        assertTrue(derived.doBBCpc);
+        assertFalse(derived.doBBVol);
+        assertEquals(45.0, derived.bbColocThresholdPercent, 0.0001);
+    }
+
+    @Test
     public void binAndStageAdaptersApplySupportedChannelKeys() {
         Map<String, Object> parameters = map(
                 "channel_names", Arrays.asList("DAPI", "Iba1"),

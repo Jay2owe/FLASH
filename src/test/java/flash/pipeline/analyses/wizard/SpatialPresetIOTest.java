@@ -45,6 +45,52 @@ public class SpatialPresetIOTest {
     }
 
     @Test
+    public void roundTripPreservesBoundingBoxFields() throws Exception {
+        File root = temp.newFolder("spatial-preset-bb");
+        SpatialPresetIO io = new SpatialPresetIO(root);
+
+        SpatialPreset preset = new SpatialPreset("BB Preset", "test", "1",
+                true, false, false, false, false, false, false,
+                false, false, false, false, false,
+                false, false, false, false, false, 4,
+                0.0, "Fire", 0, 30.0,
+                true, true, false, 45.0);
+
+        io.save(preset);
+        SpatialPreset loaded = io.load("BB Preset");
+
+        assertTrue(loaded.isDoBBOverlap());
+        assertTrue(loaded.isDoBBCpc());
+        assertFalse(loaded.isDoBBVol());
+        assertEquals(45.0, loaded.getBBColocThresholdPercent(), 0.0001);
+
+        SpatialSetupConfig.DerivedConfig derived = SpatialSetupConfig.fromPreset(loaded);
+        assertTrue(derived.doBBOverlap);
+        assertTrue(derived.doBBCpc);
+        assertFalse(derived.doBBVol);
+        assertEquals(45.0, derived.bbColocThresholdPercent, 0.0001);
+    }
+
+    @Test
+    public void legacyPresetWithoutBoundingBoxKeysDefaultsOff() throws Exception {
+        File root = temp.newFolder("spatial-preset-legacy");
+        SpatialPresetIO io = new SpatialPresetIO(root);
+        assertTrue(io.presetDirectory().mkdirs());
+        File legacy = new File(io.presetDirectory(), "legacy.json");
+        Files.write(legacy.toPath(), ("{"
+                + "\"name\":\"Legacy\","
+                + "\"doCpc\":true"
+                + "}").getBytes(StandardCharsets.UTF_8));
+
+        SpatialPreset loaded = io.load("Legacy");
+
+        assertFalse(loaded.isDoBBOverlap());
+        assertFalse(loaded.isDoBBCpc());
+        assertFalse(loaded.isDoBBVol());
+        assertEquals(30.0, loaded.getBBColocThresholdPercent(), 0.0001);
+    }
+
+    @Test
     public void stockPresetsBootstrapWhenDirectoryIsEmpty() throws Exception {
         File root = temp.newFolder("stock");
         SpatialPresetIO io = new SpatialPresetIO(root);

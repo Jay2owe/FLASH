@@ -39,6 +39,10 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
     private final String heatmapLut;
     private final int clusterK;
     private final double colocThresholdPercent;
+    private final boolean doBBOverlap;
+    private final boolean doBBCpc;
+    private final boolean doBBVol;
+    private final double bbColocThresholdPercent;
 
     public SpatialPreset(String name,
                          String description,
@@ -94,7 +98,8 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
                 do3DMorphology, doCompositeIndices, doPopMorphometrics,
                 doSpatialMorphometrics, doObjectGLCM, doObjectFractal,
                 doObjectTextureClass, false, false, textureClassK,
-                kdeBandwidth, heatmapLut, clusterK, colocThresholdPercent);
+                kdeBandwidth, heatmapLut, clusterK, colocThresholdPercent,
+                false, false, false, 30.0);
     }
 
     public SpatialPreset(String name,
@@ -126,7 +131,8 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
                 do3DMorphology, doCompositeIndices, doPopMorphometrics,
                 doSpatialMorphometrics, doObjectGLCM, doObjectFractal,
                 doObjectTextureClass, false, doNative3DTexture, textureClassK,
-                kdeBandwidth, heatmapLut, clusterK, colocThresholdPercent);
+                kdeBandwidth, heatmapLut, clusterK, colocThresholdPercent,
+                false, false, false, 30.0);
     }
 
     public SpatialPreset(String name,
@@ -154,6 +160,44 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
                          String heatmapLut,
                          int clusterK,
                          double colocThresholdPercent) {
+        this(name, description, libraryVersion, doDistances, doSpatialStats, doVolColoc,
+                doCpc, doVoronoi, doHeatmaps, doPhenotyping, do2DMorphology,
+                do3DMorphology, doCompositeIndices, doPopMorphometrics,
+                doSpatialMorphometrics, doObjectGLCM, doObjectFractal,
+                doObjectTextureClass, doObjectTextureClassFractions, doNative3DTexture,
+                textureClassK, kdeBandwidth, heatmapLut, clusterK, colocThresholdPercent,
+                false, false, false, 30.0);
+    }
+
+    public SpatialPreset(String name,
+                         String description,
+                         String libraryVersion,
+                         boolean doDistances,
+                         boolean doSpatialStats,
+                         boolean doVolColoc,
+                         boolean doCpc,
+                         boolean doVoronoi,
+                         boolean doHeatmaps,
+                         boolean doPhenotyping,
+                         boolean do2DMorphology,
+                         boolean do3DMorphology,
+                         boolean doCompositeIndices,
+                         boolean doPopMorphometrics,
+                         boolean doSpatialMorphometrics,
+                         boolean doObjectGLCM,
+                         boolean doObjectFractal,
+                         boolean doObjectTextureClass,
+                         boolean doObjectTextureClassFractions,
+                         boolean doNative3DTexture,
+                         int textureClassK,
+                         double kdeBandwidth,
+                         String heatmapLut,
+                         int clusterK,
+                         double colocThresholdPercent,
+                         boolean doBBOverlap,
+                         boolean doBBCpc,
+                         boolean doBBVol,
+                         double bbColocThresholdPercent) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = emptyToNull(libraryVersion) == null
@@ -181,6 +225,10 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
         this.heatmapLut = emptyToNull(heatmapLut) == null ? "Fire" : heatmapLut.trim();
         this.clusterK = clusterK;
         this.colocThresholdPercent = colocThresholdPercent;
+        this.doBBOverlap = doBBOverlap;
+        this.doBBCpc = doBBCpc;
+        this.doBBVol = doBBVol;
+        this.bbColocThresholdPercent = bbColocThresholdPercent;
     }
 
     public String getName() { return name; }
@@ -209,6 +257,10 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
     public String getHeatmapLut() { return heatmapLut; }
     public int getClusterK() { return clusterK; }
     public double getColocThresholdPercent() { return colocThresholdPercent; }
+    public boolean isDoBBOverlap() { return doBBOverlap; }
+    public boolean isDoBBCpc() { return doBBCpc; }
+    public boolean isDoBBVol() { return doBBVol; }
+    public double getBBColocThresholdPercent() { return bbColocThresholdPercent; }
 
     public Map<String, Object> toJsonObject() {
         Map<String, Object> root = new LinkedHashMap<String, Object>();
@@ -237,6 +289,10 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
         root.put("heatmapLut", heatmapLut);
         root.put("clusterK", Integer.valueOf(clusterK));
         root.put("colocThresholdPercent", Double.valueOf(colocThresholdPercent));
+        root.put("doBBOverlap", Boolean.valueOf(doBBOverlap));
+        root.put("doBBCpc", Boolean.valueOf(doBBCpc));
+        root.put("doBBVol", Boolean.valueOf(doBBVol));
+        root.put("bbColocThresholdPercent", Double.valueOf(bbColocThresholdPercent));
         return root;
     }
 
@@ -275,7 +331,11 @@ public final class SpatialPreset implements Preset<SpatialPreset> {
                 doubleValue(root.get("kdeBandwidth"), 0.0),
                 stringOr(root.get("heatmapLut"), "Fire"),
                 JsonIO.intValue(root.get("clusterK"), 0),
-                doubleValue(root.get("colocThresholdPercent"), 30.0));
+                doubleValue(root.get("colocThresholdPercent"), 30.0),
+                JsonIO.booleanValue(root.get("doBBOverlap"), false),
+                JsonIO.booleanValue(root.get("doBBCpc"), false),
+                JsonIO.booleanValue(root.get("doBBVol"), false),
+                doubleValue(root.get("bbColocThresholdPercent"), 30.0));
     }
 
     private static double doubleValue(Object value, double fallback) {

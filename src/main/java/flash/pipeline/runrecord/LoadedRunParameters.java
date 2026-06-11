@@ -45,7 +45,9 @@ public final class LoadedRunParameters {
             "doObjectGLCM", "doObjectFractal", "doObjectTextureClass",
             "doObjectTextureClassFractions", "doNative3DTexture",
             "textureClassK", "kdeBandwidth", "heatmapLut", "clusterK",
-            "colocThresholdPercent", "forceRerun");
+            "colocThresholdPercent",
+            "doBBOverlap", "doBBCpc", "doBBVol", "bbColocThresholdPercent",
+            "forceRerun");
 
     public static final Set<String> INTENSITY_KEYS = keys(
             "name", "description", "libraryVersion", "strategy", "defaultMode",

@@ -7052,6 +7052,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 isSelected(bindings.doObjectGLCMToggle),
                 isSelected(bindings.doObjectFractalToggle),
                 isSelected(bindings.doObjectTextureClassToggle),
+                false,   // doObjectTextureClassFractions: not exposed in this dialog
                 isSelected(bindings.doNative3DTextureToggle),
                 clampObjectTextureClassK((int) Math.round(readNumericField(
                         bindings.textureClassKField, ObjectTextureFeatures.DEFAULT_K,
@@ -7059,7 +7060,11 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 readNumericField(bindings.kdeBandwidthField, 0.0, "KDE bandwidth"),
                 selectedText(bindings.heatmapLutChoice, DEFAULT_HEATMAP_LUT),
                 (int) Math.round(readNumericField(bindings.clusterKField, 0.0, "Clusters (k)")),
-                readFirstThreshold(bindings.thresholdFields));
+                readFirstThreshold(bindings.thresholdFields),
+                isSelected(bindings.doBBOverlapToggle),
+                isSelected(bindings.doBBCpcToggle),
+                isSelected(bindings.doBBVolToggle),
+                readFirstThreshold(bindings.bbThresholdFields));
     }
 
     /**

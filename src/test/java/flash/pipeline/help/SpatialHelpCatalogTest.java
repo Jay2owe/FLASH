@@ -14,11 +14,12 @@ import static org.junit.Assert.fail;
 public class SpatialHelpCatalogTest {
 
     @Test
-    public void allSixSectionTopicsAreRegistered() {
+    public void allSectionTopicsAreRegistered() {
         Map<String, SetupHelpTopic> all = SpatialHelpCatalog.all();
-        assertEquals(6, all.size());
+        assertEquals(7, all.size());
         assertNotNull(all.get("spatial-distances"));
         assertNotNull(all.get("spatial-colocalization"));
+        assertNotNull(all.get("spatial-bb-colocalization"));
         assertNotNull(all.get("spatial-voronoi"));
         assertNotNull(all.get("spatial-morphometry"));
         assertNotNull(all.get("spatial-phenotyping"));

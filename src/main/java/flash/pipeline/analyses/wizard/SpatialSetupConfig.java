@@ -116,6 +116,10 @@ public final class SpatialSetupConfig {
         out.heatmapLut = preset.getHeatmapLut();
         out.clusterK = preset.getClusterK();
         out.colocThresholdPercent = preset.getColocThresholdPercent();
+        out.doBBOverlap = preset.isDoBBOverlap();
+        out.doBBCpc = preset.isDoBBCpc();
+        out.doBBVol = preset.isDoBBVol();
+        out.bbColocThresholdPercent = preset.getBBColocThresholdPercent();
         enforceDependencies(out, null, true);
         return out;
     }
