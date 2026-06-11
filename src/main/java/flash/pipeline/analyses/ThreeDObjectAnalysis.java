@@ -1824,6 +1824,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 isSelected(bindings.runSpatialToggle),
                 isSelected(bindings.classicalCentroidFilterToggle),
                 readFirstThreshold(bindings.thresholdFields),
+                isSelected(bindings.doBBOverlapToggle),
+                isSelected(bindings.doBBCpcToggle),
+                isSelected(bindings.doBBVolToggle),
+                readFirstThreshold(bindings.bbThresholdFields),
                 selectedProcessMarkerNames(cfg),
                 selectedNuclearMarkerNames(cfg));
     }
@@ -1849,6 +1853,13 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     break;
                 }
             }
+            double bbColocThresholdPercent = 30.0;
+            for (Double value : bbThresholds.values()) {
+                if (value != null) {
+                    bbColocThresholdPercent = value.doubleValue();
+                    break;
+                }
+            }
             ThreeDObjectPreset preset = new ThreeDObjectPreset(
                     "GUI 3D Object run",
                     "Captured from the 3D Object Analysis dialog",
@@ -1856,6 +1867,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     doVolumetric, doCpc, doIntensityColoc,
                     extractProcessLength, runSpatial, classicalCentroidFilter,
                     colocThresholdPercent,
+                    doBBOverlap, doBBCpc, doBBVol, bbColocThresholdPercent,
                     selectedProcessMarkerNames(cfg),
                     selectedNuclearMarkerNames(cfg));
             runRecordContext.recordParameters(ParameterSnapshot.fromAnalysisPresetMap(

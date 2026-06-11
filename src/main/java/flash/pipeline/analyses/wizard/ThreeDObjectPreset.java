@@ -27,6 +27,10 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
     private final boolean runSpatial;
     private final boolean classicalCentroidFiltering;
     private final double colocThresholdPercent;
+    private final boolean doBBOverlap;
+    private final boolean doBBCpc;
+    private final boolean doBBVol;
+    private final double bbColocThresholdPercent;
     private final List<String> processMarkerHints;
     private final List<String> nuclearMarkerHints;
 
@@ -58,6 +62,27 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
                               double colocThresholdPercent,
                               List<String> processMarkerHints,
                               List<String> nuclearMarkerHints) {
+        this(name, description, libraryVersion, doVolumetric, doCpc, doIntensityColoc,
+                extractProcessLength, runSpatial, classicalCentroidFiltering, colocThresholdPercent,
+                false, false, false, 30.0, processMarkerHints, nuclearMarkerHints);
+    }
+
+    public ThreeDObjectPreset(String name,
+                              String description,
+                              String libraryVersion,
+                              boolean doVolumetric,
+                              boolean doCpc,
+                              boolean doIntensityColoc,
+                              boolean extractProcessLength,
+                              boolean runSpatial,
+                              boolean classicalCentroidFiltering,
+                              double colocThresholdPercent,
+                              boolean doBBOverlap,
+                              boolean doBBCpc,
+                              boolean doBBVol,
+                              double bbColocThresholdPercent,
+                              List<String> processMarkerHints,
+                              List<String> nuclearMarkerHints) {
         this.name = requireText("name", name);
         this.description = emptyToNull(description);
         this.libraryVersion = emptyToNull(libraryVersion) == null
@@ -70,6 +95,10 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
         this.runSpatial = runSpatial;
         this.classicalCentroidFiltering = classicalCentroidFiltering;
         this.colocThresholdPercent = colocThresholdPercent;
+        this.doBBOverlap = doBBOverlap;
+        this.doBBCpc = doBBCpc;
+        this.doBBVol = doBBVol;
+        this.bbColocThresholdPercent = bbColocThresholdPercent;
         this.processMarkerHints = immutableStrings(processMarkerHints);
         this.nuclearMarkerHints = immutableStrings(nuclearMarkerHints);
     }
@@ -118,6 +147,22 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
         return colocThresholdPercent;
     }
 
+    public boolean isDoBBOverlap() {
+        return doBBOverlap;
+    }
+
+    public boolean isDoBBCpc() {
+        return doBBCpc;
+    }
+
+    public boolean isDoBBVol() {
+        return doBBVol;
+    }
+
+    public double getBBColocThresholdPercent() {
+        return bbColocThresholdPercent;
+    }
+
     public List<String> getProcessMarkerHints() {
         return processMarkerHints;
     }
@@ -140,6 +185,10 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
         root.put("runSpatial", Boolean.valueOf(runSpatial));
         root.put("classicalCentroidFiltering", Boolean.valueOf(classicalCentroidFiltering));
         root.put("colocThresholdPercent", Double.valueOf(colocThresholdPercent));
+        root.put("doBBOverlap", Boolean.valueOf(doBBOverlap));
+        root.put("doBBCpc", Boolean.valueOf(doBBCpc));
+        root.put("doBBVol", Boolean.valueOf(doBBVol));
+        root.put("bbColocThresholdPercent", Double.valueOf(bbColocThresholdPercent));
         root.put("processMarkerHints", new ArrayList<String>(processMarkerHints));
         root.put("nuclearMarkerHints", new ArrayList<String>(nuclearMarkerHints));
         return root;
@@ -181,6 +230,10 @@ public final class ThreeDObjectPreset implements Preset<ThreeDObjectPreset> {
                 runSpatial,
                 JsonIO.booleanValue(root.get("classicalCentroidFiltering"), false),
                 doubleValue(root.get("colocThresholdPercent"), 30.0),
+                JsonIO.booleanValue(root.get("doBBOverlap"), false),
+                JsonIO.booleanValue(root.get("doBBCpc"), false),
+                JsonIO.booleanValue(root.get("doBBVol"), false),
+                doubleValue(root.get("bbColocThresholdPercent"), 30.0),
                 strings(root.get("processMarkerHints")),
                 strings(root.get("nuclearMarkerHints")));
     }

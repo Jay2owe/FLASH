@@ -377,6 +377,7 @@ public final class SpatialSetupConfig {
         public double colocThresholdPercent = 30.0;
         public double bbColocThresholdPercent = 30.0;
         public final Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
+        public final Map<String, Double> bbThresholds = new LinkedHashMap<String, Double>();
 
         public boolean anyEarlyPhaseToggleOn() {
             return forceRerun || doCpc || doHeatmaps || do2DMorphology || do3DMorphology

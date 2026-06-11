@@ -93,6 +93,29 @@ public class CpcUtilsBoundingBoxTest {
         assertEquals(a.bbVolume(), ca.bbVolume());
     }
 
+    @Test
+    public void boundingBoxCoincidenceRoundsCentroidLikeCpc() {
+        // Source centroid x=2.4 rounds to voxel index 2; partner box ends at xmax=2. Voxel-level CPC
+        // would match (rounded voxel 2 is inside), so BB-CPC must also match (superset invariant) -
+        // raw 2.4 > 2 would have wrongly missed it before rounding.
+        CpcUtils.ObjectInfo source = new CpcUtils.ObjectInfo(1);
+        source.cx = 2.4; source.cy = 1.0; source.cz = 0.0;
+        source.xmin = 0; source.xmax = 2; source.ymin = 0; source.ymax = 2; source.zmin = 0; source.zmax = 0;
+
+        CpcUtils.ObjectInfo partner = new CpcUtils.ObjectInfo(5);
+        partner.cx = 2.4; partner.cy = 1.0; partner.cz = 0.0;
+        partner.xmin = 0; partner.xmax = 2; partner.ymin = 0; partner.ymax = 2; partner.zmin = 0; partner.zmax = 0;
+
+        java.util.List<CpcUtils.ObjectInfo> sources = java.util.Arrays.asList(source);
+        java.util.List<CpcUtils.ObjectInfo> partners = java.util.Arrays.asList(partner);
+        CpcUtils.testBoundingBoxCoincidence(sources, partners);
+        assertEquals(5, source.partnerLabel);
+
+        // countCentroidsInBoxes also rounds: partner centroid x=2.4 rounds to 2, inside the box.
+        assertEquals(Integer.valueOf(1),
+                CpcUtils.countCentroidsInBoxes(sources, partners).get(1));
+    }
+
     private static ImagePlus twoCuboids() {
         int w = 6, h = 6, nz = 3;
         ImageStack stack = new ImageStack(w, h);

@@ -156,9 +156,14 @@ public final class CpcUtils {
     public static void testBoundingBoxCoincidence(List<ObjectInfo> sources, List<ObjectInfo> partners) {
         if (sources == null || partners == null) return;
         for (ObjectInfo s : sources) {
+            // Round the centroid to the same voxel index CPC's testCoincidence uses, so that any
+            // object flagged by voxel-level CPC is also flagged here (box superset of object).
+            double rx = Math.round(s.cx);
+            double ry = Math.round(s.cy);
+            double rz = Math.round(s.cz);
             s.partnerLabel = 0;
             for (ObjectInfo p : partners) {
-                if (p.bbContains(s.cx, s.cy, s.cz)) {
+                if (p.bbContains(rx, ry, rz)) {
                     s.partnerLabel = p.label;
                     break;
                 }
@@ -179,7 +184,8 @@ public final class CpcUtils {
             int c = 0;
             if (partners != null && !s.isBoxEmpty()) {
                 for (ObjectInfo p : partners) {
-                    if (s.bbContains(p.cx, p.cy, p.cz)) c++;
+                    // Round to the CPC voxel index so containment stays consistent with CPC.
+                    if (s.bbContains(Math.round(p.cx), Math.round(p.cy), Math.round(p.cz))) c++;
                 }
             }
             counts.put(s.label, c);

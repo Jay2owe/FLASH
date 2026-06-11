@@ -81,10 +81,14 @@ public final class ThreeDObjectSetupConfig {
         out.doVolumetric = safePreset.isDoVolumetric();
         out.doCpc = safePreset.isDoCpc();
         out.doIntensityColoc = safePreset.isDoIntensityColoc();
+        out.doBBOverlap = safePreset.isDoBBOverlap();
+        out.doBBCpc = safePreset.isDoBBCpc();
+        out.doBBVol = safePreset.isDoBBVol();
         out.extractProcessLength = safePreset.isExtractProcessLength();
         out.runSpatial = safePreset.isRunSpatial();
         out.classicalCentroidFiltering = safePreset.isClassicalCentroidFiltering();
         out.thresholdPercent = safePreset.getColocThresholdPercent();
+        out.bbThresholdPercent = safePreset.getBBColocThresholdPercent();
         for (String channelName : safeCfg.channelNames) {
             out.markerThresholds.put(channelName, Double.valueOf(out.thresholdPercent));
             out.bbThresholds.put(channelName, Double.valueOf(out.bbThresholdPercent));

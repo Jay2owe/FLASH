@@ -33,7 +33,9 @@ public final class LoadedRunParameters {
             "name", "description", "libraryVersion",
             "doVolumetric", "doCpc", "doIntensityColoc",
             "extractProcessLength", "runSpatial", "classicalCentroidFiltering",
-            "colocThresholdPercent", "processMarkerHints", "nuclearMarkerHints");
+            "colocThresholdPercent",
+            "doBBOverlap", "doBBCpc", "doBBVol", "bbColocThresholdPercent",
+            "processMarkerHints", "nuclearMarkerHints");
 
     public static final Set<String> SPATIAL_KEYS = keys(
             "name", "description", "libraryVersion",

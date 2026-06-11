@@ -22,6 +22,34 @@ public class ThreeDObjectPresetIOTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
+    public void boundingBoxTogglesAndThresholdSurviveJsonRoundTrip() throws Exception {
+        ThreeDObjectPreset preset = new ThreeDObjectPreset(
+                "BB run", "desc", ThreeDObjectPreset.CURRENT_LIBRARY_VERSION,
+                false, false, false, false, false, true, 30.0,
+                true, false, true, 45.0,
+                new ArrayList<String>(), new ArrayList<String>());
+
+        ThreeDObjectPreset restored = ThreeDObjectPreset.fromJson(preset.toJson());
+
+        assertTrue(restored.isDoBBOverlap());
+        assertFalse(restored.isDoBBCpc());
+        assertTrue(restored.isDoBBVol());
+        assertEquals(45.0, restored.getBBColocThresholdPercent(), 0.0);
+    }
+
+    @Test
+    public void legacyPresetJsonWithoutBoundingBoxKeysDefaultsOff() throws Exception {
+        // Backward compatibility: presets saved before the BB feature have no BB keys.
+        String legacyJson = "{\"name\":\"old\",\"doVolumetric\":true,\"doCpc\":true,"
+                + "\"colocThresholdPercent\":30.0}";
+        ThreeDObjectPreset restored = ThreeDObjectPreset.fromJson(legacyJson);
+        assertFalse(restored.isDoBBOverlap());
+        assertFalse(restored.isDoBBCpc());
+        assertFalse(restored.isDoBBVol());
+        assertEquals(30.0, restored.getBBColocThresholdPercent(), 0.0);
+    }
+
+    @Test
     public void stockPresetsBootstrapWhenDirectoryIsEmpty() throws Exception {
         ThreeDObjectPresetIO io = new ThreeDObjectPresetIO(temp.newFolder("stock"));
 

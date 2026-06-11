@@ -430,10 +430,12 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             if (!bbCpcPairs.isEmpty()) parts.add("bounding-box centroid (BB-CPC) columns");
             if (!bbVolPairs.isEmpty()) parts.add("bounding-box volume-fill columns");
             if (parts.isEmpty()) {
-                return "No saved bounding-box colocalization columns were detected. Selected outputs will be computed.";
+                return "No saved bounding-box colocalization columns were detected. Bounding-box columns are "
+                        + "produced by 3D Object Analysis - run it with the BB options to generate them.";
             }
             return "Detected saved " + joinSummary(parts)
-                    + ". Existing matching columns will be reused; missing selected outputs will be computed.";
+                    + ". Existing columns will be reused; missing threshold flags are derived from the saved "
+                    + "continuous columns.";
         }
 
         boolean hasBBOverlapPair(String a, String b) {
@@ -906,7 +908,10 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             doBBCpc = effectiveOptions.doBBCpc;
             doBBVol = effectiveOptions.doBBVol;
             for (String chName : channelNames) {
-                bbThresholds.put(chName, Double.valueOf(effectiveOptions.bbColocThresholdPercent));
+                Double perChannel = effectiveOptions.bbThresholds.get(chName);
+                bbThresholds.put(chName, perChannel != null
+                        ? perChannel
+                        : Double.valueOf(effectiveOptions.bbColocThresholdPercent));
             }
             doVoronoi = effectiveOptions.doVoronoi;
             doHeatmaps = effectiveOptions.doHeatmaps;
@@ -1759,6 +1764,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         config.colocThresholdPercent = firstConfiguredThreshold(channelNames);
         config.bbColocThresholdPercent = firstConfiguredBBThreshold(channelNames);
         config.markerThresholds.putAll(markerThresholds);
+        config.bbThresholds.putAll(bbThresholds);
         return config;
     }
 
@@ -1782,7 +1788,10 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             markerThresholds.put(chName, threshold == null
                     ? Double.valueOf(config.colocThresholdPercent)
                     : threshold);
-            bbThresholds.put(chName, Double.valueOf(config.bbColocThresholdPercent));
+            Double bbThreshold = config.bbThresholds.get(chName);
+            bbThresholds.put(chName, bbThreshold == null
+                    ? Double.valueOf(config.bbColocThresholdPercent)
+                    : bbThreshold);
         }
     }
 
@@ -2477,23 +2486,24 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         for (String source : channelNames) {
             ChannelData cd = channels.get(source);
             if (cd == null) continue;
-            int threshold = (int) getBBThreshold(source);
+            double threshold = getBBThreshold(source);
+            int label = (int) threshold;   // column name uses the integer threshold (e.g. BBColoc30)
             for (String partner : channelNames) {
                 if (source.equals(partner)) continue;
                 if (doBBOverlap) {
                     deriveBBFlagColumn(cd, source + "_BBColoc_" + partner,
-                            source + "_BBColoc" + threshold + "_" + partner, threshold);
+                            source + "_BBColoc" + label + "_" + partner, threshold);
                 }
                 if (doBBVol) {
                     deriveBBFlagColumn(cd, source + "_BBVolColoc_" + partner,
-                            source + "_BBVolColoc" + threshold + "_" + partner, threshold);
+                            source + "_BBVolColoc" + label + "_" + partner, threshold);
                 }
             }
         }
     }
 
     private static void deriveBBFlagColumn(ChannelData cd, String continuousCol, String flagCol,
-                                           int threshold) {
+                                           double threshold) {
         if (hasUsableColumn(cd, flagCol)) {
             IJ.log("  Reusing existing bounding-box flag: " + flagCol);
             return;
