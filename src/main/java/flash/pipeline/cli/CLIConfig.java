@@ -206,6 +206,9 @@ public class CLIConfig {
         if (object.doBBOverlap != null) {
             parts.add("object.doBBOverlap=" + object.doBBOverlap);
         }
+        if (object.doBBCpc != null) {
+            parts.add("object.doBBCpc=" + object.doBBCpc);
+        }
         if (object.extractProcessLength != null) {
             parts.add("object.extractProcessLength=" + object.extractProcessLength);
         }
@@ -646,6 +649,7 @@ public class CLIConfig {
         Boolean doCpc = null;
         Boolean doIntensityColoc = null;
         Boolean doBBOverlap = null;
+        Boolean doBBCpc = null;
         Boolean extractProcessLength = null;
         Boolean runSpatial = null;
         Boolean classicalCentroidFiltering = null;
@@ -658,6 +662,7 @@ public class CLIConfig {
         public Boolean getDoCpc() { return doCpc; }
         public Boolean getDoIntensityColoc() { return doIntensityColoc; }
         public Boolean getDoBBOverlap() { return doBBOverlap; }
+        public Boolean getDoBBCpc() { return doBBCpc; }
         public Boolean getExtractProcessLength() { return extractProcessLength; }
         public Boolean getRunSpatial() { return runSpatial; }
         public Boolean getClassicalCentroidFiltering() { return classicalCentroidFiltering; }
@@ -671,6 +676,7 @@ public class CLIConfig {
                     || doCpc != null
                     || doIntensityColoc != null
                     || doBBOverlap != null
+                    || doBBCpc != null
                     || extractProcessLength != null
                     || runSpatial != null
                     || classicalCentroidFiltering != null

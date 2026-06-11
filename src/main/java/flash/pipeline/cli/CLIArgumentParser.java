@@ -565,6 +565,15 @@ public final class CLIArgumentParser {
                     "object.doBBOverlap", doBBOverlap, false));
         }
 
+        String doBBCpc = getValue(options, "object.doBBCpc");
+        if (doBBCpc == null) {
+            doBBCpc = getValue(options, "object.do_bb_cpc");
+        }
+        if (doBBCpc != null) {
+            object.doBBCpc = Boolean.valueOf(parseBooleanValue(
+                    "object.doBBCpc", doBBCpc, false));
+        }
+
         String extract = getValue(options, "object.extractProcessLength");
         if (extract == null) {
             extract = getValue(options, "object.extract_process_length");

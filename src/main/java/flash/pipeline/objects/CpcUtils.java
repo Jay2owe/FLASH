@@ -147,6 +147,46 @@ public final class CpcUtils {
         }
     }
 
+    /**
+     * Geometric analogue of {@link #testCoincidence}: for each source object set {@code partnerLabel}
+     * to a partner object whose <em>bounding box</em> contains the source centroid (0 if none).
+     * Because a box ⊇ its object, this is strictly more permissive than voxel-level coincidence, so
+     * a source flagged by {@link #testCoincidence} is always flagged here too.
+     */
+    public static void testBoundingBoxCoincidence(List<ObjectInfo> sources, List<ObjectInfo> partners) {
+        if (sources == null || partners == null) return;
+        for (ObjectInfo s : sources) {
+            s.partnerLabel = 0;
+            for (ObjectInfo p : partners) {
+                if (p.bbContains(s.cx, s.cy, s.cz)) {
+                    s.partnerLabel = p.label;
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * For each source object, count how many partner centroids fall inside the source bounding box.
+     * Returned map is keyed by source label (centroids may lie in several overlapping boxes, so this
+     * is computed per source rather than by partner-label bouncing).
+     */
+    public static Map<Integer, Integer> countCentroidsInBoxes(List<ObjectInfo> sources,
+                                                              List<ObjectInfo> partners) {
+        Map<Integer, Integer> counts = new LinkedHashMap<Integer, Integer>();
+        if (sources == null) return counts;
+        for (ObjectInfo s : sources) {
+            int c = 0;
+            if (partners != null && !s.isBoxEmpty()) {
+                for (ObjectInfo p : partners) {
+                    if (s.bbContains(p.cx, p.cy, p.cz)) c++;
+                }
+            }
+            counts.put(s.label, c);
+        }
+        return counts;
+    }
+
     /** Deep copy object list so each pairwise test gets its own partnerLabel state. */
     public static List<ObjectInfo> copyObjects(List<ObjectInfo> originals) {
         if (originals == null) return new ArrayList<ObjectInfo>();

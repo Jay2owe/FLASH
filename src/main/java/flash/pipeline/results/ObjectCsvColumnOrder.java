@@ -284,6 +284,20 @@ public final class ObjectCsvColumnOrder {
         if (bbOverlapFlag != null) {
             return new ColumnKey(8, partnerRank(partnerRanks, bbOverlapFlag), 1, bbOverlapFlag, originalIndex);
         }
+        String bbCpcColoc = suffixAfter(col, channelName + "_BBCPCColoc_");        // centroid-in-box flag
+        if (bbCpcColoc != null) {
+            return new ColumnKey(8, partnerRank(partnerRanks, bbCpcColoc), 2, bbCpcColoc, originalIndex);
+        }
+        String bbCpcContains = suffixAfter(col, channelName + "_BBCPCContains_");  // partner centroids in box
+        if (bbCpcContains != null) {
+            return new ColumnKey(8, partnerRank(partnerRanks, bbCpcContains), 3, bbCpcContains, originalIndex);
+        }
+        if ((channelName + "_BBCPCTargetsHit").equals(col)) {
+            return new ColumnKey(8, Integer.MAX_VALUE - 1, 0, "", originalIndex);
+        }
+        if ((channelName + "_BBCPCPattern").equals(col)) {
+            return new ColumnKey(8, Integer.MAX_VALUE, 0, "", originalIndex);
+        }
 
         exact = VORONOI_ORDER.get(col);
         if (exact != null) return new ColumnKey(9, exact, 0, "", originalIndex);

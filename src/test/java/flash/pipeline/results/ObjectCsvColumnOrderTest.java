@@ -69,4 +69,36 @@ public class ObjectCsvColumnOrderTest {
         assertTrue("CPC before BBColoc", cpc < continuous);
         assertTrue("BBColoc before Voronoi", flag < voronoi);
     }
+
+    @Test
+    public void bbCpcColumnsClassifyDistinctlyFromBBOverlap() {
+        List<String> input = Arrays.asList(
+                "Label",
+                "C1_BBCPCPattern",
+                "C1_BBCPCContains_C2",
+                "C1_BBColoc_C2",
+                "C1_BBCPCColoc_C2",
+                "C1_BBColoc30_C2",
+                "C1_BBCPCTargetsHit",
+                "Voronoi_NumNeighbors");
+
+        List<String> ordered = ObjectCsvColumnOrder.orderedColumns("C1", input, CHANNELS);
+
+        // Within a partner: overlap continuous, overlap flag, then BBCPC coloc, BBCPC contains.
+        int overlap = ordered.indexOf("C1_BBColoc_C2");
+        int overlapFlag = ordered.indexOf("C1_BBColoc30_C2");
+        int cpcColoc = ordered.indexOf("C1_BBCPCColoc_C2");
+        int cpcContains = ordered.indexOf("C1_BBCPCContains_C2");
+        int targetsHit = ordered.indexOf("C1_BBCPCTargetsHit");
+        int pattern = ordered.indexOf("C1_BBCPCPattern");
+        int voronoi = ordered.indexOf("Voronoi_NumNeighbors");
+
+        assertTrue(overlap < overlapFlag);
+        assertTrue(overlapFlag < cpcColoc);
+        assertTrue(cpcColoc < cpcContains);
+        // Whole-object roll-ups terminate the BB section, still before Voronoi.
+        assertTrue(cpcContains < targetsHit);
+        assertTrue(targetsHit < pattern);
+        assertTrue(pattern < voronoi);
+    }
 }

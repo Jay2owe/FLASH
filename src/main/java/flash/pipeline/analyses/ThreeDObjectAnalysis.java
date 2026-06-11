@@ -272,6 +272,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private boolean doCpc = true;
     private boolean doIntensityColoc = false;
     private boolean doBBOverlap = false;
+    private boolean doBBCpc = false;
     private Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
     /** Per-channel bounding-box coloc threshold (%), independent of {@link #markerThresholds}. */
     private final Map<String, Double> bbThresholds = new LinkedHashMap<String, Double>();
@@ -900,6 +901,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         gdOpts.addToggle("Bounding-box overlap (% / BBColoc)", doBBOverlap);
                 gdOpts.addHelpText("Per-object bounding-box overlap: max intersection of the object's box "
                         + "with a partner object's box, as a percentage of the source box volume.");
+                objectBindings.doBBCpcToggle =
+                        gdOpts.addToggle("Bounding-box centroid coincidence (BB-CPC)", doBBCpc);
+                gdOpts.addHelpText("Whether each object's centroid falls inside a partner object's "
+                        + "bounding box, plus a count of partner centroids inside this object's box.");
 
                 gdOpts.addHeader("Colocalisation Thresholds");
                 for (String chName : cfg.channelNames) {
@@ -980,6 +985,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 doCpc = gdOpts.getNextBoolean();
                 doIntensityColoc = gdOpts.getNextBoolean();
                 doBBOverlap = gdOpts.getNextBoolean();
+                doBBCpc = gdOpts.getNextBoolean();
                 markerThresholds.clear();
                 for (String chName : cfg.channelNames) {
                     markerThresholds.put(chName, gdOpts.getNextNumber());
@@ -1261,6 +1267,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         if (doIntensityColoc) ensureAllIntensityColocColumns(cfg, channelTables);
         if (doCpc) ensureAllCpcColocColumns(cfg, channelTables);
         if (doBBOverlap) ensureAllBBColocColumns(cfg, channelTables);
+        if (doBBCpc) ensureAllBBCpcColocColumns(cfg, channelTables);
 
         for (Map.Entry<String, ij.measure.ResultsTable> e : channelTables.entrySet()) {
             try {
@@ -1700,6 +1707,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             setToggle(bindings.doCpcToggle, doCpc);
             setToggle(bindings.doIntensityColocToggle, doIntensityColoc);
             setToggle(bindings.doBBOverlapToggle, doBBOverlap);
+            setToggle(bindings.doBBCpcToggle, doBBCpc);
             setToggle(bindings.extractProcessLengthToggle, wizardExtractProcessLength);
             setToggle(bindings.runSpatialToggle, wizardRunSpatial);
             setToggle(bindings.classicalCentroidFilterToggle, classicalCentroidFilter);
@@ -1971,6 +1979,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         if (object.getDoBBOverlap() != null) {
             derived.doBBOverlap = object.getDoBBOverlap().booleanValue();
         }
+        if (object.getDoBBCpc() != null) {
+            derived.doBBCpc = object.getDoBBCpc().booleanValue();
+        }
         if (object.getExtractProcessLength() != null) {
             derived.extractProcessLength = object.getExtractProcessLength().booleanValue();
         }
@@ -2006,6 +2017,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         doCpc = derived.doCpc;
         doIntensityColoc = derived.doIntensityColoc;
         doBBOverlap = derived.doBBOverlap;
+        doBBCpc = derived.doBBCpc;
         classicalCentroidFilter = derived.classicalCentroidFiltering;
         wizardExtractProcessLength = derived.extractProcessLength;
         wizardRunSpatial = derived.runSpatial;
@@ -2067,6 +2079,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         ToggleSwitch doCpcToggle;
         ToggleSwitch doIntensityColocToggle;
         ToggleSwitch doBBOverlapToggle;
+        ToggleSwitch doBBCpcToggle;
         ToggleSwitch extractProcessLengthToggle;
         ToggleSwitch runSpatialToggle;
         ToggleSwitch classicalCentroidFilterToggle;
@@ -2259,6 +2272,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
             if (doBBOverlap) {
                 appendBBColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBCpc) {
+                appendBBCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
             }
             if (doIntensityColoc) {
@@ -2984,6 +3001,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 keep.add(bbColocPctCol(channelName, other));
                 keep.add(bbColocFlagCol(channelName, other));
             }
+            if (doBBCpc) {
+                keep.add(bbCpcColocCol(channelName, other));
+                keep.add(bbCpcContainsCol(channelName, other));
+            }
             if (doIntensityColoc) {
                 keep.add(objPearsonCol(channelName, other));
                 keep.add(objMandersM1Col(channelName, other));
@@ -3001,6 +3022,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         if (doCpc) {
             keep.add(channelName + "_CPCTargetsHit");
             keep.add(channelName + "_CPCPattern");
+        }
+        if (doBBCpc) {
+            keep.add(channelName + "_BBCPCTargetsHit");
+            keep.add(channelName + "_BBCPCPattern");
         }
 
         boolean keepLength = false;
@@ -4068,6 +4093,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
             if (doBBOverlap) {
                 appendBBColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBCpc) {
+                appendBBCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
             }
             if (doIntensityColoc) {
@@ -5625,6 +5654,208 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
             table.setValue(pctCol, r, 0);
             table.setValue(flagCol, r, 0);
+        }
+    }
+
+    // ── Bounding-Box centroid coincidence (Family A: BB-CPC) ──────────
+
+    /** BB-CPC coincidence flag column: SOURCE_BBCPCColoc_PARTNER. */
+    private String bbCpcColocCol(String source, String partner) {
+        return source + "_BBCPCColoc_" + partner;
+    }
+
+    /** BB-CPC contains-count column: SOURCE_BBCPCContains_PARTNER. */
+    private String bbCpcContainsCol(String source, String partner) {
+        return source + "_BBCPCContains_" + partner;
+    }
+
+    private void ensureAllBBCpcColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String src : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(src);
+            if (t == null || t.size() == 0) continue;
+            for (String tgt : cfg.channelNames) {
+                if (src.equals(tgt)) continue;
+                ensureCpcColumn(t, bbCpcColocCol(src, tgt));
+                ensureCpcColumn(t, bbCpcContainsCol(src, tgt));
+            }
+            ensureCpcColumn(t, src + "_BBCPCTargetsHit");
+            try {
+                t.getStringValue(src + "_BBCPCPattern", 0);
+            } catch (Exception e) {
+                t.setValue(src + "_BBCPCPattern", 0, "None");
+            }
+        }
+    }
+
+    /**
+     * BB-CPC colocalization (Family A). Geometric analogue of CPC: a source object's centroid inside
+     * a partner object's bounding box (BBCPCColoc), and the number of partner centroids inside this
+     * source object's box (BBCPCContains). Box ⊇ object, so BBCPCColoc is a superset of CPCColoc.
+     */
+    private void appendBBCpcColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        for (int a = 0; a < n; a++) {
+            ij.measure.ResultsTable aTable = channelTables.get(cfg.channelNames.get(a));
+            boolean aHas = channelHasObjects[a]
+                    && getRegisteredImage(cfg.channelNames.get(a) + "_objects") != null
+                    && aTable != null;
+            if (!aHas && aTable != null) {
+                for (int b = 0; b < n; b++) {
+                    if (b == a) continue;
+                    setBBCpcZerosForThisImage(aTable, cfg.channelNames.get(a), cfg.channelNames.get(b),
+                            scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        for (int a = 0; a < n; a++) {
+            String aChannel = cfg.channelNames.get(a);
+            ImagePlus aObjImg = getRegisteredImage(aChannel + "_objects");
+            boolean aHas = channelHasObjects[a] && aObjImg != null;
+            ij.measure.ResultsTable aTable = channelTables.get(aChannel);
+
+            for (int b = a + 1; b < n; b++) {
+                String bChannel = cfg.channelNames.get(b);
+                ImagePlus bObjImg = getRegisteredImage(bChannel + "_objects");
+                boolean bHas = channelHasObjects[b] && bObjImg != null;
+                ij.measure.ResultsTable bTable = channelTables.get(bChannel);
+
+                if (!aHas || !bHas) {
+                    if (aTable != null) setBBCpcZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBCpcZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    String emptyChannel = !aHas
+                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
+                            : bChannel;
+                    IJ.log("    - BB-CPC: " + aChannel + " vs " + bChannel + " skipped (no objects in " + emptyChannel + ")");
+                    continue;
+                }
+
+                try {
+                    List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aObjImg);
+                    List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bObjImg);
+
+                    // Coincidence: source centroid inside a partner box.
+                    List<CpcUtils.ObjectInfo> fwdA = CpcUtils.copyObjects(objectsA);
+                    CpcUtils.testBoundingBoxCoincidence(fwdA, objectsB);
+                    List<CpcUtils.ObjectInfo> revB = CpcUtils.copyObjects(objectsB);
+                    CpcUtils.testBoundingBoxCoincidence(revB, objectsA);
+
+                    Map<Integer, CpcUtils.ObjectInfo> fwdMapA = new LinkedHashMap<Integer, CpcUtils.ObjectInfo>();
+                    for (CpcUtils.ObjectInfo obj : fwdA) fwdMapA.put(obj.label, obj);
+                    Map<Integer, CpcUtils.ObjectInfo> revMapB = new LinkedHashMap<Integer, CpcUtils.ObjectInfo>();
+                    for (CpcUtils.ObjectInfo obj : revB) revMapB.put(obj.label, obj);
+
+                    // Contains: partner centroids inside this source's box (per source object).
+                    Map<Integer, Integer> containsCountA = CpcUtils.countCentroidsInBoxes(objectsA, objectsB);
+                    Map<Integer, Integer> containsCountB = CpcUtils.countCentroidsInBoxes(objectsB, objectsA);
+
+                    if (aTable != null) {
+                        writeBBCpcValuesForThisImage(aTable, aChannel, bChannel, fwdMapA, containsCountA,
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    if (bTable != null) {
+                        writeBBCpcValuesForThisImage(bTable, bChannel, aChannel, revMapB, containsCountB,
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+
+                    int hitAB = 0;
+                    for (CpcUtils.ObjectInfo obj : fwdA) if (obj.isColocalized()) hitAB++;
+                    int hitBA = 0;
+                    for (CpcUtils.ObjectInfo obj : revB) if (obj.isColocalized()) hitBA++;
+                    IJ.log("    - BB-CPC: " + aChannel + " vs " + bChannel
+                            + " (" + hitAB + "/" + objectsA.size() + " fwd, "
+                            + hitBA + "/" + objectsB.size() + " rev)");
+                } catch (Exception e) {
+                    IJ.log("    - BB-CPC: " + aChannel + " vs " + bChannel + " FAILED: " + e.getMessage());
+                    if (aTable != null) setBBCpcZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBCpcZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        appendBBCpcMultiTargetColumns(cfg, channelTables, scnIndex, animalName, hemisphere, region, roiLabel);
+    }
+
+    /** Write BB-CPC coloc flag + contains count into a table, matched by Label. */
+    private void writeBBCpcValuesForThisImage(
+            ij.measure.ResultsTable table, String sourceChannel, String partnerChannel,
+            Map<Integer, CpcUtils.ObjectInfo> resultsByLabel,
+            Map<Integer, Integer> containsCounts,
+            int scnIndex, String animalName, String hemisphere, String region, String roiLabel
+    ) {
+        String colocCol = bbCpcColocCol(sourceChannel, partnerChannel);
+        String containsCol = bbCpcContainsCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            int label = (int) table.getValue("Label", r);
+            CpcUtils.ObjectInfo info = resultsByLabel.get(label);
+            table.setValue(colocCol, r, info != null && info.isColocalized() ? 1 : 0);
+            Integer cc = containsCounts.get(label);
+            table.setValue(containsCol, r, cc != null ? cc : 0);
+        }
+    }
+
+    private void setBBCpcZerosForThisImage(ij.measure.ResultsTable table, String sourceChannel,
+                                           String partnerChannel,
+                                           int scnIndex, String animalName, String hemisphere,
+                                           String region, String roiLabel) {
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            table.setValue(bbCpcColocCol(sourceChannel, partnerChannel), r, 0);
+            table.setValue(bbCpcContainsCol(sourceChannel, partnerChannel), r, 0);
+        }
+    }
+
+    /**
+     * After all pairwise BB-CPC tests: BBCPCTargetsHit = # partner channels where BBCPCColoc==1;
+     * BBCPCPattern = joined partner names where BBCPCColoc==1.
+     */
+    private void appendBBCpcMultiTargetColumns(
+            BinConfig cfg,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex, String animalName, String hemisphere,
+            String region, String roiLabel
+    ) {
+        for (String aChannel : cfg.channelNames) {
+            ij.measure.ResultsTable table = channelTables.get(aChannel);
+            if (table == null) continue;
+
+            List<String> partners = new ArrayList<String>();
+            for (String other : cfg.channelNames) {
+                if (other.equals(aChannel)) continue;
+                partners.add(other);
+            }
+
+            for (int r = 0; r < table.size(); r++) {
+                if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+
+                int targetsHit = 0;
+                StringBuilder pattern = new StringBuilder();
+                for (String partner : partners) {
+                    try {
+                        int val = (int) table.getValue(bbCpcColocCol(aChannel, partner), r);
+                        if (val > 0) {
+                            targetsHit++;
+                            if (pattern.length() > 0) pattern.append(" + ");
+                            pattern.append(partner);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+                table.setValue(aChannel + "_BBCPCTargetsHit", r, targetsHit);
+                table.setValue(aChannel + "_BBCPCPattern", r, pattern.length() > 0 ? pattern.toString() : "None");
+            }
         }
     }
 
