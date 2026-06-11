@@ -346,12 +346,25 @@ public final class ConditionManifestIO {
                                                              Map<String, String> assignments)
             throws IOException {
         ConditionAssignments existing = readAssignmentsModel(directory);
-        if (existing.axes().size() > 1) {
+        if (isRicherThanLegacySingleCondition(existing)) {
             IJ.log("Multi-axis condition manifest preserved; composite edits not written back.");
             return false;
         }
         saveAssignments(directory, assignments);
         return true;
+    }
+
+    /**
+     * A manifest carries richer structure than the single legacy {@code Condition}
+     * column when it has more than one axis, OR one axis that is not the default
+     * {@code condition} axis (e.g. a lone {@code Condition_Genotype} file). Composite
+     * edits would lose that axis identity, so such files must be preserved.
+     */
+    private static boolean isRicherThanLegacySingleCondition(ConditionAssignments existing) {
+        if (existing == null) return false;
+        int n = existing.axes().size();
+        if (n > 1) return true;
+        return n == 1 && !"condition".equals(existing.axes().get(0).id);
     }
 
     // ---- N-axis condition model (multi-condition support) ----------------

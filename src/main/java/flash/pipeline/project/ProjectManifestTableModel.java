@@ -407,7 +407,15 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         return new ArrayList<ConditionAxis>(conditionAxes);
     }
 
-    /** Replace the condition-axis schema (de-duplicated by id). */
+    /**
+     * Replace the condition-axis schema (de-duplicated by id).
+     *
+     * <p><b>Note:</b> for an empty or additive schema change. It does not migrate
+     * existing primary values (which live in {@code row.condition}) or per-cell meta
+     * when the PRIMARY axis changes, so it must not be used to reorder the primary
+     * axis of a populated model. No production caller does; use {@link #addConditionAxis}
+     * / {@link #removeConditionAxis} for incremental edits.
+     */
     public void setConditionAxes(List<ConditionAxis> axes) {
         conditionAxes.clear();
         if (axes != null) {
@@ -1138,14 +1146,19 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         return groups;
     }
 
-    /** Serialise a row/series {@link CellMeta} grid to the persistable DTO map. */
-    private static Map<String, ProjectFile.CellMetaData> cellMetaToDto(Map<String, CellMeta> meta) {
+    /**
+     * Serialise a row/series {@link CellMeta} grid to the persistable DTO map.
+     * Meta keyed by a field id with no current column (an axis that was removed or
+     * never restored) is dropped, so a stale user-set flag can never be persisted
+     * and later block a re-add/roster import.
+     */
+    private Map<String, ProjectFile.CellMetaData> cellMetaToDto(Map<String, CellMeta> meta) {
         Map<String, ProjectFile.CellMetaData> out =
                 new LinkedHashMap<String, ProjectFile.CellMetaData>();
         if (meta == null) return out;
         for (Map.Entry<String, CellMeta> e : meta.entrySet()) {
             CellMeta m = e.getValue();
-            if (e.getKey() == null || m == null) continue;
+            if (e.getKey() == null || m == null || !isActiveFieldId(e.getKey())) continue;
             ProjectFile.CellMetaData dto = new ProjectFile.CellMetaData();
             dto.confidence = (m.confidence == null ? Confidence.NONE : m.confidence).name();
             dto.provenance = nullToEmpty(m.provenance);
@@ -1155,19 +1168,32 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         return out;
     }
 
-    /** Restore a persisted DTO meta map into a fresh row/series {@link CellMeta} grid. */
-    private static void applyDtoMeta(Map<String, CellMeta> target,
-                                    Map<String, ProjectFile.CellMetaData> dto) {
+    /**
+     * Restore a persisted DTO meta map into a fresh row/series {@link CellMeta} grid.
+     * Orphaned meta (a field id with no current column, e.g. from an older project
+     * file written before the remove-axis purge) is ignored on read too.
+     */
+    private void applyDtoMeta(Map<String, CellMeta> target,
+                             Map<String, ProjectFile.CellMetaData> dto) {
         if (target == null || dto == null) return;
         for (Map.Entry<String, ProjectFile.CellMetaData> e : dto.entrySet()) {
             ProjectFile.CellMetaData d = e.getValue();
-            if (e.getKey() == null || d == null) continue;
+            if (e.getKey() == null || d == null || !isActiveFieldId(e.getKey())) continue;
             CellMeta m = new CellMeta();
             m.confidence = parseConfidence(d.confidence);
             m.provenance = nullToEmpty(d.provenance);
             m.userSet = d.userSet;
             target.put(e.getKey(), m);
         }
+    }
+
+    /** True if a meta field id maps to a column that currently exists (identity field or live condition axis). */
+    private boolean isActiveFieldId(String fieldId) {
+        if (fieldId == null) return false;
+        if ("animal".equals(fieldId) || "hemisphere".equals(fieldId) || "region".equals(fieldId)) {
+            return true;
+        }
+        return conditionColumnForAxis(fieldId) >= 0;
     }
 
     private static Confidence parseConfidence(String name) {

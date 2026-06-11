@@ -191,6 +191,43 @@ public class ConditionManifestIOMultiAxisTest {
         assertEquals("WT", back.get("M1"));
     }
 
+    @Test
+    public void axisLabelWithWhitespaceRoundTripsId() throws Exception {
+        ConditionAssignments ca = new ConditionAssignments();
+        ca.addAxis(ConditionAxis.of("Time Point"));   // id "time_point"
+        ca.put("M1", "time_point", "WeekFour");
+
+        File f = temp.newFile("ws.csv");
+        ConditionManifestIO.writeAssignments(f, ca);
+        ConditionAssignments back = ConditionManifestIO.readAssignments(f);
+
+        // the whitespace label round-trips to the same axis id (Condition_Time_Point)
+        assertEquals(1, back.axes().size());
+        assertEquals("time_point", back.axes().get(0).id);
+        assertEquals("WeekFour", back.get("M1", "time_point"));
+    }
+
+    @Test
+    public void saveAssignmentsPreservingMultiAxis_preservesSingleNonConditionAxis() throws Exception {
+        File dir = temp.newFolder("single-geno");
+        ConditionAssignments geno = new ConditionAssignments();
+        geno.addAxis(ConditionAxis.of("Genotype"));   // one axis, but NOT the legacy "condition"
+        geno.put("M1", "genotype", "hAPP");
+        ConditionManifestIO.writeAssignments(ConditionManifestIO.getFile(dir.getAbsolutePath()), geno);
+
+        java.util.LinkedHashMap<String, String> composite = new java.util.LinkedHashMap<String, String>();
+        composite.put("M1", "WT");
+        boolean written = ConditionManifestIO.saveAssignmentsPreservingMultiAxis(
+                dir.getAbsolutePath(), composite);
+
+        assertFalse("a single non-condition axis must be preserved", written);
+        ConditionAssignments back =
+                ConditionManifestIO.readAssignments(ConditionManifestIO.getFile(dir.getAbsolutePath()));
+        assertEquals(1, back.axes().size());
+        assertEquals("genotype", back.axes().get(0).id);
+        assertEquals("hAPP", back.get("M1", "genotype"));
+    }
+
     private static String readAll(File f) throws Exception {
         Scanner sc = new Scanner(f, "UTF-8").useDelimiter("\\A");
         try {

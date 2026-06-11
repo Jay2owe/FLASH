@@ -46,12 +46,15 @@ public final class ConditionAxis {
 
     /**
      * Column name used for this axis in {@code Conditions.csv}, e.g.
-     * {@code Condition_Genotype}. Whitespace in the label is removed so the
-     * header is a single token; CSV quoting is handled by the writer.
+     * {@code Condition_Genotype}. Whitespace in the label is collapsed to a single
+     * underscore (not removed) so the header is a single token that still
+     * {@link #normaliseId normalises} back to this axis's {@link #id} on read
+     * (e.g. {@code "Time Point"} -&gt; {@code Condition_Time_Point} -&gt; id
+     * {@code time_point}); CSV quoting is handled by the writer.
      */
     public String csvColumnName() {
         String base = label.isEmpty() ? id : label;
-        String token = base.replaceAll("\\s+", "");
+        String token = base.replaceAll("\\s+", "_");
         return "Condition_" + token;
     }
 

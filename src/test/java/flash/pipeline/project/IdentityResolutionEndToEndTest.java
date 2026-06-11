@@ -184,6 +184,36 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void loadIgnoresOrphanedMetaForAbsentAxis() {
+        // Simulate a project file written by an older build: meta for a "genotype" axis
+        // that is NOT in the schema. It must not be restored as a user-set flag that
+        // would block a later roster import for that axis.
+        ProjectFile pf = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = new File("M1.tif").getAbsolutePath();
+        item.include = true;
+        item.animalId = "M1";
+        ProjectFile.CellMetaData orphan = new ProjectFile.CellMetaData();
+        orphan.userSet = true;
+        orphan.confidence = "NONE";
+        item.meta.put("genotype", orphan);        // no genotype axis in pf.conditionAxes
+        pf.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(pf);
+
+        java.util.Map<String, java.util.Map<String, String>> byAnimal =
+                new java.util.LinkedHashMap<String, java.util.Map<String, String>>();
+        java.util.Map<String, String> vals = new java.util.LinkedHashMap<String, String>();
+        vals.put("genotype", "WT");
+        byAnimal.put("M1", vals);
+        model.importRoster(Arrays.asList(ConditionAxis.of("Genotype")), byAnimal, false);
+
+        // The orphaned user-set flag was filtered out, so the roster value lands.
+        assertEquals("WT", model.getValueAt(0, model.conditionColumnForAxis("genotype")));
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();
