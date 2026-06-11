@@ -1,6 +1,8 @@
 package flash.pipeline.project;
 
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Locates and edits the per-image "region" slot inside a {@link ProjectFile}, keyed by the
@@ -110,5 +112,27 @@ public final class ProjectRegionEditor {
         String x = a == null ? "" : a.trim();
         String y = b == null ? "" : b.trim();
         return x.toLowerCase(Locale.ROOT).equals(y.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * The no-spurious-write gate: reduce edited region labels (by zero-based series index) to
+     * only the genuinely-changed ones — those whose value differs from the baseline the picker
+     * displayed for that index ({@link #sameRegion} comparison; values trimmed, null index keys
+     * dropped). When every edit equals its baseline — notably the headless path that just echoes
+     * the displayed regions — the result is empty, so nothing is written back to {@code project.json}.
+     */
+    public static LinkedHashMap<Integer, String> changedRegions(
+            Map<Integer, String> editedByIndex, Map<Integer, String> shownByIndex) {
+        LinkedHashMap<Integer, String> changed = new LinkedHashMap<Integer, String>();
+        if (editedByIndex == null) return changed;
+        for (Map.Entry<Integer, String> e : editedByIndex.entrySet()) {
+            if (e.getKey() == null) continue;
+            String edited = e.getValue() == null ? "" : e.getValue().trim();
+            String shown = shownByIndex == null ? null : shownByIndex.get(e.getKey());
+            if (!sameRegion(edited, shown)) {
+                changed.put(e.getKey(), edited);
+            }
+        }
+        return changed;
     }
 }

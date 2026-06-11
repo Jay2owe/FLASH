@@ -856,13 +856,14 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         ProjectFile project = ProjectFileIO.read(settingsDir);
         if (project == null) return;
 
+        // Only genuinely-edited rows are written (see ProjectRegionEditor.changedRegions); the
+        // headless path echoes the displayed regions, so this is empty and nothing is written.
+        java.util.Map<Integer, String> toApply =
+                ProjectRegionEditor.changedRegions(editedByIndex, shownByIndex);
         boolean changed = false;
-        for (java.util.Map.Entry<Integer, String> e : editedByIndex.entrySet()) {
-            if (e.getKey() == null) continue;
+        for (java.util.Map.Entry<Integer, String> e : toApply.entrySet()) {
             int i = e.getKey().intValue();
-            String edited = e.getValue() == null ? "" : e.getValue().trim();
-            String shown = shownByIndex == null ? null : shownByIndex.get(Integer.valueOf(i));
-            if (ProjectRegionEditor.sameRegion(edited, shown)) continue; // unchanged
+            String edited = e.getValue();
             try {
                 OrientationImageIdentity id = OrientationImageIdentity.fromProjectSeries(
                         directory, i, supplier.getSeriesName(i));

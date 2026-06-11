@@ -2,6 +2,9 @@ package flash.pipeline.project;
 
 import org.junit.Test;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -117,6 +120,55 @@ public class ProjectRegionEditorTest {
         assertNull(ProjectRegionEditor.locate(project, "missing.tif", 1));
         assertNull(ProjectRegionEditor.locate(null, "x.tif", 1));
         assertNull(ProjectRegionEditor.locate(project, null, 1));
+    }
+
+    private static Map<Integer, String> map(Object... kv) {
+        LinkedHashMap<Integer, String> m = new LinkedHashMap<Integer, String>();
+        for (int i = 0; i < kv.length; i += 2) {
+            m.put((Integer) kv[i], (String) kv[i + 1]);
+        }
+        return m;
+    }
+
+    @Test
+    public void changedRegions_headlessEcho_writesNothing() {
+        // Headless: edited regions == the displayed (shown) regions for every row.
+        Map<Integer, String> shown = map(0, "SCN", 1, "Cortex", 2, "");
+        Map<Integer, String> edited = map(0, "SCN", 1, "Cortex", 2, "");
+        assertTrue("no genuine edit -> empty -> nothing written",
+                ProjectRegionEditor.changedRegions(edited, shown).isEmpty());
+    }
+
+    @Test
+    public void changedRegions_onlyGenuineEditsTrimmedAndIncluded() {
+        Map<Integer, String> shown = map(0, "SCN", 1, "Cortex", 2, "");
+        Map<Integer, String> edited = map(
+                0, "SCN",            // unchanged
+                1, "  Hippocampus ", // changed (and untrimmed)
+                2, "PVN");           // changed from empty
+        Map<Integer, String> changed = ProjectRegionEditor.changedRegions(edited, shown);
+        assertEquals(2, changed.size());
+        assertEquals("Hippocampus", changed.get(1)); // trimmed
+        assertEquals("PVN", changed.get(2));
+        assertFalse(changed.containsKey(0));
+    }
+
+    @Test
+    public void changedRegions_caseAndWhitespaceOnlyDiffsAreNotChanges() {
+        Map<Integer, String> shown = map(0, "SCN", 1, "Cortex");
+        Map<Integer, String> edited = map(0, " scn ", 1, "CORTEX");
+        assertTrue(ProjectRegionEditor.changedRegions(edited, shown).isEmpty());
+    }
+
+    @Test
+    public void changedRegions_nullSafeAndDropsNullKeys() {
+        assertTrue(ProjectRegionEditor.changedRegions(null, map(0, "SCN")).isEmpty());
+        LinkedHashMap<Integer, String> withNullKey = new LinkedHashMap<Integer, String>();
+        withNullKey.put(null, "SCN");
+        withNullKey.put(Integer.valueOf(3), "PVN");
+        Map<Integer, String> changed = ProjectRegionEditor.changedRegions(withNullKey, null);
+        assertEquals(1, changed.size());
+        assertEquals("PVN", changed.get(Integer.valueOf(3)));
     }
 
     @Test
