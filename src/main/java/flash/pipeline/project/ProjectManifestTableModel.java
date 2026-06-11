@@ -57,7 +57,11 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     public static final int COL_REGION = 5;
     /** First column in the generated condition-axis block. */
     public static final int COL_CONDITION = 6;
-    /** Legacy notes column index when the table has only one condition column. */
+    /**
+     * Notes column index for a single-condition table ONLY. With multiple
+     * condition axes the Notes column shifts right — always use
+     * {@link #notesColumn()} to address it; this constant is the single-axis case.
+     */
     public static final int COL_NOTES = 7;
 
     private static final String[] FIXED_COLUMNS = {

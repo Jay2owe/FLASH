@@ -82,6 +82,28 @@ public class IdentityResolutionEndToEndTest {
     }
 
     @Test
+    public void legacyPrimaryConditionSurvivesAxisPromotionAndRoundTrip() {
+        // A legacy single-Condition value must stay under the Condition column when
+        // auto-detection promotes the schema to add a Genotype axis, and survive save/reload.
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.addFile(new File("hAPP_M14_LH_SCN.tif"));
+        model.setConditionForRows(new int[]{0}, "WT");   // legacy primary Condition value
+
+        model.resolveIdentities();                        // detects genotype hAPP -> promotes schema
+
+        assertEquals("WT", model.getValueAt(0, ProjectManifestTableModel.COL_CONDITION));
+        int genotypeCol = model.conditionColumnForAxis("genotype");
+        assertTrue(genotypeCol > ProjectManifestTableModel.COL_CONDITION);
+        assertEquals("hAPP", model.getValueAt(0, genotypeCol));
+
+        ProjectFile pf = model.toProjectFile("p", "/out", "w");
+        ProjectManifestTableModel reloaded = new ProjectManifestTableModel();
+        reloaded.loadFromProjectFile(pf);
+        assertEquals("WT", reloaded.getValueAt(0, ProjectManifestTableModel.COL_CONDITION));
+        assertEquals("hAPP", reloaded.getValueAt(0, reloaded.conditionColumnForAxis("genotype")));
+    }
+
+    @Test
     public void confirmedSeriesIdentitySeedsOrientationManifest() {
         ProjectFile project = new ProjectFile();
         ProjectFile.Item item = new ProjectFile.Item();
