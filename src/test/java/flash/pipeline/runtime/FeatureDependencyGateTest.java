@@ -168,6 +168,31 @@ public class FeatureDependencyGateTest {
     }
 
     @Test
+    public void checkingDependencyBlocksWithoutOfferingInstallAction() {
+        EnumMap<DependencyId, DependencyStatus> statuses =
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.CELLPOSE_RUNTIME,
+                        DependencyStatus.checking("Checking Cellpose runtime"));
+        FeatureDependencyGate.configure(DependencyRuntimeTestSupport.serviceWith(statuses), opener);
+        ui.headless = false;
+        ui.nextAction = "change_setup";
+
+        FeatureDependencyGate.GateDecision decision = FeatureDependencyGate.check(
+                DependencyId.CELLPOSE_RUNTIME,
+                "Set Up Configuration",
+                "Cellpose segmentation");
+
+        assertEquals(FeatureDependencyGate.GateDecision.CHANGE_SETUP, decision);
+        assertEquals(1, ui.prompts.size());
+        assertTrue(ui.prompts.get(0).plainMessage.contains(
+                "Dependency status is still being checked: Cellpose runtime"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Open Dependencies"));
+        assertTrue(ui.prompts.get(0).buttonLabels.contains("Go Back / Change Setup"));
+        assertFalse(ui.prompts.get(0).buttonLabels.contains("Install Cellpose"));
+        assertEquals(0, opener.calls);
+    }
+
+    @Test
     public void missingNonFixableDependencyOffersOpenDependenciesOnly() {
         EnumMap<DependencyId, DependencyStatus> statuses =
                 DependencyRuntimeTestSupport.withStatuses(
