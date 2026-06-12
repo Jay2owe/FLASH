@@ -52,6 +52,9 @@ public final class PresentationTileConfig {
     private final int rowGapPx;
     private final int conditionFontSizePx;
     private final int channelFontSizePx;
+    private final boolean conditionHeaderVisible;
+    private final boolean channelHeaderVisible;
+    private final int outputDpi;
     private final int exportScale;
     private final double labelFracX;
     private final double labelFracY;
@@ -80,6 +83,9 @@ public final class PresentationTileConfig {
         this.rowGapPx = clamp(b.rowGapPx, 0, 400);
         this.conditionFontSizePx = clamp(b.conditionFontSizePx, 6, 96);
         this.channelFontSizePx = clamp(b.channelFontSizePx, 6, 96);
+        this.conditionHeaderVisible = b.conditionHeaderVisible;
+        this.channelHeaderVisible = b.channelHeaderVisible;
+        this.outputDpi = clamp(b.outputDpi, 72, 2400);
         this.exportScale = clamp(b.exportScale, 1, 4);
         this.labelFracX = clampFrac(b.labelFracX);
         this.labelFracY = clampFrac(b.labelFracY);
@@ -119,6 +125,9 @@ public final class PresentationTileConfig {
                 .rowGapPx(rowGapPx)
                 .conditionFontSizePx(conditionFontSizePx)
                 .channelFontSizePx(channelFontSizePx)
+                .conditionHeaderVisible(conditionHeaderVisible)
+                .channelHeaderVisible(channelHeaderVisible)
+                .outputDpi(outputDpi)
                 .exportScale(exportScale)
                 .labelFracX(labelFracX)
                 .labelFracY(labelFracY)
@@ -210,6 +219,18 @@ public final class PresentationTileConfig {
         return channelFontSizePx;
     }
 
+    public boolean conditionHeaderVisible() {
+        return conditionHeaderVisible;
+    }
+
+    public boolean channelHeaderVisible() {
+        return channelHeaderVisible;
+    }
+
+    public int outputDpi() {
+        return outputDpi;
+    }
+
     public int exportScale() {
         return exportScale;
     }
@@ -276,6 +297,9 @@ public final class PresentationTileConfig {
         private int rowGapPx = 8;
         private int conditionFontSizePx = 15;
         private int channelFontSizePx = 16;
+        private boolean conditionHeaderVisible = true;
+        private boolean channelHeaderVisible = true;
+        private int outputDpi = 300;
         private int exportScale = 1;
         private double labelFracX = -1.0;
         private double labelFracY = -1.0;
@@ -391,6 +415,21 @@ public final class PresentationTileConfig {
 
         public Builder channelFontSizePx(int value) {
             this.channelFontSizePx = value;
+            return this;
+        }
+
+        public Builder conditionHeaderVisible(boolean value) {
+            this.conditionHeaderVisible = value;
+            return this;
+        }
+
+        public Builder channelHeaderVisible(boolean value) {
+            this.channelHeaderVisible = value;
+            return this;
+        }
+
+        public Builder outputDpi(int value) {
+            this.outputDpi = value;
             return this;
         }
 

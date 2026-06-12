@@ -4,6 +4,7 @@ import flash.pipeline.presentation.PresentationTileConfig;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.config.CollapsibleSection;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -67,6 +68,8 @@ public final class ConditionLayoutChooser {
 
         PipelineDialog dialog = new PipelineDialog(
                 "Representative Image Figure - Layout", PipelineDialog.Phase.EXPORT);
+        dialog.setWorkflowTracker(new String[]{"Statistic", "Conditions", "Select Images",
+                "Display Ranges", "Layout", "Build"}, 4);
 
         dialog.addHeader("Live Preview");
         final FigurePreviewPanel preview = new FigurePreviewPanel();
@@ -554,7 +557,11 @@ public final class ConditionLayoutChooser {
         private final JTextField marginField;
         private final JTextField conditionFontField;
         private final JTextField channelFontField;
-        private final JComboBox<String> exportScaleBox;
+        private final ToggleSwitch conditionHeaderToggle;
+        private final ToggleSwitch channelHeaderToggle;
+        private final JTextField outputDpiField;
+        private final CollapsibleSection advancedTileSection;
+        private final CollapsibleSection advancedAnnotationSection;
         private double labelFracX = -1.0;
         private double labelFracY = -1.0;
         private double scaleBarFracX = -1.0;
@@ -608,8 +615,9 @@ public final class ConditionLayoutChooser {
             marginField = compactField(String.valueOf(initial.marginPx()), 4);
             conditionFontField = compactField(String.valueOf(initial.conditionFontSizePx()), 4);
             channelFontField = compactField(String.valueOf(initial.channelFontSizePx()), 4);
-            exportScaleBox = new JComboBox<String>(new String[]{"1x", "2x", "3x", "4x"});
-            exportScaleBox.setSelectedItem(Math.max(1, Math.min(4, initial.exportScale())) + "x");
+            conditionHeaderToggle = new ToggleSwitch(initial.conditionHeaderVisible());
+            channelHeaderToggle = new ToggleSwitch(initial.channelHeaderVisible());
+            outputDpiField = compactField(String.valueOf(initial.outputDpi()), 5);
             labelFracX = initial.labelFracX();
             labelFracY = initial.labelFracY();
             scaleBarFracX = initial.scaleBarFracX();
@@ -617,31 +625,41 @@ public final class ConditionLayoutChooser {
 
             panel.add(compactRow(
                     labelled("Rows by", tileGroupBox),
-                    labelled("Cell px", tileCellSizeField)));
+                    labelled("Cell px", tileCellSizeField),
+                    labelled("DPI", outputDpiField)));
+            panel.add(compactRow(
+                    labelled("Condition font", conditionFontField),
+                    labelled("Channel font", channelFontField)));
             panel.add(compactRow(
                     labelledToggle("Annotate tile", annotateOverviewToggle),
                     labelledToggle("Annotated copies", annotateIndividualToggle),
                     labelledToggle("Scale bar", scaleBarToggle)));
             panel.add(compactRow(
-                    labelled("Bar um", scaleBarLengthField),
-                    labelled("Bar px", scaleBarThicknessField),
-                    labelled("Bar position", scaleBarPositionBox),
-                    labelled("Colour", annotationColorBox)));
-            panel.add(compactRow(
                     labelled("Label", labelModeBox),
-                    labelled("Custom", customLabelField),
-                    labelled("Font px", labelFontSizeField),
-                    labelled("Label position", labelPositionBox)));
-            panel.add(compactRow(
+                    labelled("Custom", customLabelField)));
+            panel.add(tileOrderPanel.panel);
+            advancedTileSection = new CollapsibleSection("Advanced tile", false);
+            advancedTileSection.getBody().add(compactRow(
                     labelled("Row gap", rowGapField),
                     labelled("Column gap", conditionGapField),
                     labelled("Inner gap", innerGapField),
                     labelled("Margin", marginField)));
-            panel.add(compactRow(
-                    labelled("Condition font", conditionFontField),
-                    labelled("Channel font", channelFontField),
-                    labelled("Export scale", exportScaleBox)));
-            panel.add(tileOrderPanel.panel);
+            advancedTileSection.getBody().add(compactRow(
+                    labelledToggle("Condition headers", conditionHeaderToggle),
+                    labelledToggle("Channel headers", channelHeaderToggle)));
+            panel.add(advancedTileSection);
+
+            advancedAnnotationSection =
+                    new CollapsibleSection("Advanced annotations", false);
+            advancedAnnotationSection.getBody().add(compactRow(
+                    labelled("Bar um", scaleBarLengthField),
+                    labelled("Bar px", scaleBarThicknessField),
+                    labelled("Bar position", scaleBarPositionBox),
+                    labelled("Colour", annotationColorBox)));
+            advancedAnnotationSection.getBody().add(compactRow(
+                    labelled("Font px", labelFontSizeField),
+                    labelled("Label position", labelPositionBox)));
+            panel.add(advancedAnnotationSection);
 
             annotateIndividualToggle.addChangeListener(new Runnable() {
                 @Override public void run() {
@@ -669,12 +687,21 @@ public final class ConditionLayoutChooser {
                     fireChange();
                 }
             });
+            conditionHeaderToggle.addChangeListener(new Runnable() {
+                @Override public void run() {
+                    fireChange();
+                }
+            });
+            channelHeaderToggle.addChangeListener(new Runnable() {
+                @Override public void run() {
+                    fireChange();
+                }
+            });
             onCombo(tileGroupBox);
             onCombo(scaleBarPositionBox);
             onCombo(annotationColorBox);
             onCombo(labelModeBox);
             onCombo(labelPositionBox);
-            onCombo(exportScaleBox);
             onText(tileCellSizeField);
             onText(scaleBarLengthField);
             onText(scaleBarThicknessField);
@@ -686,6 +713,7 @@ public final class ConditionLayoutChooser {
             onText(marginField);
             onText(conditionFontField);
             onText(channelFontField);
+            onText(outputDpiField);
         }
 
         private void onCombo(JComboBox<String> box) {
@@ -740,7 +768,10 @@ public final class ConditionLayoutChooser {
                     .rowGapPx(parseInt(rowGapField, 8))
                     .conditionFontSizePx(parseInt(conditionFontField, 15))
                     .channelFontSizePx(parseInt(channelFontField, 16))
-                    .exportScale(parseExportScale(exportScaleBox))
+                    .conditionHeaderVisible(conditionHeaderToggle.isSelected())
+                    .channelHeaderVisible(channelHeaderToggle.isSelected())
+                    .outputDpi(parseInt(outputDpiField, 300))
+                    .exportScale(1)
                     .labelFracX(labelFracX)
                     .labelFracY(labelFracY)
                     .scaleBarFracX(scaleBarFracX)
@@ -772,6 +803,8 @@ public final class ConditionLayoutChooser {
             conditionGapField.setText(String.valueOf(spacing.conditionGapPx()));
             innerGapField.setText(String.valueOf(spacing.innerColGapPx()));
             marginField.setText(String.valueOf(spacing.marginPx()));
+            conditionHeaderToggle.setSelected(spacing.conditionHeaderVisible());
+            channelHeaderToggle.setSelected(spacing.channelHeaderVisible());
             fireChange();
         }
 
@@ -781,6 +814,14 @@ public final class ConditionLayoutChooser {
                 annotateOverviewToggle.setSelected(true);
             }
             annotateOverviewToggle.setEnabled(!forceTileAnnotations);
+        }
+
+        boolean advancedTileExpandedForTest() {
+            return advancedTileSection.isExpanded();
+        }
+
+        boolean advancedAnnotationsExpandedForTest() {
+            return advancedAnnotationSection.isExpanded();
         }
     }
 
@@ -1018,15 +1059,6 @@ public final class ConditionLayoutChooser {
             return Integer.parseInt(textValue(field, String.valueOf(fallback)));
         } catch (NumberFormatException e) {
             return fallback;
-        }
-    }
-
-    private static int parseExportScale(JComboBox<String> box) {
-        String text = selectedText(box).toLowerCase(Locale.ROOT).replace("x", "").trim();
-        try {
-            return Math.max(1, Math.min(4, Integer.parseInt(text)));
-        } catch (NumberFormatException e) {
-            return 1;
         }
     }
 

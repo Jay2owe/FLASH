@@ -1,6 +1,7 @@
 package flash.pipeline.results;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.image.DisplayRangeSetting;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.presentation.PresentationTileConfig;
@@ -43,7 +44,7 @@ public final class RepresentativeFigureDetailsWriter {
                              File outputPng) throws Exception {
         File dir = analysisDetailsWriteDir(projectDirectory);
         IoUtils.mustMkdirs(dir);
-        File out = new File(dir, FILE_NAME);
+        File out = outputFile(dir, config);
         File tmp = File.createTempFile(out.getName(), ".tmp", dir);
         boolean moved = false;
         try {
@@ -70,6 +71,9 @@ public final class RepresentativeFigureDetailsWriter {
         BinConfig safeSetup = setupConfig == null ? new BinConfig() : setupConfig;
 
         w.write("// Representative Image Figure\n");
+        if (safeConfig.hasSaveName()) {
+            w.write("Save name: " + safeConfig.saveName() + "\n");
+        }
         w.write("Output PNG: " + path(outputPng) + "\n");
         w.write("Statistic: " + (safeConfig.statistic == null
                 ? "" : safeConfig.statistic.label()) + "\n");
@@ -129,6 +133,22 @@ public final class RepresentativeFigureDetailsWriter {
         w.write("</Condition Layout>\n");
 
         writeTileConfig(w, safeConfig.tileConfig);
+    }
+
+    private static File outputFile(File dir, RepresentativeFigureConfig config) {
+        RepresentativeFigureConfig safeConfig =
+                config == null ? new RepresentativeFigureConfig() : config;
+        if (!safeConfig.hasSaveName()) {
+            return new File(dir, FILE_NAME);
+        }
+        String safe = safeConfig.safeSaveName();
+        if (safe == null || safe.isEmpty()) {
+            return new File(dir, FILE_NAME);
+        }
+        if (safe.length() > 120) {
+            safe = safe.substring(0, 120);
+        }
+        return new File(dir, "representative_figure_" + safe + ".txt");
     }
 
     private static void writeTileConfig(Writer w, PresentationTileConfig config) throws Exception {
@@ -211,13 +231,15 @@ public final class RepresentativeFigureDetailsWriter {
                                        RepresentativeFigureConfig config,
                                        BinConfig setupConfig) {
         String custom = clean(config.customDisplayRangeForChannel(channelIndex));
-        if (!custom.isEmpty()) {
-            return custom + " (representative custom)";
+        DisplayRangeSetting customSetting = DisplayRangeSetting.parse(custom);
+        if (customSetting.isConfigured()) {
+            return customSetting.summary() + " (representative custom)";
         }
         if (channelIndex >= 0 && channelIndex < setupConfig.channelMinMax.size()) {
             String setup = clean(setupConfig.channelMinMax.get(channelIndex));
-            if (!setup.isEmpty() && !"none".equalsIgnoreCase(setup)) {
-                return setup + " (setup display range)";
+            DisplayRangeSetting setupSetting = DisplayRangeSetting.parse(setup);
+            if (setupSetting.isConfigured()) {
+                return setupSetting.summary() + " (setup display range)";
             }
         }
         return "automatic fallback";

@@ -121,13 +121,12 @@ public final class RepresentativeFigurePreview {
                     thumbnail.channelIndex(), thumbnail.channelName(), "",
                     thumbnail.image()));
         }
-        // pixelWidthUm = 0 keeps the scale bar out of the cached-thumbnail preview
-        // (true microns are unknown here); the final render and tile editor draw it.
         return new RepresentativePreviewRenderer.RenderedFinalSeries(
                 series.id(), series.seriesIndex(), series.seriesNumber(),
                 series.seriesName(), series.animal(), series.condition(),
                 series.hemisphere(), series.region(), series.sourcePath(),
-                channels, series.mergeThumbnail(), 0.0, 0.0);
+                channels, series.mergeThumbnail(),
+                series.pixelWidthUm(), series.pixelHeightUm());
     }
 
     private static BufferedImage downscale(BufferedImage source, int maxLongEdgePx) {

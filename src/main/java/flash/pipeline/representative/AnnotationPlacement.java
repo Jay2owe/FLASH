@@ -12,14 +12,14 @@ public final class AnnotationPlacement {
     private AnnotationPlacement() {
     }
 
-    /** Inset fraction used for the corner anchors (matches the renderer's feel). */
-    private static final double NEAR = 0.04;
-    private static final double FAR = 0.96;
+    /** Edge fractions used for manual/snap corner anchors. */
+    private static final double NEAR = 0.0;
+    private static final double FAR = 1.0;
 
     /**
      * Approximate top-left fractional anchor ({@code [x, y]}) for a corner
      * preset. The renderer clamps the box inside the tile, so right/bottom
-     * anchors only need to be "past centre".
+     * anchors place the box against the far edge.
      */
     public static double[] cornerFraction(PresentationTileConfig.Position position) {
         switch (position) {

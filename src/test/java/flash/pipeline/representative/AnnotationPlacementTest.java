@@ -10,26 +10,26 @@ public class AnnotationPlacementTest {
 
     @Test
     public void cornerFractionsAreDistinctPerCorner() {
-        assertEquals(0.04, AnnotationPlacement.cornerFraction(
+        assertEquals(0.0, AnnotationPlacement.cornerFraction(
                 PresentationTileConfig.Position.TOP_LEFT)[0], 1e-9);
-        assertEquals(0.04, AnnotationPlacement.cornerFraction(
+        assertEquals(0.0, AnnotationPlacement.cornerFraction(
                 PresentationTileConfig.Position.TOP_LEFT)[1], 1e-9);
-        assertEquals(0.96, AnnotationPlacement.cornerFraction(
+        assertEquals(1.0, AnnotationPlacement.cornerFraction(
                 PresentationTileConfig.Position.BOTTOM_RIGHT)[0], 1e-9);
-        assertEquals(0.96, AnnotationPlacement.cornerFraction(
+        assertEquals(1.0, AnnotationPlacement.cornerFraction(
                 PresentationTileConfig.Position.BOTTOM_RIGHT)[1], 1e-9);
-        assertEquals(0.96, AnnotationPlacement.cornerFraction(
+        assertEquals(1.0, AnnotationPlacement.cornerFraction(
                 PresentationTileConfig.Position.TOP_RIGHT)[0], 1e-9);
-        assertEquals(0.04, AnnotationPlacement.cornerFraction(
+        assertEquals(0.0, AnnotationPlacement.cornerFraction(
                 PresentationTileConfig.Position.TOP_RIGHT)[1], 1e-9);
     }
 
     @Test
     public void snapsWhenNearACornerAndNotInTheMiddle() {
         assertEquals(PresentationTileConfig.Position.TOP_LEFT,
-                AnnotationPlacement.snapToNearestCorner(0.05, 0.05, 0.06));
+                AnnotationPlacement.snapToNearestCorner(0.03, 0.04, 0.06));
         assertEquals(PresentationTileConfig.Position.BOTTOM_RIGHT,
-                AnnotationPlacement.snapToNearestCorner(0.95, 0.94, 0.06));
+                AnnotationPlacement.snapToNearestCorner(0.97, 0.97, 0.06));
         assertNull("centre of the tile should not snap",
                 AnnotationPlacement.snapToNearestCorner(0.5, 0.5, 0.06));
     }

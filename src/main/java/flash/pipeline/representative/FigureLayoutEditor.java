@@ -74,6 +74,8 @@ public final class FigureLayoutEditor extends JDialog {
     private int innerGap;
     private int margin;
     private boolean showImages;
+    private boolean conditionHeaderVisible;
+    private boolean channelHeaderVisible;
     private JSlider rowGapSlider;
     private JSlider colGapSlider;
     private JSlider innerGapSlider;
@@ -96,6 +98,8 @@ public final class FigureLayoutEditor extends JDialog {
         this.colGap = tileConfig.conditionGapPx();
         this.innerGap = tileConfig.innerColGapPx();
         this.margin = tileConfig.marginPx();
+        this.conditionHeaderVisible = tileConfig.conditionHeaderVisible();
+        this.channelHeaderVisible = tileConfig.channelHeaderVisible();
         this.canvas = new GridCanvas();
 
         buildUi();
@@ -334,6 +338,24 @@ public final class FigureLayoutEditor extends JDialog {
         imagesRow.add(new JLabel("Show real images"));
         side.add(imagesRow);
 
+        JPanel headersRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        headersRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        ToggleSwitch conditionHeaderToggle = new ToggleSwitch(conditionHeaderVisible);
+        conditionHeaderToggle.addChangeListener(() -> {
+            conditionHeaderVisible = conditionHeaderToggle.isSelected();
+            canvas.repaint();
+        });
+        ToggleSwitch channelHeaderToggle = new ToggleSwitch(channelHeaderVisible);
+        channelHeaderToggle.addChangeListener(() -> {
+            channelHeaderVisible = channelHeaderToggle.isSelected();
+            canvas.repaint();
+        });
+        headersRow.add(conditionHeaderToggle);
+        headersRow.add(new JLabel("Condition headers"));
+        headersRow.add(channelHeaderToggle);
+        headersRow.add(new JLabel("Channel headers"));
+        side.add(headersRow);
+
         JButton reset = new JButton("Reset");
         reset.setAlignmentX(Component.LEFT_ALIGNMENT);
         reset.addActionListener(e -> {
@@ -346,6 +368,10 @@ public final class FigureLayoutEditor extends JDialog {
             colGapSlider.setValue(baseConfig.conditionGapPx());
             innerGapSlider.setValue(baseConfig.innerColGapPx());
             marginSlider.setValue(baseConfig.marginPx());
+            conditionHeaderVisible = baseConfig.conditionHeaderVisible();
+            channelHeaderVisible = baseConfig.channelHeaderVisible();
+            conditionHeaderToggle.setSelected(conditionHeaderVisible);
+            channelHeaderToggle.setSelected(channelHeaderVisible);
             updateGridLabel();
             canvas.repaint();
         });
@@ -392,6 +418,8 @@ public final class FigureLayoutEditor extends JDialog {
                 .conditionGapPx(colGap)
                 .innerColGapPx(innerGap)
                 .marginPx(margin)
+                .conditionHeaderVisible(conditionHeaderVisible)
+                .channelHeaderVisible(channelHeaderVisible)
                 .build();
         return new Result(layout, tile);
     }

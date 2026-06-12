@@ -34,6 +34,8 @@ public final class RepresentativeSeries {
     private final File mergeCacheFile;
     private final PreviewSource previewSource;
     private final boolean cacheHit;
+    private final double pixelWidthUm;
+    private final double pixelHeightUm;
 
     public RepresentativeSeries(String id,
                                 int seriesIndex,
@@ -49,6 +51,27 @@ public final class RepresentativeSeries {
                                 File mergeCacheFile,
                                 PreviewSource previewSource,
                                 boolean cacheHit) {
+        this(id, seriesIndex, seriesNumber, seriesName, animal, condition,
+                hemisphere, region, sourcePath, channelThumbnails, mergeThumbnail,
+                mergeCacheFile, previewSource, cacheHit, Double.NaN, Double.NaN);
+    }
+
+    public RepresentativeSeries(String id,
+                                int seriesIndex,
+                                int seriesNumber,
+                                String seriesName,
+                                String animal,
+                                String condition,
+                                String hemisphere,
+                                String region,
+                                File sourcePath,
+                                List<ChannelThumbnail> channelThumbnails,
+                                BufferedImage mergeThumbnail,
+                                File mergeCacheFile,
+                                PreviewSource previewSource,
+                                boolean cacheHit,
+                                double pixelWidthUm,
+                                double pixelHeightUm) {
         this.id = clean(id);
         this.seriesIndex = seriesIndex;
         this.seriesNumber = seriesNumber;
@@ -63,6 +86,8 @@ public final class RepresentativeSeries {
         this.mergeCacheFile = mergeCacheFile;
         this.previewSource = previewSource == null ? PreviewSource.GENERATED : previewSource;
         this.cacheHit = cacheHit;
+        this.pixelWidthUm = pixelWidthUm;
+        this.pixelHeightUm = pixelHeightUm;
     }
 
     public String id() {
@@ -119,6 +144,14 @@ public final class RepresentativeSeries {
 
     public boolean cacheHit() {
         return cacheHit;
+    }
+
+    public double pixelWidthUm() {
+        return pixelWidthUm;
+    }
+
+    public double pixelHeightUm() {
+        return pixelHeightUm;
     }
 
     private static List<ChannelThumbnail> immutableThumbnails(List<ChannelThumbnail> thumbnails) {

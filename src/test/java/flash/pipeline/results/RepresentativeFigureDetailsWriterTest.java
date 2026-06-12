@@ -60,6 +60,49 @@ public class RepresentativeFigureDetailsWriterTest {
         assertTrue(leftovers == null || leftovers.length == 0);
     }
 
+    @Test
+    public void namedFigureWritesNamedDetailsFile() throws Exception {
+        File project = temp.newFolder("named-details-project");
+        File source = new File(project, "source.lif");
+        Files.write(source.toPath(), "source".getBytes(StandardCharsets.UTF_8));
+        File output = new File(project, "figure.png");
+        Files.write(output.toPath(), "png".getBytes(StandardCharsets.UTF_8));
+
+        RepresentativeFigureConfig config = representativeConfig(source);
+        config.saveName = "Mean intensity";
+
+        File out = RepresentativeFigureDetailsWriter.write(
+                project, config, new BinConfig(), output);
+
+        assertTrue(out.isFile());
+        assertTrue(out.getName().equals("representative_figure_Mean intensity.txt"));
+        String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
+        assertTrue(text.contains("Save name: Mean intensity"));
+    }
+
+    @Test
+    public void writeDescribesAutoEnhanceDisplayRanges() throws Exception {
+        File project = temp.newFolder("auto-details-project");
+        File source = new File(project, "source.lif");
+        Files.write(source.toPath(), "source".getBytes(StandardCharsets.UTF_8));
+        File output = new File(project, "figure.png");
+        Files.write(output.toPath(), "png".getBytes(StandardCharsets.UTF_8));
+
+        RepresentativeFigureConfig config = representativeConfig(source);
+        config.setCustomDisplayRangeForChannel(0, "auto:1.25");
+        BinConfig setup = new BinConfig();
+        setup.channelNames.add("DAPI");
+        setup.channelNames.add("GFAP");
+        setup.channelMinMax.add("None");
+        setup.channelMinMax.add("auto:0.5");
+
+        File out = RepresentativeFigureDetailsWriter.write(project, config, setup, output);
+
+        String text = new String(Files.readAllBytes(out.toPath()), StandardCharsets.UTF_8);
+        assertTrue(text.contains("Channel 1 (DAPI): auto-enhance 1.25% (representative custom)"));
+        assertTrue(text.contains("Channel 2 (GFAP): auto-enhance 0.5% (setup display range)"));
+    }
+
     private static RepresentativeFigureConfig representativeConfig(File source) {
         RepresentativeFigureConfig config = new RepresentativeFigureConfig();
         config.statistic = RepresentativeStatistic.QUICK;

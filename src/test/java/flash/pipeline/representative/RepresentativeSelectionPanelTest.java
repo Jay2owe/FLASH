@@ -168,6 +168,54 @@ public class RepresentativeSelectionPanelTest {
     }
 
     @Test
+    public void recommendedRowsAreSelectedAndHighlightedWhenDialogOpens()
+            throws Exception {
+        final RepresentativeSeries controlA = series("0", "Control", "Control-A");
+        final RepresentativeSeries controlB = series("1", "Control", "Control-B");
+        final RepresentativeSeries controlC = series("2", "Control", "Control-C");
+        final RepresentativeSeries treatmentA = series("3", "Treatment", "Treatment-A");
+        final RepresentativeSeries treatmentB = series("4", "Treatment", "Treatment-B");
+        final RepresentativeSeries treatmentC = series("5", "Treatment", "Treatment-C");
+        final RepresentativeStatTable table = new RepresentativeStatTable();
+        table.putValue("0", 0, 1, "Control-A", "Control-A",
+                "Control", "LH", "SCN", "DAPI", 10.0);
+        table.putValue("1", 1, 2, "Control-B", "Control-B",
+                "Control", "LH", "SCN", "DAPI", 12.0);
+        table.putValue("2", 2, 3, "Control-C", "Control-C",
+                "Control", "LH", "SCN", "DAPI", 18.0);
+        table.putValue("3", 3, 4, "Treatment-A", "Treatment-A",
+                "Treatment", "LH", "SCN", "DAPI", 100.0);
+        table.putValue("4", 4, 5, "Treatment-B", "Treatment-B",
+                "Treatment", "LH", "SCN", "DAPI", 130.0);
+        table.putValue("5", 5, 6, "Treatment-C", "Treatment-C",
+                "Treatment", "LH", "SCN", "DAPI", 140.0);
+
+        runOnEdt(new Runnable() {
+            @Override
+            public void run() {
+                RepresentativeSelectionPanel panel =
+                        new RepresentativeSelectionPanel(
+                                Arrays.asList(controlA, controlB, controlC,
+                                        treatmentA, treatmentB, treatmentC),
+                                RepresentativeStatistic.QUICK, table);
+                try {
+                    assertTrue(panel.hasCompleteSelection());
+                    assertEquals(controlB, panel.selectedSeries("Control"));
+                    assertEquals(treatmentB, panel.selectedSeries("Treatment"));
+
+                    List<String> highlighted = panel.statsPanelForTests()
+                            .highlightedSeriesIdsForTest();
+                    assertEquals(2, highlighted.size());
+                    assertTrue(highlighted.contains("1"));
+                    assertTrue(highlighted.contains("4"));
+                } finally {
+                    panel.dispose();
+                }
+            }
+        });
+    }
+
+    @Test
     public void rememberedSelectionPreselectsMatchingRenderedRows()
             throws Exception {
         final RepresentativeSeries controlA = series("0", "Control", "Control-A");
@@ -222,6 +270,33 @@ public class RepresentativeSelectionPanelTest {
 
                     assertFalse(labels.contains("cache cache"));
                     assertFalse(labels.contains("cache"));
+                } finally {
+                    panel.dispose();
+                }
+            }
+        });
+    }
+
+    @Test
+    public void channelLabelsRenderOnceInColumnHeader()
+            throws Exception {
+        final RepresentativeSeries controlA = seriesWithChannels("0", "Control",
+                "Control-A", "DAPI", "AF488", "mCherry");
+        final RepresentativeSeries controlB = seriesWithChannels("1", "Control",
+                "Control-B", "DAPI", "AF488", "mCherry");
+
+        runOnEdt(new Runnable() {
+            @Override
+            public void run() {
+                RepresentativeSelectionPanel panel = new RepresentativeSelectionPanel(
+                        Arrays.asList(controlA, controlB));
+                try {
+                    List<String> labels = labelTexts(panel);
+
+                    assertEquals(1, Collections.frequency(labels, "DAPI"));
+                    assertEquals(1, Collections.frequency(labels, "AF488"));
+                    assertEquals(1, Collections.frequency(labels, "mCherry"));
+                    assertEquals(1, Collections.frequency(labels, "Merge"));
                 } finally {
                     panel.dispose();
                 }
@@ -322,12 +397,38 @@ public class RepresentativeSelectionPanelTest {
                                                String name,
                                                RepresentativeSeries.PreviewSource previewSource,
                                                boolean cacheHit) {
+        return seriesWithChannels(id, condition, name, previewSource, cacheHit,
+                "DAPI");
+    }
+
+    private static RepresentativeSeries seriesWithChannels(String id,
+                                                           String condition,
+                                                           String name,
+                                                           String... channelNames) {
+        return seriesWithChannels(id, condition, name,
+                RepresentativeSeries.PreviewSource.GENERATED, false,
+                channelNames);
+    }
+
+    private static RepresentativeSeries seriesWithChannels(String id,
+                                                           String condition,
+                                                           String name,
+                                                           RepresentativeSeries.PreviewSource previewSource,
+                                                           boolean cacheHit,
+                                                           String... channelNames) {
         BufferedImage image = new BufferedImage(20, 12, BufferedImage.TYPE_INT_RGB);
+        List<RepresentativeSeries.ChannelThumbnail> thumbnails =
+                new ArrayList<RepresentativeSeries.ChannelThumbnail>();
+        String[] names = channelNames == null || channelNames.length == 0
+                ? new String[] { "DAPI" } : channelNames;
+        for (int i = 0; i < names.length; i++) {
+            thumbnails.add(new RepresentativeSeries.ChannelThumbnail(
+                    i, names[i], image, null));
+        }
         return new RepresentativeSeries(id, Integer.parseInt(id),
                 Integer.parseInt(id) + 1, name, name, condition,
                 "LH", "SCN", new File(name + ".lif"),
-                Collections.singletonList(new RepresentativeSeries.ChannelThumbnail(
-                        0, "DAPI", image, null)),
+                thumbnails,
                 image, null, previewSource, cacheHit);
     }
 }

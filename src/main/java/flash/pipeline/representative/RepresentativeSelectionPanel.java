@@ -86,10 +86,13 @@ public final class RepresentativeSelectionPanel extends JPanel {
         }
     }
 
-    private static final int THUMB_WIDTH = 132;
+    private static final int THUMB_WIDTH = 84;
     private static final int THUMB_HEIGHT = 84;
     private static final int META_WIDTH = 148;
-    private static final int ROW_GAP = 8;
+    private static final int ROW_GAP = 4;
+    private static final int THUMB_GAP = 4;
+    private static final int CHANNEL_HEADER_HEIGHT = 18;
+    private static final int ROW_HEIGHT = THUMB_HEIGHT + 24;
     private static final int MAX_THUMB_THREADS = 4;
     private static final String RECOMMENDED_BADGE_TEXT = "RECOMMENDED";
     private static final Color RECOMMENDED_BLUE = new Color(0x56, 0xB4, 0xE9);
@@ -135,6 +138,7 @@ public final class RepresentativeSelectionPanel extends JPanel {
                 new ThumbnailThreadFactory());
         buildUi();
         applyRememberedSelection(rememberedSelection);
+        applyRecommendedSelectionDefaults();
         updateStatus();
     }
 
@@ -189,7 +193,8 @@ public final class RepresentativeSelectionPanel extends JPanel {
             }
         }
         if (statsPanel != null) {
-            statsPanel.setHighlightedSeries(selectedSeries);
+            statsPanel.setHighlightedSeries(selectedByCondition.values(),
+                    selectedSeries);
         }
         updateStatus();
         fireSelectionChanged(selectedSeries);
@@ -278,6 +283,24 @@ public final class RepresentativeSelectionPanel extends JPanel {
         }
     }
 
+    private void applyRecommendedSelectionDefaults() {
+        if (recommendedSeriesIdByCondition.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, String> entry : recommendedSeriesIdByCondition.entrySet()) {
+            String condition = RepresentativeSelection.conditionLabel(entry.getKey());
+            if (selectedByCondition.containsKey(condition)) {
+                continue;
+            }
+            SeriesRowPanel recommendedRow =
+                    rowBySeriesId.get(clean(entry.getValue()));
+            if (recommendedRow != null
+                    && sameCondition(recommendedRow.series, condition)) {
+                selectSeries(recommendedRow.series);
+            }
+        }
+    }
+
     private RepresentativeSeries matchingCurrentSeries(String condition,
                                                        RepresentativeSeries remembered) {
         if (remembered == null) {
@@ -352,6 +375,8 @@ public final class RepresentativeSelectionPanel extends JPanel {
         header.setAlignmentX(Component.LEFT_ALIGNMENT);
         column.add(header);
         column.add(Box.createVerticalStrut(FlashTheme.SPACE_S));
+        column.add(buildChannelHeader(seriesForCondition));
+        column.add(Box.createVerticalStrut(3));
 
         List<SeriesRowPanel> rows = new ArrayList<SeriesRowPanel>();
         for (RepresentativeSeries series : seriesForCondition) {
@@ -377,6 +402,67 @@ public final class RepresentativeSelectionPanel extends JPanel {
                 recommendedSeriesIdByCondition.get(condition)));
     }
 
+    private JComponent buildChannelHeader(List<RepresentativeSeries> seriesForCondition) {
+        List<String> labels = thumbnailLabels(seriesForCondition);
+        JPanel row = new JPanel();
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.add(Box.createHorizontalStrut(META_WIDTH + FlashTheme.SPACE_M));
+
+        for (int i = 0; i < labels.size(); i++) {
+            row.add(channelHeaderLabel(labels.get(i)));
+            if (i < labels.size() - 1) {
+                row.add(Box.createHorizontalStrut(THUMB_GAP));
+            }
+        }
+
+        Dimension size = new Dimension(META_WIDTH + FlashTheme.SPACE_M
+                + thumbnailStripWidth(labels.size()), CHANNEL_HEADER_HEIGHT);
+        row.setPreferredSize(size);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, CHANNEL_HEADER_HEIGHT));
+        return row;
+    }
+
+    private JLabel channelHeaderLabel(String text) {
+        JLabel label = new JLabel(text == null ? "" : text, SwingConstants.CENTER);
+        label.setFont(FlashTheme.caption());
+        label.setForeground(FlashTheme.TEXT_SUBHEADER);
+        label.setToolTipText(text);
+        Dimension size = new Dimension(THUMB_WIDTH, CHANNEL_HEADER_HEIGHT);
+        label.setPreferredSize(size);
+        label.setMinimumSize(size);
+        label.setMaximumSize(size);
+        return label;
+    }
+
+    private List<String> thumbnailLabels(List<RepresentativeSeries> seriesForCondition) {
+        RepresentativeSeries labelSource = null;
+        int maxChannelCount = 0;
+        if (seriesForCondition != null) {
+            for (RepresentativeSeries series : seriesForCondition) {
+                int count = series == null ? 0 : series.channelThumbnails().size();
+                if (count > maxChannelCount) {
+                    maxChannelCount = count;
+                    labelSource = series;
+                }
+            }
+        }
+
+        List<String> labels = new ArrayList<String>();
+        if (labelSource != null) {
+            for (RepresentativeSeries.ChannelThumbnail thumbnail
+                    : labelSource.channelThumbnails()) {
+                labels.add(thumbnail.channelName());
+            }
+        }
+        while (labels.size() < maxChannelCount) {
+            labels.add("Channel " + (labels.size() + 1));
+        }
+        labels.add("Merge");
+        return labels;
+    }
+
     private int preferredColumnWidth(List<RepresentativeSeries> seriesForCondition) {
         int maxTileCount = 1;
         for (RepresentativeSeries series : seriesForCondition) {
@@ -384,8 +470,15 @@ public final class RepresentativeSelectionPanel extends JPanel {
             if (count > maxTileCount) maxTileCount = count;
         }
         return META_WIDTH + FlashTheme.SPACE_M
-                + maxTileCount * (THUMB_WIDTH + FlashTheme.SPACE_S)
+                + thumbnailStripWidth(maxTileCount)
                 + FlashTheme.SPACE_L;
+    }
+
+    private int thumbnailStripWidth(int tileCount) {
+        if (tileCount <= 0) {
+            return 0;
+        }
+        return tileCount * THUMB_WIDTH + (tileCount - 1) * THUMB_GAP;
     }
 
     private void updateStatus() {
@@ -407,8 +500,8 @@ public final class RepresentativeSelectionPanel extends JPanel {
         JPanel meta = new JPanel();
         meta.setLayout(new BoxLayout(meta, BoxLayout.Y_AXIS));
         meta.setOpaque(false);
-        meta.setPreferredSize(new Dimension(META_WIDTH, THUMB_HEIGHT + 24));
-        meta.setMaximumSize(new Dimension(META_WIDTH, THUMB_HEIGHT + 24));
+        meta.setPreferredSize(new Dimension(META_WIDTH, THUMB_HEIGHT));
+        meta.setMaximumSize(new Dimension(META_WIDTH, THUMB_HEIGHT));
 
         if (recommended) {
             meta.add(recommendationBadge());
@@ -471,27 +564,22 @@ public final class RepresentativeSelectionPanel extends JPanel {
     private JComponent thumbnailTile(String label,
                                      BufferedImage image,
                                      File cacheFile) {
-        JPanel tile = new JPanel(new BorderLayout(0, 3));
+        JPanel tile = new JPanel(new BorderLayout());
         tile.setOpaque(false);
-        tile.setPreferredSize(new Dimension(THUMB_WIDTH, THUMB_HEIGHT + 20));
-        tile.setMaximumSize(new Dimension(THUMB_WIDTH, THUMB_HEIGHT + 20));
+        tile.setToolTipText(label);
+        tile.setPreferredSize(new Dimension(THUMB_WIDTH, THUMB_HEIGHT));
+        tile.setMaximumSize(new Dimension(THUMB_WIDTH, THUMB_HEIGHT));
 
         JLabel imageLabel = new JLabel("Loading", SwingConstants.CENTER);
         imageLabel.setFont(FlashTheme.caption());
         imageLabel.setForeground(FlashTheme.TEXT_MUTED);
-        imageLabel.setOpaque(true);
-        imageLabel.setBackground(FlashTheme.SURFACE_MUTED);
-        imageLabel.setBorder(BorderFactory.createLineBorder(FlashTheme.BORDER));
+        imageLabel.setOpaque(false);
+        imageLabel.setToolTipText(label);
+        imageLabel.setBorder(BorderFactory.createEmptyBorder());
         imageLabel.setPreferredSize(new Dimension(THUMB_WIDTH, THUMB_HEIGHT));
         imageLabel.setMinimumSize(new Dimension(THUMB_WIDTH, THUMB_HEIGHT));
 
-        JLabel caption = new JLabel(label == null ? "" : label, SwingConstants.CENTER);
-        caption.setFont(FlashTheme.caption());
-        caption.setForeground(FlashTheme.TEXT_SUBHEADER);
-        caption.setToolTipText(label);
-
         tile.add(imageLabel, BorderLayout.CENTER);
-        tile.add(caption, BorderLayout.SOUTH);
         loadThumbnailAsync(imageLabel, image, cacheFile);
         return tile;
     }
@@ -765,8 +853,8 @@ public final class RepresentativeSelectionPanel extends JPanel {
             setBorder(rowBorder(false, recommended));
             setPreferredSize(new Dimension(preferredColumnWidth(
                     Collections.singletonList(series)) - FlashTheme.SPACE_L,
-                    THUMB_HEIGHT + 42));
-            setMaximumSize(new Dimension(Integer.MAX_VALUE, THUMB_HEIGHT + 42));
+                    ROW_HEIGHT));
+            setMaximumSize(new Dimension(Integer.MAX_VALUE, ROW_HEIGHT));
 
             JPanel strip = new JPanel();
             strip.setLayout(new BoxLayout(strip, BoxLayout.X_AXIS));
@@ -775,7 +863,7 @@ public final class RepresentativeSelectionPanel extends JPanel {
                     : series.channelThumbnails()) {
                 strip.add(thumbnailTile(thumbnail.channelName(),
                         thumbnail.image(), thumbnail.cacheFile()));
-                strip.add(Box.createHorizontalStrut(FlashTheme.SPACE_S));
+                strip.add(Box.createHorizontalStrut(THUMB_GAP));
             }
             strip.add(thumbnailTile("Merge", series.mergeThumbnail(),
                     series.mergeCacheFile()));

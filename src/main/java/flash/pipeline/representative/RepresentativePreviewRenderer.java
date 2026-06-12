@@ -2,6 +2,7 @@ package flash.pipeline.representative;
 
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.image.DisplayRangeSetting;
 import flash.pipeline.image.ImageOps;
 import flash.pipeline.image.OrientationOps;
 import flash.pipeline.io.DeferredImageSupplier;
@@ -27,7 +28,6 @@ import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.Calibration;
 import ij.plugin.ChannelSplitter;
-import ij.plugin.ContrastEnhancer;
 import ij.plugin.ZProjector;
 import ij.process.ImageProcessor;
 
@@ -64,7 +64,6 @@ public final class RepresentativePreviewRenderer {
     public static final String CACHE_DIR_NAME = "Representative Previews";
     public static final String PRESENTATION_MANIFEST_FILE = "Presentation_Image_Manifest.csv";
 
-    private static final double AUTO_SATURATION = 0.35;
     private static final String MERGE_NAME = "Merge";
     private static final String CACHE_VERSION = "representative-preview-v1";
     private static final Object ORIGINAL_TIF_CACHE_LOCK = new Object();
@@ -409,7 +408,7 @@ public final class RepresentativePreviewRenderer {
                 item.presentationCoverage.covers()
                         ? RepresentativeSeries.PreviewSource.PRESENTATION
                         : RepresentativeSeries.PreviewSource.GENERATED,
-                false);
+                false, previews.pixelWidthUm, previews.pixelHeightUm);
     }
 
     private static RenderedFinalSeries renderFinalItem(WorkItem item,
@@ -439,15 +438,19 @@ public final class RepresentativePreviewRenderer {
         BufferedImage merge = ImageIO.read(plan.mergeFile);
         if (merge == null) return null;
         return buildSeries(item, plan, channelImages, merge,
-                RepresentativeSeries.PreviewSource.CACHE, true);
+                RepresentativeSeries.PreviewSource.CACHE, true,
+                scaledPixelSize(item.pixelWidthUm, item.calibrationWidthPx, merge.getWidth()),
+                scaledPixelSize(item.pixelHeightUm, item.calibrationHeightPx, merge.getHeight()));
     }
 
     private static RepresentativeSeries buildSeries(WorkItem item,
                                                     RenderPlan plan,
-                                                    List<BufferedImage> channelImages,
-                                                    BufferedImage merge,
-                                                    RepresentativeSeries.PreviewSource source,
-                                                    boolean cacheHit) {
+                                                     List<BufferedImage> channelImages,
+                                                     BufferedImage merge,
+                                                     RepresentativeSeries.PreviewSource source,
+                                                     boolean cacheHit,
+                                                     double pixelWidthUm,
+                                                     double pixelHeightUm) {
         List<RepresentativeSeries.ChannelThumbnail> thumbnails =
                 new ArrayList<RepresentativeSeries.ChannelThumbnail>();
         for (int i = 0; i < item.channels.size() && i < channelImages.size(); i++) {
@@ -470,7 +473,9 @@ public final class RepresentativePreviewRenderer {
                 merge,
                 plan.mergeFile,
                 source,
-                cacheHit);
+                cacheHit,
+                pixelWidthUm,
+                pixelHeightUm);
     }
 
     private static RenderedFinalSeries buildFinalSeries(WorkItem item,
@@ -527,7 +532,12 @@ public final class RepresentativePreviewRenderer {
             throw new IOException("Could not read presentation merge PNG: "
                     + mergeRecord.imageFile().getAbsolutePath());
         }
-        return new RenderedPreviews(channelImages, scaleToLongEdge(toRgb(merge), plan.longEdge));
+        BufferedImage scaledMerge = scaleToLongEdge(toRgb(merge), plan.longEdge);
+        return new RenderedPreviews(channelImages, scaledMerge,
+                scaledPixelSize(mergeRecord.pixelWidthUm(), mergeRecord.widthPx(),
+                        scaledMerge.getWidth()),
+                scaledPixelSize(mergeRecord.pixelHeightUm(), mergeRecord.heightPx(),
+                        scaledMerge.getHeight()));
     }
 
     private static RenderedPreviews renderFromSource(WorkItem item,
@@ -547,8 +557,12 @@ public final class RepresentativePreviewRenderer {
         try {
             working = applyConfiguredZSliceSubset(context.binConfig, item, source);
             OrientationOps.applyTransform(working, item.orientationMetadata);
-            double pixelWidthUm = calibratedPixelWidthUm(working, true);
-            double pixelHeightUm = calibratedPixelWidthUm(working, false);
+            double pixelWidthUm = finitePositive(
+                    calibratedPixelWidthUm(working, true), item.pixelWidthUm);
+            double pixelHeightUm = finitePositive(
+                    calibratedPixelWidthUm(working, false), item.pixelHeightUm);
+            int sourceWidth = working.getWidth();
+            int sourceHeight = working.getHeight();
             split = ChannelSplitter.split(working);
             if (split == null || split.length == 0) {
                 throw new IOException("No channels found in " + item.seriesName);
@@ -569,7 +583,9 @@ public final class RepresentativePreviewRenderer {
                 channelImages.add(renderPseudoColor(scaled, spec.colorName));
             }
             BufferedImage merge = mergePseudoColorImages(channelImages);
-            return new RenderedPreviews(channelImages, merge, pixelWidthUm, pixelHeightUm);
+            return new RenderedPreviews(channelImages, merge,
+                    scaledPixelSize(pixelWidthUm, sourceWidth, merge.getWidth()),
+                    scaledPixelSize(pixelHeightUm, sourceHeight, merge.getHeight()));
         } finally {
             for (ImagePlus imp : projected) {
                 closeQuietly(imp);
@@ -616,11 +632,16 @@ public final class RepresentativePreviewRenderer {
             imp.setDisplayRange(range.min, range.max);
             return;
         }
+        if (range != null && range.isAutoEnhance()) {
+            DisplayRangeSetting.autoEnhance(range.saturationPercent).applyTo(imp);
+            return;
+        }
         if (!allowAutoEnhance) {
             throw new IOException("No locked display range is available for "
                     + safe(channelName) + " in " + safe(seriesName) + ".");
         }
-        new ContrastEnhancer().stretchHistogram(imp, AUTO_SATURATION);
+        DisplayRangeSetting.autoEnhance(
+                DisplayRangeSetting.DEFAULT_AUTO_SATURATION_PERCENT).applyTo(imp);
     }
 
     private static BufferedImage renderPseudoColor(ImagePlus imp, String colorName) {
@@ -921,6 +942,21 @@ public final class RepresentativePreviewRenderer {
         ResolvedImageMetadata orientationMetadata = resolved == null
                 ? null
                 : resolved;
+        PresentationTileRecord calibrationRecord = coverage.mergeRecord == null
+                ? firstCalibrationRecord(effectiveRecords)
+                : coverage.mergeRecord;
+        int calibrationWidthPx = calibrationRecord == null
+                ? (meta == null ? 0 : meta.width)
+                : calibrationRecord.widthPx();
+        int calibrationHeightPx = calibrationRecord == null
+                ? (meta == null ? 0 : meta.height)
+                : calibrationRecord.heightPx();
+        double calibrationPixelWidthUm = finitePositive(
+                calibrationRecord == null ? Double.NaN : calibrationRecord.pixelWidthUm(),
+                pixelSizeUm(meta, true));
+        double calibrationPixelHeightUm = finitePositive(
+                calibrationRecord == null ? Double.NaN : calibrationRecord.pixelHeightUm(),
+                pixelSizeUm(meta, false));
         return new WorkItem(
                 RepresentativeStatTable.seriesIdForIndex(seriesIndex),
                 seriesIndex,
@@ -933,6 +969,10 @@ public final class RepresentativePreviewRenderer {
                 sourcePath,
                 channels,
                 coverage,
+                calibrationWidthPx,
+                calibrationHeightPx,
+                calibrationPixelWidthUm,
+                calibrationPixelHeightUm,
                 sourceFingerprint(sourcePath, meta, orientationMetadata),
                 orientationMetadata);
     }
@@ -978,6 +1018,10 @@ public final class RepresentativePreviewRenderer {
                 ? new MetadataResolver(directory) : metadataResolver;
         ResolvedImageMetadata orientationMetadata = resolver.resolve(
                 series.seriesName(), series.seriesNumber(), effectiveSourcePath);
+        double calibrationPixelWidthUm = finitePositive(
+                series.pixelWidthUm(), pixelSizeUm(effectiveMeta, true));
+        double calibrationPixelHeightUm = finitePositive(
+                series.pixelHeightUm(), pixelSizeUm(effectiveMeta, false));
         return new WorkItem(
                 series.id(),
                 series.seriesIndex(),
@@ -990,6 +1034,10 @@ public final class RepresentativePreviewRenderer {
                 effectiveSourcePath,
                 channels,
                 ManifestCoverage.empty(),
+                effectiveMeta.width,
+                effectiveMeta.height,
+                calibrationPixelWidthUm,
+                calibrationPixelHeightUm,
                 sourceFingerprint(effectiveSourcePath, effectiveMeta, orientationMetadata),
                 orientationMetadata);
     }
@@ -1373,6 +1421,36 @@ public final class RepresentativePreviewRenderer {
         return value * multiplier;
     }
 
+    private static PresentationTileRecord firstCalibrationRecord(
+            List<PresentationTileRecord> records) {
+        if (records == null) return null;
+        for (PresentationTileRecord record : records) {
+            if (record == null) continue;
+            if (Double.isFinite(record.pixelWidthUm()) && record.pixelWidthUm() > 0
+                    && Double.isFinite(record.pixelHeightUm()) && record.pixelHeightUm() > 0) {
+                return record;
+            }
+        }
+        return null;
+    }
+
+    private static double finitePositive(double preferred, double fallback) {
+        if (Double.isFinite(preferred) && preferred > 0) {
+            return preferred;
+        }
+        return Double.isFinite(fallback) && fallback > 0 ? fallback : Double.NaN;
+    }
+
+    private static double scaledPixelSize(double pixelSizeUm,
+                                          int sourceSizePx,
+                                          int renderedSizePx) {
+        if (!Double.isFinite(pixelSizeUm) || pixelSizeUm <= 0
+                || sourceSizePx <= 0 || renderedSizePx <= 0) {
+            return Double.NaN;
+        }
+        return pixelSizeUm * (sourceSizePx / (double) renderedSizePx);
+    }
+
     private static String sourceFingerprint(File sourcePath,
                                             SeriesMeta meta,
                                             ResolvedImageMetadata metadata) {
@@ -1653,6 +1731,10 @@ public final class RepresentativePreviewRenderer {
         final File sourcePath;
         final List<ChannelSpec> channels;
         final ManifestCoverage presentationCoverage;
+        final int calibrationWidthPx;
+        final int calibrationHeightPx;
+        final double pixelWidthUm;
+        final double pixelHeightUm;
         final String sourceFingerprint;
         final ResolvedImageMetadata orientationMetadata;
 
@@ -1667,6 +1749,10 @@ public final class RepresentativePreviewRenderer {
                  File sourcePath,
                  List<ChannelSpec> channels,
                  ManifestCoverage presentationCoverage,
+                 int calibrationWidthPx,
+                 int calibrationHeightPx,
+                 double pixelWidthUm,
+                 double pixelHeightUm,
                  String sourceFingerprint,
                  ResolvedImageMetadata orientationMetadata) {
             this.id = safe(id);
@@ -1684,6 +1770,10 @@ public final class RepresentativePreviewRenderer {
             this.presentationCoverage = presentationCoverage == null
                     ? ManifestCoverage.empty()
                     : presentationCoverage;
+            this.calibrationWidthPx = Math.max(0, calibrationWidthPx);
+            this.calibrationHeightPx = Math.max(0, calibrationHeightPx);
+            this.pixelWidthUm = pixelWidthUm;
+            this.pixelHeightUm = pixelHeightUm;
             this.sourceFingerprint = safe(sourceFingerprint);
             this.orientationMetadata = orientationMetadata;
         }
@@ -1977,7 +2067,11 @@ public final class RepresentativePreviewRenderer {
 
         String rangeToken(WorkItem item, ChannelSpec spec) {
             DisplayRange range = resolve(item, spec);
-            return range == null ? "auto-enhance" : range.source + ":" + range.min + "-" + range.max;
+            if (range == null) return "auto-enhance";
+            if (range.isAutoEnhance()) {
+                return range.source + ":" + DisplayRangeSetting.formatAutoToken(range.saturationPercent);
+            }
+            return range.source + ":" + range.min + "-" + range.max;
         }
 
         private DisplayRange representativeCustomRange(WorkItem item, ChannelSpec spec) {
@@ -2026,18 +2120,14 @@ public final class RepresentativePreviewRenderer {
         }
 
         private static DisplayRange parseRange(String token) {
-            String text = token == null ? "" : token.trim();
-            if (text.isEmpty() || "none".equalsIgnoreCase(text)) return null;
-            int dash = text.indexOf('-');
-            if (dash <= 0 || dash >= text.length() - 1) return null;
-            try {
-                double min = Double.parseDouble(text.substring(0, dash).trim());
-                double max = Double.parseDouble(text.substring(dash + 1).trim());
-                DisplayRange range = new DisplayRange(min, max, "setup");
-                return range.isValid() ? range : null;
-            } catch (NumberFormatException e) {
-                return null;
+            DisplayRangeSetting setting = DisplayRangeSetting.parse(token);
+            if (setting.isManual()) {
+                return new DisplayRange(setting.min(), setting.max(), "setup");
             }
+            if (setting.isAutoEnhance()) {
+                return DisplayRange.autoEnhance(setting.saturationPercent(), "setup");
+            }
+            return null;
         }
 
         private static String conditionChannelKey(String condition, String channel) {
@@ -2054,19 +2144,45 @@ public final class RepresentativePreviewRenderer {
         final double min;
         final double max;
         final String source;
+        final double saturationPercent;
+        final boolean autoEnhance;
 
         DisplayRange(double min, double max, String source) {
+            this(min, max, source, Double.NaN, false);
+        }
+
+        private DisplayRange(double min,
+                             double max,
+                             String source,
+                             double saturationPercent,
+                             boolean autoEnhance) {
             this.min = min;
             this.max = max;
             this.source = safe(source);
+            this.saturationPercent = saturationPercent;
+            this.autoEnhance = autoEnhance;
+        }
+
+        static DisplayRange autoEnhance(double saturationPercent, String source) {
+            return new DisplayRange(Double.NaN, Double.NaN, source,
+                    DisplayRangeSetting.normalizeSaturation(
+                            saturationPercent,
+                            DisplayRangeSetting.DEFAULT_AUTO_SATURATION_PERCENT),
+                    true);
         }
 
         boolean isValid() {
             return Double.isFinite(min) && Double.isFinite(max) && max > min;
         }
 
+        boolean isAutoEnhance() {
+            return autoEnhance;
+        }
+
         DisplayRange withSource(String newSource) {
-            return new DisplayRange(min, max, newSource);
+            return autoEnhance
+                    ? autoEnhance(saturationPercent, newSource)
+                    : new DisplayRange(min, max, newSource);
         }
     }
 

@@ -318,7 +318,7 @@ public final class CLIArgumentParser {
                 + "  intensityV2.useDeconv=true|false\n"
                 + "\n"
                 + "Representative Figure Options (re-render a saved selection; selection itself needs headed mode):\n"
-                + "  repfig.cell_size=260            repfig.export_scale=1\n"
+                + "  repfig.cell_size=260            repfig.dpi=300\n"
                 + "  repfig.row_gap=8                repfig.column_gap=12   repfig.inner_gap=4   repfig.margin=6\n"
                 + "  repfig.condition_font=15        repfig.channel_font=16\n"
                 + "  repfig.scalebar=true|false      repfig.scalebar_um=100   repfig.scalebar_thickness=6\n"
@@ -330,6 +330,7 @@ public final class CLIArgumentParser {
                 + "  repfig.group_by=condition|animal\n"
                 + "  repfig.channel_order=[DAPI,GFP,Iba1]\n"
                 + "  repfig.rows=2                   (reshape the saved conditions into N rows)\n"
+                + "  repfig.save_name=[Mean intensity]  (select/write a named saved representative figure)\n"
                 + "\n"
                 + "PyImageJ Example:\n"
                 + "  ij.py.run_plugin(\"FLASH - The Pipeline for Fluorescence Automated Spatial Histology\", args={'dir': '/data', 'run_deconv': True, 'threads': 4})\n"
@@ -1103,6 +1104,15 @@ public final class CLIArgumentParser {
                     "repfig.channel_font", channelFont, 16, 6, 96));
         }
 
+        String outputDpi = getValue(options, "repfig.dpi");
+        if (outputDpi == null) {
+            outputDpi = getValue(options, "repfig.output_dpi");
+        }
+        if (outputDpi != null) {
+            repfig.outputDpi = Integer.valueOf(parseIntValue(
+                    "repfig.dpi", outputDpi, 300, 72, 2400));
+        }
+
         String exportScale = getValue(options, "repfig.export_scale");
         if (exportScale != null) {
             repfig.exportScale = Integer.valueOf(parseIntValue(
@@ -1213,6 +1223,12 @@ public final class CLIArgumentParser {
         if (rows != null) {
             repfig.rows = Integer.valueOf(parseIntValue(
                     "repfig.rows", rows, 1, 1, Integer.MAX_VALUE));
+        }
+
+        String saveName = firstValue(options,
+                "repfig.save_name", "repfig.savename", "repfig.name");
+        if (saveName != null && !saveName.trim().isEmpty()) {
+            repfig.saveName = saveName.trim();
         }
     }
 

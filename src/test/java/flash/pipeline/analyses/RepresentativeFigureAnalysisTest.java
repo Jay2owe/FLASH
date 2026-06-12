@@ -1,6 +1,8 @@
 package flash.pipeline.analyses;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.cli.CLIArgumentParser;
+import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.SeriesMeta;
@@ -119,6 +121,53 @@ public class RepresentativeFigureAnalysisTest {
                 analysis.configForTests().layout.flattenedConditions());
         LoadedRunParameters.Result empty = analysis.applyLoadedParameters(Collections.<String, Object>emptyMap());
         assertFalse(empty.hasIgnoredKeys());
+    }
+
+    @Test
+    public void loadedParametersCanSelectNamedRepresentativeFigure() {
+        RepresentativeFigureConfig mean = representativeConfig(new File("mean.lif"));
+        mean.saveName = "Mean intensity";
+        RepresentativeFigureConfig count = representativeConfig(new File("count.lif"));
+        count.saveName = "Cell count";
+
+        Map<String, Object> parameters = new LinkedHashMap<String, Object>();
+        parameters.put(RepresentativeFigureConfig.PROJECT_COLLECTION_KEY,
+                Arrays.asList(mean.toMap(), count.toMap()));
+
+        CLIConfig cli = CLIArgumentParser.parse(
+                "dir=[/tmp] repfig.save_name=[Cell count]");
+        RepresentativeFigureAnalysis analysis = new RepresentativeFigureAnalysis();
+        analysis.setCliConfig(cli);
+
+        LoadedRunParameters.Result result = analysis.applyLoadedParameters(parameters);
+
+        assertTrue(result.getAppliedKeys().contains(
+                RepresentativeFigureConfig.PROJECT_COLLECTION_KEY));
+        assertEquals("Cell count", analysis.configForTests().saveName());
+        assertEquals("count.lif",
+                analysis.configForTests().selection.seriesForCondition("Control")
+                        .sourcePath().getName());
+    }
+
+    @Test
+    public void statisticSelectionChangedIgnoresUnchangedChooserDefaults() {
+        assertFalse(RepresentativeFigureAnalysis.statisticSelectionChanged(
+                RepresentativeStatistic.QUICK,
+                "Intensity.csv :: Mean",
+                RepresentativeStatistic.QUICK,
+                "Intensity.csv :: Mean"));
+
+        assertTrue(RepresentativeFigureAnalysis.statisticSelectionChanged(
+                RepresentativeStatistic.QUICK,
+                "Intensity.csv :: Mean",
+                RepresentativeStatistic.EXISTING_RESULT,
+                "Intensity.csv :: Mean"));
+
+        assertTrue(RepresentativeFigureAnalysis.statisticSelectionChanged(
+                RepresentativeStatistic.EXISTING_RESULT,
+                "Intensity.csv :: Mean",
+                RepresentativeStatistic.EXISTING_RESULT,
+                "Objects.csv :: Count"));
     }
 
     @Test
@@ -262,6 +311,81 @@ public class RepresentativeFigureAnalysisTest {
         assertTrue(hasMessageContaining(record, "Representative figure written"));
     }
 
+    @Test
+    public void persistCompletedRunUpsertsMultipleNamedFiguresInProjectJson() throws Exception {
+        File projectRoot = temp.newFolder("repfig-named-project");
+        File source = new File(projectRoot, "source.lif");
+        Files.write(source.toPath(), "source".getBytes(StandardCharsets.UTF_8));
+        File firstOutput = new File(projectRoot, "mean.png");
+        File secondOutput = new File(projectRoot, "count.png");
+        Files.write(firstOutput.toPath(), "png1".getBytes(StandardCharsets.UTF_8));
+        Files.write(secondOutput.toPath(), "png2".getBytes(StandardCharsets.UTF_8));
+
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath());
+        ProjectFile project = new ProjectFile();
+        project.name = "Study";
+        ProjectFileIO.write(layout.configurationWriteDir(), project);
+
+        BinConfig setup = new BinConfig();
+        setup.channelNames.add("DAPI");
+
+        RepresentativeFigureAnalysis analysis = new RepresentativeFigureAnalysis();
+        RepresentativeFigureConfig first = representativeConfig(source);
+        first.saveName = "Mean intensity";
+        analysis.configForTests().copyFrom(first);
+        analysis.persistCompletedRun(projectRoot.getAbsolutePath(), setup, firstOutput);
+
+        RepresentativeFigureConfig second = representativeConfig(source);
+        second.saveName = "Cell count";
+        analysis.configForTests().copyFrom(second);
+        analysis.persistCompletedRun(projectRoot.getAbsolutePath(), setup, secondOutput);
+
+        ProjectFile savedProject = ProjectFileIO.read(layout.configurationWriteDir());
+        Map<String, Object> current = stringObjectMapForTest(
+                savedProject.extras.get(RepresentativeFigureConfig.PROJECT_EXTRA_KEY));
+        assertEquals("Cell count", current.get("saveName"));
+        assertEquals(secondOutput.getAbsolutePath(), current.get("lastOutputPng"));
+
+        Object figuresValue = savedProject.extras.get(
+                RepresentativeFigureConfig.PROJECT_COLLECTION_KEY);
+        assertTrue(figuresValue instanceof java.util.List<?>);
+        java.util.List<?> figures = (java.util.List<?>) figuresValue;
+        assertEquals(2, figures.size());
+        assertTrue(hasSavedFigure(figures, "Mean intensity", firstOutput));
+        assertTrue(hasSavedFigure(figures, "Cell count", secondOutput));
+    }
+
+    @Test
+    public void persistCompletedRunReplacesExistingNamedFigure() throws Exception {
+        File projectRoot = temp.newFolder("repfig-replace-named-project");
+        File source = new File(projectRoot, "source.lif");
+        Files.write(source.toPath(), "source".getBytes(StandardCharsets.UTF_8));
+        File firstOutput = new File(projectRoot, "first.png");
+        File secondOutput = new File(projectRoot, "second.png");
+        Files.write(firstOutput.toPath(), "png1".getBytes(StandardCharsets.UTF_8));
+        Files.write(secondOutput.toPath(), "png2".getBytes(StandardCharsets.UTF_8));
+
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(projectRoot.getAbsolutePath());
+        ProjectFile project = new ProjectFile();
+        project.name = "Study";
+        ProjectFileIO.write(layout.configurationWriteDir(), project);
+
+        RepresentativeFigureAnalysis analysis = new RepresentativeFigureAnalysis();
+        RepresentativeFigureConfig config = representativeConfig(source);
+        config.saveName = "Mean intensity";
+        analysis.configForTests().copyFrom(config);
+        analysis.persistCompletedRun(projectRoot.getAbsolutePath(), new BinConfig(), firstOutput);
+
+        analysis.configForTests().copyFrom(config);
+        analysis.persistCompletedRun(projectRoot.getAbsolutePath(), new BinConfig(), secondOutput);
+
+        ProjectFile savedProject = ProjectFileIO.read(layout.configurationWriteDir());
+        java.util.List<?> figures = (java.util.List<?>) savedProject.extras.get(
+                RepresentativeFigureConfig.PROJECT_COLLECTION_KEY);
+        assertEquals(1, figures.size());
+        assertTrue(hasSavedFigure(figures, "Mean intensity", secondOutput));
+    }
+
     private static RepresentativeFigureConfig representativeConfig(File source) {
         RepresentativeFigureConfig config = new RepresentativeFigureConfig();
         config.statistic = RepresentativeStatistic.QUICK;
@@ -317,5 +441,31 @@ public class RepresentativeFigureAnalysisTest {
             }
         }
         return false;
+    }
+
+    private static boolean hasSavedFigure(java.util.List<?> figures,
+                                          String saveName,
+                                          File output) {
+        for (Object value : figures) {
+            Map<String, Object> row = stringObjectMapForTest(value);
+            if (saveName.equals(row.get("saveName"))
+                    && output.getAbsolutePath().equals(row.get("lastOutputPng"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Map<String, Object> stringObjectMapForTest(Object value) {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        if (!(value instanceof Map<?, ?>)) {
+            return out;
+        }
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (entry.getKey() != null) {
+                out.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return out;
     }
 }

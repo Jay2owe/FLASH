@@ -18,8 +18,10 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -42,6 +44,8 @@ public final class RepresentativeStatsPanel extends JPanel {
     private final List<ChannelChartData> chartData;
     private final List<ChannelChartPanel> chartPanels =
             new ArrayList<ChannelChartPanel>();
+    private final LinkedHashSet<String> highlightedSeriesIds =
+            new LinkedHashSet<String>();
     private String highlightedSeriesId = "";
 
     public RepresentativeStatsPanel(RepresentativeStatTable table) {
@@ -53,12 +57,46 @@ public final class RepresentativeStatsPanel extends JPanel {
         setHighlightedSeriesId(series == null ? "" : series.id());
     }
 
+    public void setHighlightedSeries(Collection<RepresentativeSeries> series,
+                                     RepresentativeSeries primarySeries) {
+        LinkedHashSet<String> ids = new LinkedHashSet<String>();
+        if (series != null) {
+            for (RepresentativeSeries item : series) {
+                String id = item == null ? "" : clean(item.id());
+                if (!id.isEmpty()) {
+                    ids.add(id);
+                }
+            }
+        }
+        setHighlightedSeriesIds(ids,
+                primarySeries == null ? "" : primarySeries.id());
+    }
+
     public void setHighlightedSeriesId(String seriesId) {
         String normalized = clean(seriesId);
-        if (highlightedSeriesId.equals(normalized)) return;
-        highlightedSeriesId = normalized;
+        LinkedHashSet<String> ids = new LinkedHashSet<String>();
+        if (!normalized.isEmpty()) {
+            ids.add(normalized);
+        }
+        setHighlightedSeriesIds(ids, normalized);
+    }
+
+    private void setHighlightedSeriesIds(LinkedHashSet<String> seriesIds,
+                                         String primarySeriesId) {
+        String normalizedPrimary = clean(primarySeriesId);
+        if (normalizedPrimary.isEmpty() && !seriesIds.isEmpty()) {
+            normalizedPrimary = seriesIds.iterator().next();
+        }
+        if (highlightedSeriesId.equals(normalizedPrimary)
+                && highlightedSeriesIds.equals(seriesIds)) {
+            return;
+        }
+        highlightedSeriesId = normalizedPrimary;
+        highlightedSeriesIds.clear();
+        highlightedSeriesIds.addAll(seriesIds);
         for (ChannelChartPanel chartPanel : chartPanels) {
-            chartPanel.setHighlightedSeriesId(normalized);
+            chartPanel.setHighlightedSeriesIds(highlightedSeriesIds,
+                    highlightedSeriesId);
         }
     }
 
@@ -72,6 +110,11 @@ public final class RepresentativeStatsPanel extends JPanel {
 
     String highlightedSeriesIdForTest() {
         return highlightedSeriesId;
+    }
+
+    List<String> highlightedSeriesIdsForTest() {
+        return Collections.unmodifiableList(
+                new ArrayList<String>(highlightedSeriesIds));
     }
 
     List<ChannelChartData> chartDataForTest() {
@@ -316,6 +359,8 @@ public final class RepresentativeStatsPanel extends JPanel {
 
     private static final class ChannelChartPanel extends JPanel {
         private final ChannelChartData data;
+        private final LinkedHashSet<String> highlightedSeriesIds =
+                new LinkedHashSet<String>();
         private String highlightedSeriesId = "";
 
         ChannelChartPanel(ChannelChartData data) {
@@ -329,7 +374,29 @@ public final class RepresentativeStatsPanel extends JPanel {
         }
 
         void setHighlightedSeriesId(String highlightedSeriesId) {
-            this.highlightedSeriesId = clean(highlightedSeriesId);
+            LinkedHashSet<String> ids = new LinkedHashSet<String>();
+            String normalized = clean(highlightedSeriesId);
+            if (!normalized.isEmpty()) {
+                ids.add(normalized);
+            }
+            setHighlightedSeriesIds(ids, normalized);
+        }
+
+        void setHighlightedSeriesIds(Collection<String> seriesIds,
+                                     String primarySeriesId) {
+            highlightedSeriesIds.clear();
+            if (seriesIds != null) {
+                for (String seriesId : seriesIds) {
+                    String normalized = clean(seriesId);
+                    if (!normalized.isEmpty()) {
+                        highlightedSeriesIds.add(normalized);
+                    }
+                }
+            }
+            highlightedSeriesId = clean(primarySeriesId);
+            if (highlightedSeriesId.isEmpty() && !highlightedSeriesIds.isEmpty()) {
+                highlightedSeriesId = highlightedSeriesIds.iterator().next();
+            }
             repaint();
         }
 
@@ -441,7 +508,8 @@ public final class RepresentativeStatsPanel extends JPanel {
                                 boolean highlightedOnly) {
             for (ConditionSummary condition : data.conditions) {
                 for (SeriesPoint point : condition.points) {
-                    boolean highlighted = point.seriesId.equals(highlightedSeriesId);
+                    boolean highlighted =
+                            highlightedSeriesIds.contains(point.seriesId);
                     if (highlightedOnly != highlighted) continue;
                     drawPoint(g2, point, left, top, plotWidth, plotHeight,
                             highlighted);
@@ -454,17 +522,18 @@ public final class RepresentativeStatsPanel extends JPanel {
                                           int top,
                                           int plotWidth,
                                           int plotHeight) {
-            SeriesPoint point = data.point(highlightedSeriesId);
-            if (point == null) return;
-
-            ConditionSummary condition = data.condition(point.conditionName);
-            if (condition != null) {
-                int x = pointX(point, left, plotWidth);
-                int yPoint = valueToY(point.value, top, plotHeight);
-                int yMean = valueToY(condition.mean, top, plotHeight);
-                g2.setColor(new Color(HIGHLIGHT.getRed(), HIGHLIGHT.getGreen(),
-                        HIGHLIGHT.getBlue(), 130));
-                g2.drawLine(x, yPoint, x, yMean);
+            for (ConditionSummary condition : data.conditions) {
+                for (SeriesPoint point : condition.points) {
+                    if (!highlightedSeriesIds.contains(point.seriesId)) {
+                        continue;
+                    }
+                    int x = pointX(point, left, plotWidth);
+                    int yPoint = valueToY(point.value, top, plotHeight);
+                    int yMean = valueToY(condition.mean, top, plotHeight);
+                    g2.setColor(new Color(HIGHLIGHT.getRed(),
+                            HIGHLIGHT.getGreen(), HIGHLIGHT.getBlue(), 130));
+                    g2.drawLine(x, yPoint, x, yMean);
+                }
             }
             drawPoints(g2, left, top, plotWidth, plotHeight, true);
         }

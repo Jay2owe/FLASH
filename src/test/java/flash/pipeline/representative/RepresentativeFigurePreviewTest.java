@@ -45,6 +45,32 @@ public class RepresentativeFigurePreviewTest {
         assertEquals(tight.height, wide.height);
     }
 
+    @Test
+    public void layoutThumbnailDrawsScaleBarWhenPreviewCalibrationIsKnown() {
+        RepresentativeSelection selection = calibratedSelection("Control");
+        RepresentativeLayout layout =
+                RepresentativeLayout.allInOneRow(Collections.singletonList("Control"));
+        PresentationTileConfig tileConfig = PresentationTileConfig.builder()
+                .createOverviewTile(true)
+                .annotateOverviewTile(true)
+                .scaleBarEnabled(true)
+                .scaleBarLengthUm(20.0)
+                .scaleBarThicknessPx(4)
+                .scaleBarPosition(PresentationTileConfig.Position.BOTTOM_RIGHT)
+                .annotationColor(Color.GREEN)
+                .labelMode(PresentationTileConfig.LabelMode.NONE)
+                .channelOrder(Collections.singletonList("DAPI"))
+                .cellSizePx(100)
+                .build();
+
+        BufferedImage thumb = RepresentativeFigurePreview.renderLayoutThumbnail(
+                selection, layout, tileConfig, 1000);
+
+        assertNotNull(thumb);
+        assertTrue("layout preview should include the scale bar annotation",
+                containsDominantGreen(thumb));
+    }
+
     private static PresentationTileConfig tile(int conditionGapPx) {
         return PresentationTileConfig.builder()
                 .createOverviewTile(true)
@@ -66,6 +92,13 @@ public class RepresentativeFigurePreviewTest {
         return new RepresentativeSelection(Arrays.asList(conditions), selected);
     }
 
+    private static RepresentativeSelection calibratedSelection(String condition) {
+        Map<String, RepresentativeSeries> selected =
+                new LinkedHashMap<String, RepresentativeSeries>();
+        selected.put(condition, calibratedSeries(0, condition));
+        return new RepresentativeSelection(Collections.singletonList(condition), selected);
+    }
+
     private static RepresentativeSeries series(int index, String condition) {
         return new RepresentativeSeries(
                 RepresentativeStatTable.seriesIdForIndex(index),
@@ -85,6 +118,27 @@ public class RepresentativeFigurePreviewTest {
                 false);
     }
 
+    private static RepresentativeSeries calibratedSeries(int index, String condition) {
+        return new RepresentativeSeries(
+                RepresentativeStatTable.seriesIdForIndex(index),
+                index,
+                index + 1,
+                "Exp-Mouse" + (index + 1) + "_LH_SCN",
+                "Mouse" + (index + 1),
+                condition,
+                "LH",
+                "SCN",
+                null,
+                Collections.singletonList(new RepresentativeSeries.ChannelThumbnail(
+                        0, "DAPI", solid(Color.BLACK, 60), null)),
+                solid(Color.BLACK, 60),
+                null,
+                RepresentativeSeries.PreviewSource.GENERATED,
+                false,
+                2.0,
+                2.0);
+    }
+
     private static BufferedImage solid(Color color, int size) {
         BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_RGB);
         int rgb = color.getRGB();
@@ -94,5 +148,17 @@ public class RepresentativeFigurePreviewTest {
             }
         }
         return image;
+    }
+
+    private static boolean containsDominantGreen(BufferedImage image) {
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                Color c = new Color(image.getRGB(x, y), true);
+                if (c.getGreen() > 180 && c.getRed() < 80 && c.getBlue() < 80) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

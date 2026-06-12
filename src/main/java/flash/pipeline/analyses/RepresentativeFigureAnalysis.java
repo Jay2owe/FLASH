@@ -4,6 +4,7 @@ import flash.pipeline.bin.BinField;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.image.DisplayRangeSetting;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageCache;
@@ -26,6 +27,7 @@ import flash.pipeline.representative.RepresentativeSelectionPanel;
 import flash.pipeline.representative.RepresentativeStatLoader;
 import flash.pipeline.representative.RepresentativeStatTable;
 import flash.pipeline.representative.RepresentativeStatistic;
+import flash.pipeline.representative.RepresentativeStatisticChoicePanel;
 import flash.pipeline.representative.RepresentativeSeries;
 import flash.pipeline.report.QualityReport;
 import flash.pipeline.results.RepresentativeFigureDetailsWriter;
@@ -49,6 +51,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -74,7 +77,9 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                         Map<String, String> prefill,
                         String title) {
                     return ConditionManifestPanel.showDialog(
-                            directory, animals, prefill, title);
+                            null, directory, animals, prefill, title,
+                            NextStepLabels.SELECT_REPRESENTATIVES, null,
+                            representativeWorkflow(), 1);
                 }
             };
 
@@ -93,6 +98,9 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 IJ.log("[Representative Figure] Statistic chooser cancelled.");
                 return;
             }
+            boolean loadedNamed = loadNamedProjectParametersIfPresent(directory, choice.saveName);
+            config.saveName = choice.saveName;
+            applyCliSaveNameOverride();
             List<SeriesMeta> metas = loadSourceMetadata(directory);
             LinkedHashSet<String> reviewAnimals = conditionReviewAnimals(metas);
             IJ.log("[Representative Figure] Reviewing condition assignments for "
@@ -103,16 +111,22 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 return;
             }
 
-            config.statistic = choice.statistic;
-            config.existingResult = choice.existingResult;
+            if (!loadedNamed || choice.statisticChanged) {
+                config.statistic = choice.statistic;
+                config.existingResult = choice.existingResult;
+            }
+            RepresentativeStatistic statistic = config.statistic == null
+                    ? RepresentativeStatistic.QUICK
+                    : config.statistic;
+            RepresentativeStatLoader.ExistingResultOption existingResult = config.existingResult;
             IJ.log("[Representative Figure] Loading statistic source: "
-                    + choice.statistic.label() + ".");
+                    + statistic.label() + ".");
             long statStart = System.currentTimeMillis();
             config.statTable = RepresentativeStatLoader.load(
-                    directory, choice.statistic, choice.existingResult, parallelThreads, metas);
+                    directory, statistic, existingResult, parallelThreads, metas);
 
             IJ.log("[Representative Figure] Loaded statistic source: "
-                    + choice.statistic.label() + " (" + statTableSummary(config.statTable)
+                    + statistic.label() + " (" + statTableSummary(config.statTable)
                     + ") in " + elapsed(statStart) + ".");
 
             IJ.log("[Representative Figure] Building representative candidate list.");
@@ -244,6 +258,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
             return;
         }
         CLIConfig.RepfigConfig repfig = cliConfig.getRepfig();
+        applyCliSaveNameOverride();
         config.tileConfig = repfig.applyTo(config.tileConfig);
         if (repfig.getRows() != null && config.layout != null) {
             RepresentativeLayout reshaped = reshapeLayoutRows(
@@ -252,6 +267,21 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 config.layout = reshaped;
             }
         }
+    }
+
+    private void applyCliSaveNameOverride() {
+        String saveName = cliSaveName();
+        if (!saveName.isEmpty()) {
+            config.saveName = saveName;
+        }
+    }
+
+    private String cliSaveName() {
+        if (cliConfig == null || cliConfig.getRepfig() == null) {
+            return "";
+        }
+        return RepresentativeFigureConfig.normalizeSaveName(
+                cliConfig.getRepfig().getSaveName());
     }
 
     /**
@@ -358,12 +388,15 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
     }
 
     public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
-        Map<String, Object> block = representativeFigureBlock(parameters);
+        Map<String, Object> block = representativeFigureBlock(parameters, cliSaveName());
         if (!block.isEmpty()) {
             config.applyMap(block);
         }
+        LinkedHashSet<String> knownKeys = new LinkedHashSet<String>();
+        knownKeys.add(RepresentativeFigureConfig.PROJECT_EXTRA_KEY);
+        knownKeys.add(RepresentativeFigureConfig.PROJECT_COLLECTION_KEY);
         LoadedRunParameters.Result result = LoadedRunParameters.resultForKnownKeys(
-                parameters, Collections.singleton(RepresentativeFigureConfig.PROJECT_EXTRA_KEY));
+                parameters, knownKeys);
         LoadedRunParameters.rememberLastResult(result);
         return result;
     }
@@ -438,14 +471,41 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
         try {
             ProjectFile project = ProjectFileIO.read(
                     FlashProjectLayout.forDirectory(directory).configurationWriteDir());
-            if (project != null && project.extras != null
-                    && project.extras.containsKey(RepresentativeFigureConfig.PROJECT_EXTRA_KEY)) {
-                applyLoadedParameters(project.extras);
+            if (project != null && project.extras != null) {
+                Map<String, Object> block = representativeFigureBlock(
+                        project.extras, cliSaveName());
+                if (!block.isEmpty()) {
+                    config.applyMap(block);
+                    applyCliSaveNameOverride();
+                }
             }
         } catch (RuntimeException e) {
             IJ.log("[Representative Figure] Could not load remembered figure settings: "
                     + e.getMessage());
         }
+    }
+
+    private boolean loadNamedProjectParametersIfPresent(String directory, String saveName) {
+        String cleanName = RepresentativeFigureConfig.normalizeSaveName(saveName);
+        if (directory == null || directory.trim().isEmpty() || cleanName.isEmpty()) {
+            return false;
+        }
+        try {
+            ProjectFile project = ProjectFileIO.read(
+                    FlashProjectLayout.forDirectory(directory).configurationWriteDir());
+            Map<String, Object> block = project == null || project.extras == null
+                    ? Collections.<String, Object>emptyMap()
+                    : representativeFigureBlock(project.extras, cleanName);
+            if (!block.isEmpty()) {
+                config.applyMap(block);
+                config.saveName = cleanName;
+                return true;
+            }
+        } catch (RuntimeException e) {
+            IJ.log("[Representative Figure] Could not load named figure settings for '"
+                    + cleanName + "': " + e.getMessage());
+        }
+        return false;
     }
 
     private File writeProjectExtras(String directory,
@@ -468,6 +528,12 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
             project.extras = new LinkedHashMap<String, Object>();
         }
         project.extras.put(RepresentativeFigureConfig.PROJECT_EXTRA_KEY, representative);
+        if (config.hasSaveName()) {
+            project.extras.put(RepresentativeFigureConfig.PROJECT_COLLECTION_KEY,
+                    upsertRepresentativeFigure(project.extras.get(
+                            RepresentativeFigureConfig.PROJECT_COLLECTION_KEY),
+                            representative));
+        }
         ProjectFileIO.write(settingsDir, project);
         return new File(settingsDir, ProjectFileIO.FILE_NAME);
     }
@@ -493,13 +559,41 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
     }
 
     private static Map<String, Object> representativeFigureBlock(
-            Map<String, Object> parameters) {
+            Map<String, Object> parameters,
+            String requestedSaveName) {
         if (parameters == null || parameters.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        String cleanRequested = RepresentativeFigureConfig.normalizeSaveName(requestedSaveName);
+        if (!cleanRequested.isEmpty()) {
+            Map<String, Object> named = representativeFigureBySaveName(
+                    parameters.get(RepresentativeFigureConfig.PROJECT_COLLECTION_KEY),
+                    cleanRequested);
+            if (!named.isEmpty()) {
+                return named;
+            }
+            Map<String, Object> current = stringObjectMap(
+                    parameters.get(RepresentativeFigureConfig.PROJECT_EXTRA_KEY));
+            if (!current.isEmpty() && sameSaveName(
+                    current.get("saveName"), cleanRequested)) {
+                return current;
+            }
+            if (representativeFigureList(
+                    parameters.get(RepresentativeFigureConfig.PROJECT_COLLECTION_KEY)).isEmpty()
+                    && !current.isEmpty()) {
+                current.put("saveName", cleanRequested);
+                return current;
+            }
             return Collections.emptyMap();
         }
         Object block = parameters.get(RepresentativeFigureConfig.PROJECT_EXTRA_KEY);
         if (block instanceof Map<?, ?>) {
             return stringObjectMap(block);
+        }
+        List<Map<String, Object>> figures = representativeFigureList(
+                parameters.get(RepresentativeFigureConfig.PROJECT_COLLECTION_KEY));
+        if (!figures.isEmpty()) {
+            return figures.get(figures.size() - 1);
         }
         if (parameters.containsKey("lockedSeries")
                 || parameters.containsKey("conditionNames")
@@ -507,6 +601,93 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
             return stringObjectMap(parameters);
         }
         return Collections.emptyMap();
+    }
+
+    private static Map<String, Object> representativeFigureBySaveName(
+            Object value,
+            String saveName) {
+        for (Map<String, Object> figure : representativeFigureList(value)) {
+            if (sameSaveName(figure.get("saveName"), saveName)) {
+                return figure;
+            }
+        }
+        return Collections.emptyMap();
+    }
+
+    private static List<Map<String, Object>> representativeFigureList(Object value) {
+        List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
+        if (value instanceof List<?>) {
+            for (Object item : (List<?>) value) {
+                Map<String, Object> figure = stringObjectMap(item);
+                if (!figure.isEmpty()) {
+                    out.add(figure);
+                }
+            }
+            return out;
+        }
+        Map<String, Object> object = stringObjectMap(value);
+        if (object.isEmpty()) {
+            return out;
+        }
+        if (looksLikeRepresentativeFigure(object)) {
+            out.add(object);
+            return out;
+        }
+        for (Map.Entry<String, Object> entry : object.entrySet()) {
+            Map<String, Object> figure = stringObjectMap(entry.getValue());
+            if (!figure.isEmpty()) {
+                if (!figure.containsKey("saveName")) {
+                    figure.put("saveName", entry.getKey());
+                }
+                out.add(figure);
+            }
+        }
+        return out;
+    }
+
+    private static boolean looksLikeRepresentativeFigure(Map<String, Object> object) {
+        return object != null
+                && (object.containsKey("lockedSeries")
+                || object.containsKey("conditionNames")
+                || object.containsKey("statistic")
+                || object.containsKey("tileConfig")
+                || object.containsKey("layout"));
+    }
+
+    private static List<Object> upsertRepresentativeFigure(Object existing,
+                                                           Map<String, Object> representative) {
+        List<Object> out = new ArrayList<Object>();
+        String saveName = RepresentativeFigureConfig.normalizeSaveName(
+                representative == null ? null : representative.get("saveName"));
+        boolean replaced = false;
+        for (Map<String, Object> figure : representativeFigureList(existing)) {
+            if (!saveName.isEmpty() && sameSaveName(figure.get("saveName"), saveName)) {
+                if (representative != null) {
+                    out.add(new LinkedHashMap<String, Object>(representative));
+                }
+                replaced = true;
+            } else {
+                out.add(new LinkedHashMap<String, Object>(figure));
+            }
+        }
+        if (!replaced && representative != null && !representative.isEmpty()) {
+            out.add(new LinkedHashMap<String, Object>(representative));
+        }
+        return out;
+    }
+
+    private static boolean sameSaveName(Object left, Object right) {
+        String leftKey = saveNameKey(left);
+        String rightKey = saveNameKey(right);
+        return !leftKey.isEmpty() && leftKey.equals(rightKey);
+    }
+
+    private static String saveNameKey(Object value) {
+        String safe = RepresentativeFigureConfig.safeSaveName(value);
+        if (safe.isEmpty()) {
+            safe = RepresentativeFigureConfig.normalizeSaveName(value);
+        }
+        return safe.toLowerCase(Locale.ROOT);
     }
 
     private static Map<String, Object> stringObjectMap(Object value) {
@@ -538,42 +719,62 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 existingByLabel.put(option.label, option);
             }
         }
+        RepresentativeStatistic initialStatistic = config.statistic == null
+                ? RepresentativeStatistic.QUICK
+                : config.statistic;
         String defaultExistingLabel = defaultExistingResultLabel(existingLabels, existingOptions);
 
         PipelineDialog dialog = new PipelineDialog(
                 "Representative Image Figure - Statistic", PipelineDialog.Phase.EXPORT);
+        dialog.setWorkflowTracker(new String[]{"Statistic", "Conditions", "Select Images",
+                "Display Ranges", "Layout", "Build"}, 0);
         dialog.addHeader("Guiding Statistic");
-        dialog.addMessage("Choose how FLASH should compute the statistic shown beside images during representative selection.");
-        final JComboBox<String> statisticChoice = dialog.addChoice("Statistic source",
-                RepresentativeStatistic.labels(),
-                config.statistic == null ? RepresentativeStatistic.QUICK.label() : config.statistic.label());
-        final JComboBox<String> existingChoice = dialog.addChoice(
-                "Existing result column", existingLabels, defaultExistingLabel);
         final boolean hasExistingOptions = !existingOptions.isEmpty();
-        updateExistingResultChoiceEnabled(
-                statisticChoice, existingChoice, hasExistingOptions);
-        statisticChoice.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                updateExistingResultChoiceEnabled(
-                        statisticChoice, existingChoice, hasExistingOptions);
-            }
-        });
-        dialog.addHelpText("Existing result is only used when Statistic source is set to Existing result.");
+        final RepresentativeStatisticChoicePanel statisticPanel =
+                new RepresentativeStatisticChoicePanel(
+                        initialStatistic,
+                        existingLabels,
+                        defaultExistingLabel,
+                        hasExistingOptions);
+        dialog.addComponent(statisticPanel);
+        dialog.addStringField("Save name", config.saveName(), 24);
+        dialog.addHelpText("Optional save name keeps separate project.json settings and output files for this representative figure.");
         dialog.setPrimaryButtonText(NextStepLabels.ASSIGN_CONDITIONS);
 
         if (!dialog.showDialog()) {
             return null;
         }
 
-        RepresentativeStatistic statistic =
-                RepresentativeStatistic.fromLabel(dialog.getNextChoice());
-        String existingLabel = dialog.getNextChoice();
+        RepresentativeStatistic statistic = statisticPanel.getSelectedStatistic();
+        String existingLabel = statisticPanel.getSelectedExistingLabel();
+        String saveName = RepresentativeFigureConfig.normalizeSaveName(dialog.getNextString());
         RepresentativeStatLoader.ExistingResultOption existing = existingByLabel.get(existingLabel);
         if (statistic == RepresentativeStatistic.EXISTING_RESULT && existing == null) {
             throw new IllegalStateException("No numeric existing result column is available.");
         }
-        return new StatisticChoice(statistic, existing);
+        return new StatisticChoice(statistic, existing, saveName,
+                statisticSelectionChanged(
+                        initialStatistic, defaultExistingLabel, statistic, existingLabel));
+    }
+
+    static boolean statisticSelectionChanged(
+            RepresentativeStatistic initialStatistic,
+            String initialExistingLabel,
+            RepresentativeStatistic selectedStatistic,
+            String selectedExistingLabel) {
+        RepresentativeStatistic initial = initialStatistic == null
+                ? RepresentativeStatistic.QUICK
+                : initialStatistic;
+        RepresentativeStatistic selected = selectedStatistic == null
+                ? RepresentativeStatistic.QUICK
+                : selectedStatistic;
+        if (initial != selected) {
+            return true;
+        }
+        if (selected == RepresentativeStatistic.EXISTING_RESULT) {
+            return !clean(initialExistingLabel).equals(clean(selectedExistingLabel));
+        }
+        return false;
     }
 
     static void updateExistingResultChoiceEnabled(JComboBox<String> statisticChoice,
@@ -631,6 +832,8 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
 
         PipelineDialog dialog = new PipelineDialog(
                 "Representative Image Figure - Display Ranges", PipelineDialog.Phase.EXPORT);
+        dialog.setWorkflowTracker(new String[]{"Statistic", "Conditions", "Select Images",
+                "Display Ranges", "Layout", "Build"}, 3);
         dialog.addHeader("Display Ranges");
         dialog.addMessage("Choose whether to keep the display ranges from Set Up Configuration or adjust them for this representative figure.");
         String[] choices = hasRememberedRanges
@@ -700,21 +903,7 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
     }
 
     private static boolean isValidRangeToken(String token) {
-        String text = clean(token);
-        if (text.isEmpty() || "none".equalsIgnoreCase(text)) {
-            return false;
-        }
-        int dash = text.indexOf('-');
-        if (dash <= 0 || dash >= text.length() - 1) {
-            return false;
-        }
-        try {
-            double min = Double.parseDouble(text.substring(0, dash).trim());
-            double max = Double.parseDouble(text.substring(dash + 1).trim());
-            return Double.isFinite(min) && Double.isFinite(max) && max > min;
-        } catch (NumberFormatException e) {
-            return false;
-        }
+        return DisplayRangeSetting.parse(token).isConfigured();
     }
 
     private static String statTableSummary(RepresentativeStatTable table) {
@@ -790,6 +979,8 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
     private RepresentativeSelection showSelectionGrid(List<RepresentativeSeries> previewSeries) {
         PipelineDialog dialog = new PipelineDialog(
                 "Representative Image Figure - Select Images", PipelineDialog.Phase.EXPORT);
+        dialog.setWorkflowTracker(new String[]{"Statistic", "Conditions", "Select Images",
+                "Display Ranges", "Layout", "Build"}, 2);
         dialog.addHeader("Select Representatives");
         final RepresentativeSelectionPanel selectionPanel =
                 new RepresentativeSelectionPanel(previewSeries,
@@ -823,14 +1014,25 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                                            String title);
     }
 
+    private static String[] representativeWorkflow() {
+        return new String[]{"Statistic", "Conditions", "Select Images",
+                "Display Ranges", "Layout", "Build"};
+    }
+
     private static final class StatisticChoice {
         final RepresentativeStatistic statistic;
         final RepresentativeStatLoader.ExistingResultOption existingResult;
+        final String saveName;
+        final boolean statisticChanged;
 
         StatisticChoice(RepresentativeStatistic statistic,
-                        RepresentativeStatLoader.ExistingResultOption existingResult) {
+                        RepresentativeStatLoader.ExistingResultOption existingResult,
+                        String saveName,
+                        boolean statisticChanged) {
             this.statistic = statistic == null ? RepresentativeStatistic.QUICK : statistic;
             this.existingResult = existingResult;
+            this.saveName = RepresentativeFigureConfig.normalizeSaveName(saveName);
+            this.statisticChanged = statisticChanged;
         }
     }
 

@@ -19,6 +19,7 @@ public class RepresentativeFigureConfigTest {
     public void mapRoundTripPreservesReplayableFigureSettings() {
         RepresentativeFigureConfig config = new RepresentativeFigureConfig();
         config.statistic = RepresentativeStatistic.EXISTING_RESULT;
+        config.saveName = "Mean intensity";
         config.existingResult = new RepresentativeStatLoader.ExistingResultOption(
                 new File("FLASH/Results/Tables/Intensity/Image Intensities.csv"),
                 "Mean",
@@ -57,6 +58,9 @@ public class RepresentativeFigureConfigTest {
                 .rowGapPx(17)
                 .conditionFontSizePx(22)
                 .channelFontSizePx(24)
+                .conditionHeaderVisible(false)
+                .channelHeaderVisible(false)
+                .outputDpi(600)
                 .exportScale(3)
                 .labelFracX(0.10)
                 .labelFracY(0.85)
@@ -67,6 +71,7 @@ public class RepresentativeFigureConfigTest {
         RepresentativeFigureConfig back =
                 RepresentativeFigureConfig.fromMap(config.toMap());
 
+        assertEquals("Mean intensity", back.saveName());
         assertEquals(RepresentativeStatistic.EXISTING_RESULT, back.statistic);
         assertNotNull(back.existingResult);
         assertEquals("Mean", back.existingResult.columnName);
@@ -89,11 +94,23 @@ public class RepresentativeFigureConfigTest {
         assertEquals(17, back.tileConfig.rowGapPx());
         assertEquals(22, back.tileConfig.conditionFontSizePx());
         assertEquals(24, back.tileConfig.channelFontSizePx());
+        assertFalse(back.tileConfig.conditionHeaderVisible());
+        assertFalse(back.tileConfig.channelHeaderVisible());
+        assertEquals(600, back.tileConfig.outputDpi());
         assertEquals(3, back.tileConfig.exportScale());
         assertEquals(0.10, back.tileConfig.labelFracX(), 1e-9);
         assertEquals(0.85, back.tileConfig.labelFracY(), 1e-9);
         assertEquals(0.60, back.tileConfig.scaleBarFracX(), 1e-9);
         assertEquals(0.92, back.tileConfig.scaleBarFracY(), 1e-9);
+    }
+
+    @Test
+    public void saveNameNormalizesPngExtensionAndFilesystemSafeName() {
+        RepresentativeFigureConfig config = new RepresentativeFigureConfig();
+        config.saveName = "Mean/Intensity.png";
+
+        assertEquals("Mean/Intensity", config.saveName());
+        assertEquals("Mean%2FIntensity", config.safeSaveName());
     }
 
     @Test
@@ -119,6 +136,9 @@ public class RepresentativeFigureConfigTest {
         tileConfig.remove("rowGapPx");
         tileConfig.remove("conditionFontSizePx");
         tileConfig.remove("channelFontSizePx");
+        tileConfig.remove("conditionHeaderVisible");
+        tileConfig.remove("channelHeaderVisible");
+        tileConfig.remove("outputDpi");
         tileConfig.remove("exportScale");
         tileConfig.remove("labelFracX");
         tileConfig.remove("labelFracY");
@@ -132,6 +152,9 @@ public class RepresentativeFigureConfigTest {
         assertEquals(8, back.tileConfig.rowGapPx());
         assertEquals(15, back.tileConfig.conditionFontSizePx());
         assertEquals(16, back.tileConfig.channelFontSizePx());
+        assertEquals(true, back.tileConfig.conditionHeaderVisible());
+        assertEquals(true, back.tileConfig.channelHeaderVisible());
+        assertEquals(300, back.tileConfig.outputDpi());
         assertEquals(1, back.tileConfig.exportScale());
         assertEquals(-1.0, back.tileConfig.labelFracX(), 1e-9);
         assertEquals(-1.0, back.tileConfig.scaleBarFracY(), 1e-9);

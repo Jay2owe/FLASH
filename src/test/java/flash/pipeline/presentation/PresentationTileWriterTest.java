@@ -6,14 +6,20 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.metadata.IIOMetadata;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.Color;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.PrintWriter;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.w3c.dom.Node;
 
 import static org.junit.Assert.*;
 
@@ -324,6 +330,48 @@ public class PresentationTileWriterTest {
         assertTrue("large-image preview should not draw full-size scale-bar thickness", run <= 6);
     }
 
+    @Test
+    public void fractionalScaleBarPlacementCanReachImageEdge() {
+        BufferedImage image = new BufferedImage(120, 80, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        try {
+            PresentationTileWriter.applyQualityHints(g);
+            g.setColor(Color.BLACK);
+            g.fillRect(0, 0, image.getWidth(), image.getHeight());
+            PresentationTileRecord record = new PresentationTileRecord(
+                    null, "Animal1", "LH", "Cortex", "DAPI", "DAPI",
+                    0, 120, 80, 1.0, 1.0);
+            PresentationTileConfig config = PresentationTileConfig.builder()
+                    .labelMode(PresentationTileConfig.LabelMode.NONE)
+                    .scaleBarEnabled(true)
+                    .scaleBarLengthUm(20.0)
+                    .scaleBarThicknessPx(4)
+                    .scaleBarFracX(1.0)
+                    .scaleBarFracY(1.0)
+                    .annotationColor(Color.WHITE)
+                    .build();
+
+            PresentationTileWriter.drawAnnotations(g, record,
+                    new LinkedHashMap<String, String>(), config,
+                    new java.awt.Rectangle(0, 0, image.getWidth(), image.getHeight()), 1.0);
+        } finally {
+            g.dispose();
+        }
+
+        assertTrue("manual bottom-right placement should reach the image edge",
+                containsBrightPixel(image, 118, 78, 119, 79));
+    }
+
+    @Test
+    public void writePngAtomicallyEmbedsRequestedDpi() throws Exception {
+        File output = temp.newFile("dpi.png");
+        BufferedImage image = new BufferedImage(10, 10, BufferedImage.TYPE_INT_ARGB);
+
+        PresentationTileWriter.writePngAtomically(image, output, 600);
+
+        assertEquals(600, pngDpi(output));
+    }
+
     private static PresentationTileRecord record(File file, String animal, String stain, int channelIndex) {
         return new PresentationTileRecord(file, animal, "LH", "Cortex", stain, stain,
                 channelIndex, 40, 40, 1.0, 1.0);
@@ -450,5 +498,44 @@ public class PresentationTileWriterTest {
         int g = (rgb >> 8) & 0xff;
         int b = rgb & 0xff;
         return a > 0 && r > 240 && g > 240 && b > 240;
+    }
+
+    private static int pngDpi(File file) throws Exception {
+        Iterator<ImageReader> readers = ImageIO.getImageReadersByFormatName("png");
+        assertTrue("PNG reader available", readers.hasNext());
+        ImageReader reader = readers.next();
+        ImageInputStream input = null;
+        try {
+            input = ImageIO.createImageInputStream(file);
+            reader.setInput(input);
+            IIOMetadata metadata = reader.getImageMetadata(0);
+            Node root = metadata.getAsTree("javax_imageio_png_1.0");
+            Node phys = childNamed(root, "pHYs");
+            assertNotNull("PNG pHYs metadata", phys);
+            int pixelsPerMeter = Integer.parseInt(
+                    phys.getAttributes().getNamedItem("pixelsPerUnitXAxis")
+                            .getNodeValue());
+            assertEquals("meter", phys.getAttributes().getNamedItem("unitSpecifier")
+                    .getNodeValue());
+            return (int) Math.round(pixelsPerMeter * 0.0254d);
+        } finally {
+            reader.dispose();
+            if (input != null) {
+                input.close();
+            }
+        }
+    }
+
+    private static Node childNamed(Node root, String name) {
+        if (root == null) {
+            return null;
+        }
+        for (Node child = root.getFirstChild(); child != null;
+             child = child.getNextSibling()) {
+            if (name.equals(child.getNodeName())) {
+                return child;
+            }
+        }
+        return null;
     }
 }

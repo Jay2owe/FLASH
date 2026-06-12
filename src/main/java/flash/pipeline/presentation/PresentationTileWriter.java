@@ -4,7 +4,14 @@ import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.IoUtils;
 import ij.IJ;
 
+import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageTypeSpecifier;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.metadata.IIOMetadata;
+import javax.imageio.metadata.IIOMetadataNode;
+import javax.imageio.stream.ImageOutputStream;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -23,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -181,7 +189,7 @@ public final class PresentationTileWriter {
             File animalDir = new File(annotatedRoot, record.animal());
             IoUtils.mustMkdirs(animalDir);
             File out = new File(animalDir, source.getName());
-            writePngAtomically(annotated, out);
+            writePngAtomically(annotated, out, config.outputDpi());
             record.setAnnotatedImageFile(out);
         }
     }
@@ -256,7 +264,7 @@ public final class PresentationTileWriter {
 
         File parent = outputFile.getParentFile();
         if (parent != null) IoUtils.mustMkdirs(parent);
-        writePngAtomically(tile, outputFile);
+        writePngAtomically(tile, outputFile, config.outputDpi());
         IJ.log("  - Presentation overview tile written: " + outputFile.getAbsolutePath());
     }
 
@@ -309,20 +317,76 @@ public final class PresentationTileWriter {
     }
 
     public static void writePngAtomically(BufferedImage image, File outputFile) throws IOException {
+        writePngAtomically(image, outputFile, 0);
+    }
+
+    public static void writePngAtomically(BufferedImage image, File outputFile, int dpi)
+            throws IOException {
         File parent = outputFile.getParentFile();
         if (parent != null) IoUtils.mustMkdirs(parent);
         File temp = tempFileFor(outputFile);
         boolean moved = false;
         try {
-            if (!ImageIO.write(image, "png", temp)) {
-                throw new IOException("No PNG writer available");
-            }
+            writePng(image, temp, dpi);
             moveAtomically(temp.toPath(), outputFile.toPath());
             moved = true;
         } finally {
             if (!moved) {
                 Files.deleteIfExists(temp.toPath());
             }
+        }
+    }
+
+    private static void writePng(BufferedImage image, File outputFile, int dpi)
+            throws IOException {
+        if (dpi <= 0) {
+            if (!ImageIO.write(image, "png", outputFile)) {
+                throw new IOException("No PNG writer available");
+            }
+            return;
+        }
+
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("png");
+        if (!writers.hasNext()) {
+            throw new IOException("No PNG writer available");
+        }
+        ImageWriter writer = writers.next();
+        ImageOutputStream output = null;
+        try {
+            output = ImageIO.createImageOutputStream(outputFile);
+            if (output == null) {
+                throw new IOException("Could not open " + outputFile.getAbsolutePath());
+            }
+            writer.setOutput(output);
+            ImageWriteParam param = writer.getDefaultWriteParam();
+            IIOMetadata metadata = writer.getDefaultImageMetadata(
+                    ImageTypeSpecifier.createFromRenderedImage(image), param);
+            setPngDpi(metadata, dpi);
+            writer.write(null, new IIOImage(image, null, metadata), param);
+        } finally {
+            writer.dispose();
+            if (output != null) {
+                output.close();
+            }
+        }
+    }
+
+    private static void setPngDpi(IIOMetadata metadata, int dpi) throws IOException {
+        if (metadata == null || metadata.isReadOnly()) {
+            return;
+        }
+        int pixelsPerMeter = Math.max(1,
+                (int) Math.round(dpi / 0.0254d));
+        IIOMetadataNode root = new IIOMetadataNode("javax_imageio_png_1.0");
+        IIOMetadataNode phys = new IIOMetadataNode("pHYs");
+        phys.setAttribute("pixelsPerUnitXAxis", String.valueOf(pixelsPerMeter));
+        phys.setAttribute("pixelsPerUnitYAxis", String.valueOf(pixelsPerMeter));
+        phys.setAttribute("unitSpecifier", "meter");
+        root.appendChild(phys);
+        try {
+            metadata.mergeTree("javax_imageio_png_1.0", root);
+        } catch (RuntimeException e) {
+            throw new IOException("Could not write PNG DPI metadata.", e);
         }
     }
 
@@ -625,11 +689,13 @@ public final class PresentationTileWriter {
 
     /**
      * Top-left X for a {@code contentWidth}-wide box at {@code frac} of the
-     * tile width, clamped so the box stays inside {@code rect} minus {@code inset}.
+     * tile width, clamped so the box stays inside {@code rect}. The inset is
+     * only used by the named corner presets; manual fractional placement can
+     * reach the image edge.
      */
     private static int fracOriginX(Rectangle rect, double frac, int contentWidth, int inset) {
-        int min = rect.x + inset;
-        int max = rect.x + rect.width - inset - contentWidth;
+        int min = rect.x;
+        int max = rect.x + rect.width - contentWidth;
         if (max < min) {
             max = min;
         }
@@ -638,8 +704,8 @@ public final class PresentationTileWriter {
     }
 
     private static int fracOriginY(Rectangle rect, double frac, int contentHeight, int inset) {
-        int min = rect.y + inset;
-        int max = rect.y + rect.height - inset - contentHeight;
+        int min = rect.y;
+        int max = rect.y + rect.height - contentHeight;
         if (max < min) {
             max = min;
         }

@@ -37,7 +37,7 @@ public class CLIArgumentParserRepfigTest {
         CLIConfig.RepfigConfig repfig = parseRepfig(
                 "repfig.cell_size=400 repfig.row_gap=10 repfig.column_gap=20 "
                         + "repfig.inner_gap=3 repfig.margin=12 repfig.condition_font=14 "
-                        + "repfig.channel_font=20 repfig.export_scale=3");
+                        + "repfig.channel_font=20 repfig.dpi=600");
         assertEquals(Integer.valueOf(400), repfig.getCellSizePx());
         assertEquals(Integer.valueOf(10), repfig.getRowGapPx());
         assertEquals(Integer.valueOf(20), repfig.getConditionGapPx());
@@ -45,7 +45,7 @@ public class CLIArgumentParserRepfigTest {
         assertEquals(Integer.valueOf(12), repfig.getMarginPx());
         assertEquals(Integer.valueOf(14), repfig.getConditionFontSizePx());
         assertEquals(Integer.valueOf(20), repfig.getChannelFontSizePx());
-        assertEquals(Integer.valueOf(3), repfig.getExportScale());
+        assertEquals(Integer.valueOf(600), repfig.getOutputDpi());
     }
 
     @Test
@@ -58,6 +58,13 @@ public class CLIArgumentParserRepfigTest {
     public void exportScaleIsClamped() {
         assertEquals(Integer.valueOf(4), parseRepfig("repfig.export_scale=9").getExportScale());
         assertEquals(Integer.valueOf(1), parseRepfig("repfig.export_scale=0").getExportScale());
+    }
+
+    @Test
+    public void dpiIsClamped() {
+        assertEquals(Integer.valueOf(2400), parseRepfig("repfig.dpi=99999").getOutputDpi());
+        assertEquals(Integer.valueOf(72), parseRepfig("repfig.dpi=1").getOutputDpi());
+        assertEquals(Integer.valueOf(300), parseRepfig("repfig.output_dpi=300").getOutputDpi());
     }
 
     @Test
@@ -164,6 +171,16 @@ public class CLIArgumentParserRepfigTest {
     }
 
     @Test
+    public void saveNameParses() {
+        assertEquals("Mean intensity",
+                parseRepfig("repfig.save_name=[Mean intensity]").getSaveName());
+        assertEquals("Cell count",
+                parseRepfig("repfig.savename=[Cell count]").getSaveName());
+        assertEquals("Object count",
+                parseRepfig("repfig.name=[Object count]").getSaveName());
+    }
+
+    @Test
     public void anyRepfigOptionAutoSelectsAnalysis12() {
         CLIConfig cfg = CLIArgumentParser.parse("dir=[/tmp] repfig.cell_size=300");
         assertNotNull(cfg);
@@ -241,10 +258,10 @@ public class CLIArgumentParserRepfigTest {
     }
 
     @Test
-    public void applyToForwardsSpacingFontsExportScaleAndFractions() {
+    public void applyToForwardsSpacingFontsDpiAndFractions() {
         CLIConfig.RepfigConfig repfig = parseRepfig(
                 "repfig.row_gap=21 repfig.column_gap=22 repfig.inner_gap=7 repfig.margin=9 "
-                        + "repfig.condition_font=20 repfig.channel_font=24 repfig.export_scale=3 "
+                        + "repfig.condition_font=20 repfig.channel_font=24 repfig.dpi=600 "
                         + "repfig.label_frac=0.1,0.2 repfig.scalebar_frac=0.7,0.8");
         PresentationTileConfig applied = repfig.applyTo(
                 PresentationTileConfig.builder().build());
@@ -254,7 +271,8 @@ public class CLIArgumentParserRepfigTest {
         assertEquals(9, applied.marginPx());
         assertEquals(20, applied.conditionFontSizePx());
         assertEquals(24, applied.channelFontSizePx());
-        assertEquals(3, applied.exportScale());
+        assertEquals(600, applied.outputDpi());
+        assertEquals(1, applied.exportScale());
         assertEquals(0.1, applied.labelFracX(), 1e-9);
         assertEquals(0.2, applied.labelFracY(), 1e-9);
         assertEquals(0.7, applied.scaleBarFracX(), 1e-9);
@@ -265,13 +283,14 @@ public class CLIArgumentParserRepfigTest {
     public void serializeRoundTripIsStable() {
         String options = "dir=[/tmp] repfig.cell_size=420 repfig.row_gap=9 repfig.column_gap=14 "
                 + "repfig.inner_gap=2 repfig.margin=10 repfig.condition_font=13 "
-                + "repfig.channel_font=17 repfig.export_scale=2 repfig.scalebar=false "
+                + "repfig.channel_font=17 repfig.dpi=600 repfig.scalebar=false "
                 + "repfig.scalebar_um=75 repfig.scalebar_thickness=8 "
                 + "repfig.scalebar_position=tl repfig.scalebar_frac=0.9,0.85 "
                 + "repfig.label_mode=condition_image repfig.label_text=[{stain}] "
                 + "repfig.label_font=22 repfig.label_position=br repfig.label_frac=0.05,0.06 "
                 + "repfig.color=black repfig.annotate_tile=false repfig.annotate_individual=true "
-                + "repfig.group_by=condition repfig.channel_order=[DAPI,GFP] repfig.rows=2";
+                + "repfig.group_by=condition repfig.channel_order=[DAPI,GFP] repfig.rows=2 "
+                + "repfig.save_name=[Mean intensity]";
 
         CLIConfig first = CLIArgumentParser.parse(options);
         assertNotNull(first);
@@ -289,6 +308,7 @@ public class CLIArgumentParserRepfigTest {
         assertEquals(a.getMarginPx(), b.getMarginPx());
         assertEquals(a.getConditionFontSizePx(), b.getConditionFontSizePx());
         assertEquals(a.getChannelFontSizePx(), b.getChannelFontSizePx());
+        assertEquals(a.getOutputDpi(), b.getOutputDpi());
         assertEquals(a.getExportScale(), b.getExportScale());
         assertEquals(a.getScaleBarEnabled(), b.getScaleBarEnabled());
         assertEquals(a.getScaleBarLengthUm(), b.getScaleBarLengthUm());
@@ -308,6 +328,7 @@ public class CLIArgumentParserRepfigTest {
         assertEquals(a.getGroupRowsBy(), b.getGroupRowsBy());
         assertEquals(a.getChannelOrder(), b.getChannelOrder());
         assertEquals(a.getRows(), b.getRows());
+        assertEquals(a.getSaveName(), b.getSaveName());
     }
 
     @Test

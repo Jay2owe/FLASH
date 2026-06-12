@@ -1,6 +1,7 @@
 package flash.pipeline.representative;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.image.DisplayRangeSetting;
 import flash.pipeline.image.ImageOps;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
@@ -93,7 +94,7 @@ public final class RepresentativeRangeStage {
         List<ChannelRef> channels = channelsForSelection(selection, setupConfig);
         if (channels.isEmpty()) return false;
         for (ChannelRef channel : channels) {
-            if (parseRange(setupRangeToken(setupConfig, channel.channelIndex)) == null) {
+            if (!isConfiguredDisplaySetting(setupRangeToken(setupConfig, channel.channelIndex))) {
                 return false;
             }
         }
@@ -144,10 +145,10 @@ public final class RepresentativeRangeStage {
         if (channel == null) return "None";
         if (config != null) {
             String custom = config.customDisplayRangeForChannel(channel.channelIndex);
-            if (parseRange(custom) != null) return custom.trim();
+            if (isConfiguredDisplaySetting(custom)) return custom.trim();
         }
         String setup = setupRangeToken(setupConfig, channel.channelIndex);
-        if (parseRange(setup) != null) return setup.trim();
+        if (isConfiguredDisplaySetting(setup)) return setup.trim();
         String quick = quickRangeToken(config, selection, channel);
         return quick == null ? "None" : quick;
     }
@@ -187,7 +188,7 @@ public final class RepresentativeRangeStage {
                 new DisplayRangeStage.RangeStore() {
                     @Override public String get() {
                         String custom = config.customDisplayRangeForChannel(channel.channelIndex);
-                        return parseRange(custom) == null ? seedRange : custom;
+                        return isConfiguredDisplaySetting(custom) ? custom : seedRange;
                     }
 
                     @Override public void set(String token) {
@@ -290,9 +291,9 @@ public final class RepresentativeRangeStage {
                     + channel.label() + " | "
                     + RepresentativeSelection.conditionLabel(series.condition())
                     + " | " + series.seriesName());
-            double[] seed = parseRange(seedRange);
-            if (seed != null) {
-                projection.setDisplayRange(seed[0], seed[1]);
+            DisplayRangeSetting seed = DisplayRangeSetting.parse(seedRange);
+            if (seed.isConfigured()) {
+                seed.applyTo(projection);
             }
             return applyPreviewLut(projection, channel.colorName);
         } finally {
@@ -539,25 +540,15 @@ public final class RepresentativeRangeStage {
     }
 
     static double[] parseRange(String token) {
-        String text = token == null ? "" : token.trim();
-        if (text.isEmpty() || "none".equalsIgnoreCase(text)) return null;
-        int dash = text.indexOf('-');
-        if (dash <= 0 || dash >= text.length() - 1) return null;
-        try {
-            double min = Double.parseDouble(text.substring(0, dash).trim());
-            double max = Double.parseDouble(text.substring(dash + 1).trim());
-            if (!Double.isFinite(min) || !Double.isFinite(max) || max <= min) {
-                return null;
-            }
-            return new double[]{min, max};
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        return DisplayRangeSetting.parseManualRange(token);
     }
 
     private static String formatRange(double min, double max) {
-        return String.valueOf((int) Math.round(min))
-                + "-" + String.valueOf((int) Math.round(max));
+        return DisplayRangeSetting.formatManualToken(min, max);
+    }
+
+    private static boolean isConfiguredDisplaySetting(String token) {
+        return DisplayRangeSetting.parse(token).isConfigured();
     }
 
     private static String toLutName(String color) {

@@ -52,6 +52,9 @@ public class ConditionLayoutChooserTest {
         assertEquals("{stain}", config.customLabelTemplate());
         assertEquals(18, config.labelFontSizePx());
         assertEquals(PresentationTileConfig.Position.TOP_LEFT, config.labelPosition());
+        assertTrue(config.conditionHeaderVisible());
+        assertTrue(config.channelHeaderVisible());
+        assertEquals(300, config.outputDpi());
     }
 
     @Test
@@ -131,6 +134,9 @@ public class ConditionLayoutChooserTest {
                 .customLabelTemplate("{condition}")
                 .labelFontSizePx(24)
                 .labelPosition(PresentationTileConfig.Position.BOTTOM_LEFT)
+                .conditionHeaderVisible(false)
+                .channelHeaderVisible(false)
+                .outputDpi(600)
                 .build();
 
         ConditionLayoutChooser.TileOptionsPanel panel =
@@ -153,6 +159,30 @@ public class ConditionLayoutChooserTest {
         assertEquals("{condition}", config.customLabelTemplate());
         assertEquals(24, config.labelFontSizePx());
         assertEquals(PresentationTileConfig.Position.BOTTOM_LEFT, config.labelPosition());
+        assertFalse(config.conditionHeaderVisible());
+        assertFalse(config.channelHeaderVisible());
+        assertEquals(600, config.outputDpi());
+    }
+
+    @Test
+    public void tileOptionsPanelAppliesLayoutEditorHeaderVisibility() {
+        ConditionLayoutChooser.TileOptionsPanel panel =
+                new ConditionLayoutChooser.TileOptionsPanel(
+                        Arrays.asList("DAPI", "GFAP", "Merge"),
+                        ConditionLayoutChooser.defaultTileConfig(
+                                Arrays.asList("DAPI", "GFAP", "Merge")));
+        PresentationTileConfig arranged = panel.buildConfig().toBuilder()
+                .rowGapPx(0)
+                .conditionHeaderVisible(false)
+                .channelHeaderVisible(false)
+                .build();
+
+        panel.applySpacing(arranged);
+
+        PresentationTileConfig config = panel.buildConfig();
+        assertEquals(0, config.rowGapPx());
+        assertFalse(config.conditionHeaderVisible());
+        assertFalse(config.channelHeaderVisible());
     }
 
     @Test
@@ -164,7 +194,31 @@ public class ConditionLayoutChooserTest {
                                 Arrays.asList("DAPI", "GFAP", "Merge")));
 
         assertFalse(containsLabel(panel.panel, "Create tile"));
+        assertFalse(containsLabel(panel.panel, "Export scale"));
+        assertTrue(containsLabel(panel.panel, "DPI"));
         assertTrue(panel.buildConfig().createOverviewTile());
+    }
+
+    @Test
+    public void tileAndAnnotationEditorBackedControlsStartCollapsed() {
+        ConditionLayoutChooser.TileOptionsPanel panel =
+                new ConditionLayoutChooser.TileOptionsPanel(
+                        Arrays.asList("DAPI", "GFAP", "Merge"),
+                        ConditionLayoutChooser.defaultTileConfig(
+                                Arrays.asList("DAPI", "GFAP", "Merge")));
+
+        assertFalse(panel.advancedTileExpandedForTest());
+        assertFalse(panel.advancedAnnotationsExpandedForTest());
+        assertTrue(containsVisibleLabel(panel.panel, "Rows by"));
+        assertTrue(containsVisibleLabel(panel.panel, "DPI"));
+        assertTrue(containsVisibleLabel(panel.panel, "Label"));
+        assertTrue(containsVisibleLabel(panel.panel, "Scale bar"));
+        assertFalse(containsVisibleLabel(panel.panel, "Row gap"));
+        assertFalse(containsVisibleLabel(panel.panel, "Condition headers"));
+        assertFalse(containsVisibleLabel(panel.panel, "Bar um"));
+        assertFalse(containsVisibleLabel(panel.panel, "Font px"));
+        assertTrue(containsLabel(panel.panel, "Advanced tile"));
+        assertTrue(containsLabel(panel.panel, "Advanced annotations"));
     }
 
     private static RepresentativeSelection selection() {
@@ -214,6 +268,29 @@ public class ConditionLayoutChooserTest {
             Component[] children = ((Container) component).getComponents();
             for (int i = 0; i < children.length; i++) {
                 if (containsLabel(children[i], text)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsVisibleLabel(Component component, String text) {
+        return containsVisibleLabel(component, text, true);
+    }
+
+    private static boolean containsVisibleLabel(Component component,
+                                                String text,
+                                                boolean visibleParent) {
+        boolean visible = visibleParent && component.isVisible();
+        if (visible && component instanceof JLabel
+                && text.equals(((JLabel) component).getText())) {
+            return true;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                if (containsVisibleLabel(children[i], text, visible)) {
                     return true;
                 }
             }

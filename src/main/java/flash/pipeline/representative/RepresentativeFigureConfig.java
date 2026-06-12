@@ -1,5 +1,6 @@
 package flash.pipeline.representative;
 
+import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.presentation.PresentationTileConfig;
 
 import java.awt.Color;
@@ -15,9 +16,11 @@ import java.util.Map;
  */
 public class RepresentativeFigureConfig {
     public static final String PROJECT_EXTRA_KEY = "representativeFigure";
+    public static final String PROJECT_COLLECTION_KEY = "representativeFigures";
 
     private static final int SCHEMA_VERSION = 1;
 
+    public String saveName = "";
     public RepresentativeStatistic statistic = RepresentativeStatistic.QUICK;
     public RepresentativeStatLoader.ExistingResultOption existingResult = null;
     public RepresentativeStatTable statTable = new RepresentativeStatTable();
@@ -49,6 +52,9 @@ public class RepresentativeFigureConfig {
     public Map<String, Object> toMap() {
         Map<String, Object> root = new LinkedHashMap<String, Object>();
         root.put("schemaVersion", Integer.valueOf(SCHEMA_VERSION));
+        if (hasSaveName()) {
+            root.put("saveName", saveName());
+        }
         root.put("statistic", statistic == null
                 ? RepresentativeStatistic.QUICK.name()
                 : statistic.name());
@@ -80,6 +86,7 @@ public class RepresentativeFigureConfig {
         if (other == null) {
             return;
         }
+        saveName = other.saveName();
         statistic = other.statistic;
         existingResult = other.existingResult;
         statTable = other.statTable == null ? new RepresentativeStatTable() : other.statTable;
@@ -95,6 +102,8 @@ public class RepresentativeFigureConfig {
         if (values == null || values.isEmpty()) {
             return config;
         }
+        config.saveName = normalizeSaveName(firstNonNull(
+                values.get("saveName"), values.get("savedName")));
         config.statistic = RepresentativeStatistic.fromLabel(
                 string(firstNonNull(values.get("statistic"), values.get("statisticLabel"))));
         config.existingResult = existingResultFromMap(asObject(values.get("existingResult")));
@@ -110,6 +119,35 @@ public class RepresentativeFigureConfig {
                     ConditionLayoutChooser.defaultTileOrder(config.selection));
         }
         return config;
+    }
+
+    public String saveName() {
+        return normalizeSaveName(saveName);
+    }
+
+    public boolean hasSaveName() {
+        return !saveName().isEmpty();
+    }
+
+    public String safeSaveName() {
+        return safeSaveName(saveName);
+    }
+
+    public static String normalizeSaveName(Object value) {
+        String clean = string(value);
+        if (clean.toLowerCase(java.util.Locale.ROOT).endsWith(".png")) {
+            clean = clean.substring(0, clean.length() - 4).trim();
+        }
+        return clean;
+    }
+
+    public static String safeSaveName(Object value) {
+        String clean = normalizeSaveName(value);
+        if (clean.isEmpty()) {
+            return "";
+        }
+        String safe = ChannelFilenameCodec.toSafe(clean);
+        return safe == null ? "" : safe.trim();
     }
 
     private static Map<String, Object> existingResultToMap(
@@ -354,6 +392,9 @@ public class RepresentativeFigureConfig {
         out.put("rowGapPx", Integer.valueOf(config.rowGapPx()));
         out.put("conditionFontSizePx", Integer.valueOf(config.conditionFontSizePx()));
         out.put("channelFontSizePx", Integer.valueOf(config.channelFontSizePx()));
+        out.put("conditionHeaderVisible", Boolean.valueOf(config.conditionHeaderVisible()));
+        out.put("channelHeaderVisible", Boolean.valueOf(config.channelHeaderVisible()));
+        out.put("outputDpi", Integer.valueOf(config.outputDpi()));
         out.put("exportScale", Integer.valueOf(config.exportScale()));
         out.put("labelFracX", Double.valueOf(config.labelFracX()));
         out.put("labelFracY", Double.valueOf(config.labelFracY()));
@@ -392,6 +433,9 @@ public class RepresentativeFigureConfig {
                 .rowGapPx(intValue(map.get("rowGapPx"), 8))
                 .conditionFontSizePx(intValue(map.get("conditionFontSizePx"), 15))
                 .channelFontSizePx(intValue(map.get("channelFontSizePx"), 16))
+                .conditionHeaderVisible(booleanValue(map.get("conditionHeaderVisible"), true))
+                .channelHeaderVisible(booleanValue(map.get("channelHeaderVisible"), true))
+                .outputDpi(intValue(map.get("outputDpi"), 300))
                 .exportScale(intValue(map.get("exportScale"), 1))
                 .labelFracX(doubleValue(map.get("labelFracX"), -1.0))
                 .labelFracY(doubleValue(map.get("labelFracY"), -1.0))

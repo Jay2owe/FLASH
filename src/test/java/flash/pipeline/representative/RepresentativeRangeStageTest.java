@@ -25,6 +25,10 @@ public class RepresentativeRangeStageTest {
         cfg.channelMinMax.set(1, "0-200");
 
         assertTrue(RepresentativeRangeStage.hasCompleteSetupRanges(cfg, selection));
+
+        cfg.channelMinMax.set(1, "auto:0.35");
+
+        assertTrue(RepresentativeRangeStage.hasCompleteSetupRanges(cfg, selection));
     }
 
     @Test
@@ -62,8 +66,16 @@ public class RepresentativeRangeStageTest {
         assertEquals("3-33",
                 RepresentativeRangeStage.seedRangeForChannel(config, cfg, selection, channel));
 
+        config.setCustomDisplayRangeForChannel(0, "auto:1.25");
+        assertEquals("auto:1.25",
+                RepresentativeRangeStage.seedRangeForChannel(config, cfg, selection, channel));
+
         config.clearCustomDisplayRanges();
         assertEquals("0-100",
+                RepresentativeRangeStage.seedRangeForChannel(config, cfg, selection, channel));
+
+        cfg.channelMinMax.set(0, "auto:0.5");
+        assertEquals("auto:0.5",
                 RepresentativeRangeStage.seedRangeForChannel(config, cfg, selection, channel));
 
         cfg.channelMinMax.set(0, "None");

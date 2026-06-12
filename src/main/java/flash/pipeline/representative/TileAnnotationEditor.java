@@ -532,11 +532,10 @@ public final class TileAnnotationEditor extends JDialog {
             FontMetrics fm = g2.getFontMetrics();
             int textW = fm.stringWidth(text);
             int textH = fm.getAscent() + fm.getDescent();
-            int inset = editorInset(tileToCanvas);
             int boxX = clampBox(drawX + (int) Math.round(labelFracX * drawW),
-                    drawX, drawX + drawW, textW, inset);
+                    drawX, drawX + drawW, textW);
             int boxY = clampBox(drawY + (int) Math.round(labelFracY * drawH),
-                    drawY, drawY + drawH, textH, inset);
+                    drawY, drawY + drawH, textH);
             labelBox = new Rectangle(boxX, boxY, textW, textH);
             g2.setColor(annotationColor);
             g2.drawString(text, boxX, boxY + fm.getAscent());
@@ -547,11 +546,10 @@ public final class TileAnnotationEditor extends JDialog {
         private void drawBar(Graphics2D g2, double tileToCanvas) {
             int barLen = Math.max(8, (int) Math.round(0.25 * drawW));
             int thick = Math.max(2, (int) Math.round(barThicknessPx * tileToCanvas));
-            int inset = editorInset(tileToCanvas);
             int boxX = clampBox(drawX + (int) Math.round(barFracX * drawW),
-                    drawX, drawX + drawW, barLen, inset);
+                    drawX, drawX + drawW, barLen);
             int boxY = clampBox(drawY + (int) Math.round(barFracY * drawH),
-                    drawY, drawY + drawH, thick, inset);
+                    drawY, drawY + drawH, thick);
             barBox = new Rectangle(boxX, boxY, barLen, thick);
             g2.setColor(annotationColor);
             g2.fillRect(boxX, boxY, barLen, thick);
@@ -583,23 +581,13 @@ public final class TileAnnotationEditor extends JDialog {
             g2.drawRect(box.x - 2, box.y - 2, box.width + 4, box.height + 4);
         }
 
-        private int clampBox(int pos, int min, int max, int size, int inset) {
-            int lo = min + inset;
-            int hi = max - inset - size;
+        private int clampBox(int pos, int min, int max, int size) {
+            int lo = min;
+            int hi = max - size;
             if (hi < lo) {
                 hi = lo;
             }
             return Math.max(lo, Math.min(hi, pos));
-        }
-
-        /**
-         * Editor-space inset mirroring the renderer's
-         * {@code max(8, labelFontSize/2)} margin so the drawn box matches the
-         * final PNG at the extremes. Affects drawing only, not the stored fraction.
-         */
-        private int editorInset(double tileToCanvas) {
-            return Math.max(2,
-                    (int) Math.round(Math.max(8, labelFontSizePx / 2.0) * tileToCanvas));
         }
     }
 

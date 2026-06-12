@@ -85,19 +85,21 @@ public final class RepresentativeFigureWriter {
         IoUtils.mustMkdirs(outDir);
 
         BufferedImage figure = renderFigureImage(config, rendered);
-        File output = uniqueOutputFile(outDir, baseNameFor(config.layout) + ".png");
-        PresentationTileWriter.writePngAtomically(figure, output);
-        writeIndividualImages(directory, outDir, rendered);
+        File output = outputFileFor(outDir, config);
+        PresentationTileWriter.writePngAtomically(figure, output,
+                config.tileConfig.outputDpi());
+        writeIndividualImages(directory, outDir, config, rendered);
         return output;
     }
 
     private static void writeIndividualImages(
             String directory,
             File representativeFiguresDir,
+            RepresentativeFigureConfig config,
             List<RepresentativePreviewRenderer.RenderedFinalSeries> rendered)
             throws IOException {
-        File root = new File(representativeFiguresDir, INDIVIDUAL_IMAGES_DIR);
-        prepareCleanIndividualImagesRoot(root, representativeFiguresDir);
+        File root = individualImagesRoot(representativeFiguresDir, config);
+        prepareCleanIndividualImagesRoot(root, root.getParentFile());
         int pngCount = 0;
         int originalTifCount = 0;
         for (RepresentativePreviewRenderer.RenderedFinalSeries series : rendered) {
@@ -110,12 +112,14 @@ public final class RepresentativeFigureWriter {
                 RepresentativePreviewRenderer.RenderedFinalChannel channel = channels.get(i);
                 if (channel == null || channel.image() == null) continue;
                 File output = new File(conditionDir, channelFileName(channel));
-                PresentationTileWriter.writePngAtomically(channel.image(), output);
+                PresentationTileWriter.writePngAtomically(channel.image(), output,
+                        config.tileConfig.outputDpi());
                 pngCount++;
             }
             if (series.mergeImage() != null) {
                 PresentationTileWriter.writePngAtomically(
-                        series.mergeImage(), new File(conditionDir, MERGE_NAME + ".png"));
+                        series.mergeImage(), new File(conditionDir, MERGE_NAME + ".png"),
+                        config.tileConfig.outputDpi());
                 pngCount++;
             }
             File original = originalTifSource(directory, series);
@@ -232,17 +236,21 @@ public final class RepresentativeFigureWriter {
             FigureLayout layout,
             int x,
             int y) {
-        g.setFont(layout.conditionFont);
-        g.setColor(TILE_TEXT);
-        FontMetrics conditionFm = g.getFontMetrics();
-        String conditionLabel = fitSingleLine(condition, conditionFm, layout.conditionBlockWidth);
-        int conditionX = x + Math.max(0,
-                (layout.conditionBlockWidth - conditionFm.stringWidth(conditionLabel)) / 2);
-        g.drawString(conditionLabel, conditionX, y + conditionFm.getAscent() + 2);
+        if (config.conditionHeaderVisible()) {
+            g.setFont(layout.conditionFont);
+            g.setColor(TILE_TEXT);
+            FontMetrics conditionFm = g.getFontMetrics();
+            String conditionLabel = fitSingleLine(condition, conditionFm, layout.conditionBlockWidth);
+            int conditionX = x + Math.max(0,
+                    (layout.conditionBlockWidth - conditionFm.stringWidth(conditionLabel)) / 2);
+            g.drawString(conditionLabel, conditionX, y + conditionFm.getAscent() + 2);
+        }
 
         int headerY = y + layout.conditionHeaderHeight;
-        drawOutputHeaders(g, outputs, x, headerY, layout.cell,
-                layout.channelHeaderHeight, layout.channelFont, layout.innerColGapPx);
+        if (config.channelHeaderVisible()) {
+            drawOutputHeaders(g, outputs, x, headerY, layout.cell,
+                    layout.channelHeaderHeight, layout.channelFont, layout.innerColGapPx);
+        }
 
         int tileY = headerY + layout.channelHeaderHeight;
         Map<String, RenderedTile> tiles = tilesByOutput(series);
@@ -348,7 +356,8 @@ public final class RepresentativeFigureWriter {
         Font channelFont = new Font(Font.SANS_SERIF, Font.BOLD,
                 Math.max(1, tileConfig.channelFontSizePx() * scale));
         return createFigureLayout(layout, outputs, cell, conditionFont, channelFont,
-                marginPx, innerColGapPx, conditionGapPx, rowGapPx, scale);
+                marginPx, innerColGapPx, conditionGapPx, rowGapPx, scale,
+                tileConfig.conditionHeaderVisible(), tileConfig.channelHeaderVisible());
     }
 
     private static FigureLayout createFigureLayout(RepresentativeLayout representativeLayout,
@@ -360,15 +369,19 @@ public final class RepresentativeFigureWriter {
                                                    int innerColGapPx,
                                                    int conditionGapPx,
                                                    int rowGapPx,
-                                                   int exportScale) {
+                                                   int exportScale,
+                                                   boolean conditionHeaderVisible,
+                                                   boolean channelHeaderVisible) {
         BufferedImage scratch = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = scratch.createGraphics();
         try {
             PresentationTileWriter.applyQualityHints(g);
             FontMetrics conditionFm = g.getFontMetrics(conditionFont);
             FontMetrics channelFm = g.getFontMetrics(channelFont);
-            int conditionHeaderHeight = conditionFm.getHeight() + 4;
-            int channelHeaderHeight = channelFm.getHeight() + 4;
+            int conditionHeaderHeight = conditionHeaderVisible
+                    ? conditionFm.getHeight() + 4 : 0;
+            int channelHeaderHeight = channelHeaderVisible
+                    ? channelFm.getHeight() + 4 : 0;
             int conditionBlockWidth = outputs.size() * cell
                     + Math.max(0, outputs.size() - 1) * innerColGapPx;
             int maxConditionsPerRow = representativeLayout.maxColumnCount();
@@ -529,6 +542,34 @@ public final class RepresentativeFigureWriter {
             if (!candidate.exists()) return candidate;
         }
         throw new IllegalStateException("Could not choose a unique representative figure filename.");
+    }
+
+    private static File outputFileFor(File outDir, RepresentativeFigureConfig config) {
+        String saveBase = saveFileBase(config);
+        if (!saveBase.isEmpty()) {
+            return new File(outDir, saveBase + ".png");
+        }
+        return uniqueOutputFile(outDir, baseNameFor(config.layout) + ".png");
+    }
+
+    private static File individualImagesRoot(File representativeFiguresDir,
+                                             RepresentativeFigureConfig config) {
+        String saveBase = saveFileBase(config);
+        if (saveBase.isEmpty()) {
+            return new File(representativeFiguresDir, INDIVIDUAL_IMAGES_DIR);
+        }
+        return new File(new File(representativeFiguresDir, saveBase), INDIVIDUAL_IMAGES_DIR);
+    }
+
+    private static String saveFileBase(RepresentativeFigureConfig config) {
+        if (config == null || !config.hasSaveName()) {
+            return "";
+        }
+        String safe = config.safeSaveName();
+        if (safe == null || safe.isEmpty()) {
+            return "";
+        }
+        return safe.length() > 140 ? safe.substring(0, 140) : safe;
     }
 
     private static String baseNameFor(RepresentativeLayout layout) {

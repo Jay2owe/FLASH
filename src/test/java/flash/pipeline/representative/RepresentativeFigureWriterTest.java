@@ -61,6 +61,37 @@ public class RepresentativeFigureWriterTest {
     }
 
     @Test
+    public void namedFigureWritesStablePngAndNamedIndividualImagesFolder() throws Exception {
+        File project = temp.newFolder("project-named");
+        RepresentativeFigureConfig config = configFor(
+                Collections.singletonList("Control"),
+                PresentationTileConfig.builder()
+                        .createOverviewTile(true)
+                        .annotateOverviewTile(false)
+                        .scaleBarEnabled(false)
+                        .labelMode(PresentationTileConfig.LabelMode.NONE)
+                        .channelOrder(Arrays.asList("DAPI", "Merge"))
+                        .cellSizePx(50)
+                        .build());
+        config.saveName = "Mean intensity";
+
+        File output = RepresentativeFigureWriter.writeRenderedFigureForTests(
+                project.getAbsolutePath(),
+                config,
+                Collections.singletonList(
+                        renderedSeries(0, "Control", Color.RED, Color.CYAN)));
+
+        File representativeDir = new File(project,
+                "FLASH/Results/Presentation Images/Representative Figures");
+        assertEquals(new File(representativeDir, "Mean intensity.png").getAbsolutePath(),
+                output.getAbsolutePath());
+        assertTrue(new File(representativeDir,
+                "Mean intensity/Individual Images/Control/C1_DAPI.png").isFile());
+        assertFalse("named runs should not use the legacy shared individual folder",
+                new File(representativeDir, "Individual Images").exists());
+    }
+
+    @Test
     public void renderFigureImageDrawsConfiguredScaleBar() {
         RepresentativeFigureConfig config = configFor(
                 Collections.singletonList("Control"),
@@ -321,6 +352,19 @@ public class RepresentativeFigureWriterTest {
     }
 
     @Test
+    public void hiddenHeadersMakeRowGapControlImageToImageSpacing() {
+        int tight = heightForTwoRowsWithoutHeaders(0);
+        int gapped = heightForTwoRowsWithoutHeaders(13);
+
+        assertEquals("without above-image headers, zero row gap means only cells plus margins",
+                172, tight);
+        assertEquals("row gap should add directly between image rows",
+                13, gapped - tight);
+        assertTrue("headers visible should reserve extra vertical space",
+                heightForTwoRows(0) > tight);
+    }
+
+    @Test
     public void exportScaleScalesOverviewAnnotationText() {
         int basePixels = annotationBrightPixelsForExportScale(1);
         int scaledPixels = annotationBrightPixelsForExportScale(2);
@@ -357,6 +401,16 @@ public class RepresentativeFigureWriterTest {
     }
 
     private static int heightForTwoRows(int rowGapPx) {
+        return heightForTwoRows(rowGapPx, true, true);
+    }
+
+    private static int heightForTwoRowsWithoutHeaders(int rowGapPx) {
+        return heightForTwoRows(rowGapPx, false, false);
+    }
+
+    private static int heightForTwoRows(int rowGapPx,
+                                        boolean conditionHeaderVisible,
+                                        boolean channelHeaderVisible) {
         RepresentativeFigureConfig config = configFor(
                 Arrays.asList("Control", "Treatment"),
                 PresentationTileConfig.builder()
@@ -367,6 +421,8 @@ public class RepresentativeFigureWriterTest {
                         .channelOrder(Collections.singletonList("DAPI"))
                         .cellSizePx(50)
                         .rowGapPx(rowGapPx)
+                        .conditionHeaderVisible(conditionHeaderVisible)
+                        .channelHeaderVisible(channelHeaderVisible)
                         .build());
         config.layout = new RepresentativeLayout(Arrays.asList(
                 Collections.singletonList("Control"),

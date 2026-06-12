@@ -1068,6 +1068,7 @@ public class CLIConfig {
         Integer marginPx = null;
         Integer conditionFontSizePx = null;
         Integer channelFontSizePx = null;
+        Integer outputDpi = null;
         Integer exportScale = null;
         Boolean scaleBarEnabled = null;
         Double scaleBarLengthUm = null;
@@ -1087,6 +1088,7 @@ public class CLIConfig {
         PresentationTileConfig.GroupRowsBy groupRowsBy = null;
         List<String> channelOrder = null;
         Integer rows = null;
+        String saveName = null;
 
         public Integer getCellSizePx() { return cellSizePx; }
         public Integer getRowGapPx() { return rowGapPx; }
@@ -1095,6 +1097,7 @@ public class CLIConfig {
         public Integer getMarginPx() { return marginPx; }
         public Integer getConditionFontSizePx() { return conditionFontSizePx; }
         public Integer getChannelFontSizePx() { return channelFontSizePx; }
+        public Integer getOutputDpi() { return outputDpi; }
         public Integer getExportScale() { return exportScale; }
         public Boolean getScaleBarEnabled() { return scaleBarEnabled; }
         public Double getScaleBarLengthUm() { return scaleBarLengthUm; }
@@ -1116,6 +1119,7 @@ public class CLIConfig {
             return channelOrder == null ? null : new ArrayList<String>(channelOrder);
         }
         public Integer getRows() { return rows; }
+        public String getSaveName() { return saveName; }
 
         public boolean hasConfiguration() {
             return cellSizePx != null
@@ -1125,6 +1129,7 @@ public class CLIConfig {
                     || marginPx != null
                     || conditionFontSizePx != null
                     || channelFontSizePx != null
+                    || outputDpi != null
                     || exportScale != null
                     || scaleBarEnabled != null
                     || scaleBarLengthUm != null
@@ -1143,15 +1148,16 @@ public class CLIConfig {
                     || annotateIndividualImages != null
                     || groupRowsBy != null
                     || (channelOrder != null && !channelOrder.isEmpty())
-                    || rows != null;
+                    || rows != null
+                    || (saveName != null && !saveName.trim().isEmpty());
         }
 
         /**
          * Returns a copy of {@code base} (or a fresh default config when
          * {@code base} is null) with every non-null override applied. Seeds
          * from {@code base.toBuilder()} so all fields (including spacing, fonts,
-         * export scale and fractional positions) carry through, then forwards
-         * each set override.
+         * DPI, legacy export scale, and fractional positions) carry through,
+         * then forwards each set override.
          */
         public PresentationTileConfig applyTo(PresentationTileConfig base) {
             PresentationTileConfig source = base != null
@@ -1170,6 +1176,7 @@ public class CLIConfig {
             if (channelFontSizePx != null) {
                 builder.channelFontSizePx(channelFontSizePx.intValue());
             }
+            if (outputDpi != null) builder.outputDpi(outputDpi.intValue());
             if (exportScale != null) builder.exportScale(exportScale.intValue());
             if (scaleBarEnabled != null) builder.scaleBarEnabled(scaleBarEnabled.booleanValue());
             if (scaleBarLengthUm != null) builder.scaleBarLengthUm(scaleBarLengthUm.doubleValue());
@@ -1210,6 +1217,7 @@ public class CLIConfig {
             if (channelFontSizePx != null) {
                 parts.add("repfig.channel_font=" + channelFontSizePx.intValue());
             }
+            if (outputDpi != null) parts.add("repfig.dpi=" + outputDpi.intValue());
             if (exportScale != null) parts.add("repfig.export_scale=" + exportScale.intValue());
             if (scaleBarEnabled != null) {
                 parts.add("repfig.scalebar=" + scaleBarEnabled.booleanValue());
@@ -1259,6 +1267,11 @@ public class CLIConfig {
                 parts.add("repfig.channel_order=[" + joinChannelOrder(channelOrder) + "]");
             }
             if (rows != null) parts.add("repfig.rows=" + rows.intValue());
+            if (saveName != null && !saveName.trim().isEmpty()) {
+                String clean = saveName.trim();
+                parts.add("repfig.save_name="
+                        + (clean.contains(" ") ? "[" + clean + "]" : clean));
+            }
         }
 
         private static String formatFrac(Double x, Double y) {

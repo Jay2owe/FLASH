@@ -66,6 +66,8 @@ public class RepresentativePreviewRendererTest {
         assertFalse(first.cacheHit());
         assertEquals(2, first.channelThumbnails().size());
         assertEquals(220, first.mergeThumbnail().getWidth());
+        assertEquals(1.0, first.pixelWidthUm(), 0.0001);
+        assertEquals(1.0, first.pixelHeightUm(), 0.0001);
         assertTrue(first.mergeCacheFile().isFile());
         assertTrue(first.channelThumbnails().get(0).cacheFile().isFile());
 
@@ -77,6 +79,8 @@ public class RepresentativePreviewRendererTest {
         assertEquals(RepresentativeSeries.PreviewSource.CACHE, second.previewSource());
         assertTrue(second.cacheHit());
         assertEquals(220, second.channelThumbnails().get(0).image().getWidth());
+        assertEquals(1.0, second.pixelWidthUm(), 0.0001);
+        assertEquals(1.0, second.pixelHeightUm(), 0.0001);
     }
 
     @Test
@@ -308,6 +312,8 @@ public class RepresentativePreviewRendererTest {
         assertEquals(RepresentativeSeries.PreviewSource.GENERATED, first.previewSource());
         assertEquals(1, first.channelThumbnails().size());
         assertEquals(220, first.channelThumbnails().get(0).image().getWidth());
+        assertEquals(0.5 * 260 / 220.0, first.pixelWidthUm(), 0.0001);
+        assertEquals(0.5 * 80 / 68.0, first.pixelHeightUm(), 0.0001);
         assertTrue("auto-enhanced preview should contain dark and bright pixels",
                 hasDarkAndBrightPixels(first.channelThumbnails().get(0).image()));
 
@@ -318,6 +324,8 @@ public class RepresentativePreviewRendererTest {
 
         assertEquals(RepresentativeSeries.PreviewSource.CACHE, second.previewSource());
         assertTrue(second.cacheHit());
+        assertEquals(first.pixelWidthUm(), second.pixelWidthUm(), 0.0001);
+        assertEquals(first.pixelHeightUm(), second.pixelHeightUm(), 0.0001);
     }
 
     @Test
@@ -364,6 +372,19 @@ public class RepresentativePreviewRendererTest {
         } catch (Exception expected) {
             assertTrue(expected.getMessage().contains("No locked display range"));
         }
+    }
+
+    @Test
+    public void finalRenderAcceptsLockedAutoEnhanceRange() throws Exception {
+        BinConfig cfg = configuredOneChannelBinConfig("auto:0.35");
+
+        RepresentativePreviewRenderer.RenderedFinalSeries rendered =
+                RepresentativePreviewRenderer.renderFinalSeriesForTests(
+                        cfg, new RepresentativeFigureConfig(),
+                        representativeSeries(0, "Control"), oneChannelGradientImage(260, 80));
+
+        assertEquals(1, rendered.channels().size());
+        assertEquals(260, rendered.channels().get(0).image().getWidth());
     }
 
     private static BinConfig configuredTwoChannelBinConfig(String c1Range, String c2Range) {
