@@ -232,6 +232,22 @@ public class DependencyServiceTest {
         assertFalse(service.hasVisibleDependenciesNeedingAttention());
     }
 
+    @Test
+    public void checkingRowsDoNotTriggerWarningsOrFixAll() {
+        DependencyService service = DependencyRuntimeTestSupport.serviceWith(
+                DependencyRuntimeTestSupport.withStatuses(
+                        DependencyId.CELLPOSE_RUNTIME,
+                        DependencyStatus.checking("Checking Cellpose runtime")));
+
+        assertTrue(service.getDialogRowsNeedingAttention().isEmpty());
+        assertFalse(service.hasVisibleDependenciesNeedingAttention());
+        assertFalse(ids(service.getMissingFixableDependencies()).contains(DependencyId.CELLPOSE_RUNTIME));
+        assertFalse(ids(service.planFixAll().getDependenciesToFix()).contains(DependencyId.CELLPOSE_RUNTIME));
+
+        Map<DependencyId, String> labels = firstActionLabels(service.getDialogRows());
+        assertEquals("Refresh Status", labels.get(DependencyId.CELLPOSE_RUNTIME));
+    }
+
     private static Map<DependencyId, DependencyFixer> fakeFixers() {
         Map<DependencyId, DependencyFixer> fixers = new LinkedHashMap<DependencyId, DependencyFixer>();
         int order = 0;

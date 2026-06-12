@@ -7,6 +7,7 @@ public final class DependencyStatus {
 
     public enum State {
         PRESENT,
+        CHECKING,
         MISSING,
         ERROR
     }
@@ -21,6 +22,10 @@ public final class DependencyStatus {
 
     public static DependencyStatus present(String detailMessage) {
         return new DependencyStatus(State.PRESENT, detailMessage);
+    }
+
+    public static DependencyStatus checking(String detailMessage) {
+        return new DependencyStatus(State.CHECKING, detailMessage);
     }
 
     public static DependencyStatus missing(String detailMessage) {
@@ -47,11 +52,15 @@ public final class DependencyStatus {
         return state == State.MISSING;
     }
 
+    public boolean isChecking() {
+        return state == State.CHECKING;
+    }
+
     public boolean isError() {
         return state == State.ERROR;
     }
 
     public boolean needsAttention() {
-        return state != State.PRESENT;
+        return state == State.MISSING || state == State.ERROR;
     }
 }

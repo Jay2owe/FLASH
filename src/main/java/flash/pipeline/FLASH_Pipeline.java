@@ -897,12 +897,9 @@ public class FLASH_Pipeline implements PlugIn {
                 }
             }));
 
-            List<DependencyService.DialogRow> dependencyAttentionRows = refreshDependencyAttentionRows();
-            JButton depsBtn = pd.addFooterButton(dependencyButtonLabel(!dependencyAttentionRows.isEmpty()));
-            if (!dependencyAttentionRows.isEmpty()) {
-                depsBtn.setForeground(new Color(183, 28, 28));
-                depsBtn.setToolTipText(dependencyAttentionTooltip(dependencyAttentionRows));
-            }
+            JButton depsBtn = pd.addFooterButton(dependencyButtonLabel(false));
+            depsBtn.setToolTipText("Checking dependency status...");
+            startDependencyBadgeRefresh(pd, depsBtn);
             depsBtn.addActionListener(e -> pd.closeWithAction("dependencies"));
 
             if (!pd.showDialog()) {
@@ -1948,6 +1945,72 @@ public class FLASH_Pipeline implements PlugIn {
         }
     }
 
+    private void startDependencyBadgeRefresh(final PipelineDialog pd, final JButton depsBtn) {
+        if (pd == null || depsBtn == null) {
+            return;
+        }
+        final Color defaultForeground = depsBtn.getForeground();
+        final boolean[] openedOrClosed = new boolean[]{false};
+        final java.util.concurrent.atomic.AtomicInteger refreshGeneration =
+                new java.util.concurrent.atomic.AtomicInteger();
+        pd.getWindow().addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override public void windowOpened(java.awt.event.WindowEvent e) {
+                openedOrClosed[0] = true;
+            }
+
+            @Override public void windowClosed(java.awt.event.WindowEvent e) {
+                openedOrClosed[0] = true;
+            }
+        });
+
+        refreshDependencyBadgeAsync(pd, depsBtn, defaultForeground, openedOrClosed, refreshGeneration);
+        CellposeRuntime.probeAsync().whenComplete(
+                new java.util.function.BiConsumer<CellposeRuntime.Status, Throwable>() {
+                    @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
+                        refreshDependencyBadgeAsync(
+                                pd, depsBtn, defaultForeground, openedOrClosed, refreshGeneration);
+                    }
+                });
+    }
+
+    private void refreshDependencyBadgeAsync(final PipelineDialog pd,
+                                             final JButton depsBtn,
+                                             final Color defaultForeground,
+                                             final boolean[] openedOrClosed,
+                                             final java.util.concurrent.atomic.AtomicInteger refreshGeneration) {
+        final int generation = refreshGeneration.incrementAndGet();
+        new javax.swing.SwingWorker<List<DependencyService.DialogRow>, Void>() {
+            @Override protected List<DependencyService.DialogRow> doInBackground() {
+                return refreshDependencyAttentionRows();
+            }
+
+            @Override protected void done() {
+                if (generation != refreshGeneration.get()) {
+                    return;
+                }
+                if (openedOrClosed[0] && !pd.getWindow().isDisplayable()) {
+                    return;
+                }
+                List<DependencyService.DialogRow> rows;
+                try {
+                    rows = get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (java.util.concurrent.ExecutionException e) {
+                    IJ.log("[FLASH] Could not update dependency badge: " + e.getMessage());
+                    return;
+                }
+                boolean hasDependencyIssues = rows != null && !rows.isEmpty();
+                depsBtn.setText(dependencyButtonLabel(hasDependencyIssues));
+                depsBtn.setForeground(hasDependencyIssues ? new Color(183, 28, 28) : defaultForeground);
+                depsBtn.setToolTipText(dependencyAttentionTooltip(rows));
+                depsBtn.revalidate();
+                depsBtn.repaint();
+            }
+        }.execute();
+    }
+
     static String dependencyButtonLabel(boolean hasDependencyIssues) {
         return hasDependencyIssues ? "Dependencies !" : "Dependencies";
     }
@@ -2637,6 +2700,7 @@ public class FLASH_Pipeline implements PlugIn {
                     + PreFlightChecks.humanBytes(ds.freeBytes)
                     + ", estimated output: "
                     + PreFlightChecks.humanBytes(ds.estimatedOutputBytes)
+                    + (ds.projectScoped ? " (selected project sources)" : "")
                     + (ds.likelyInsufficient ? " (likely insufficient)" : ""));
         }
 

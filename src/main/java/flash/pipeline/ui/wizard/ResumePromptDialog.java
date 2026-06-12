@@ -1,6 +1,7 @@
 package flash.pipeline.ui.wizard;
 
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.StartOverConfirmationDialog;
 
 import javax.swing.JButton;
 import java.awt.GraphicsEnvironment;
@@ -36,7 +37,13 @@ public final class ResumePromptDialog {
         dialog.addMessage("Last update: " + formatLastUpdate(lastUpdatedMillis));
 
         JButton startOver = dialog.addFooterButton("Start Over");
-        startOver.addActionListener(e -> dialog.closeWithAction(ACTION_START_OVER));
+        startOver.addActionListener(e -> {
+            StartOverConfirmationDialog.Choice confirm = StartOverConfirmationDialog.show(
+                    dialog.getWindow(), progressLines, lastUpdatedMillis);
+            if (confirm == StartOverConfirmationDialog.Choice.START_OVER) {
+                dialog.closeWithAction(ACTION_START_OVER);
+            }
+        });
         dialog.setPrimaryButtonText("Resume");
         dialog.focusPrimaryButtonOnShow();
 

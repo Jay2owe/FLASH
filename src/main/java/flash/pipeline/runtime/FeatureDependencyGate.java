@@ -142,6 +142,10 @@ public final class FeatureDependencyGate {
 
         DependencyService service = currentDependencyService();
         DependencyStatus status = service.getStatus(id);
+        if (status != null && status.isChecking()) {
+            service.invalidateStatusCache();
+            status = service.getStatus(id);
+        }
         if (status != null && status.isPresent()) {
             return GateDecision.ALLOWED;
         }
@@ -162,7 +166,7 @@ public final class FeatureDependencyGate {
                 spec,
                 status,
                 plainMessage,
-                buildGateActions(spec));
+                buildGateActions(spec, status));
         if (ACTION_OPEN_DEPENDENCIES.equals(action)) {
             DependenciesDialogOpener opener = currentDependenciesDialogOpener();
             if (opener != null) {
@@ -230,10 +234,14 @@ public final class FeatureDependencyGate {
                 || System.getProperty("org.gradle.test.worker") != null;
     }
 
-    private static List<GateAction> buildGateActions(DependencySpec spec) {
+    private static List<GateAction> buildGateActions(DependencySpec spec, DependencyStatus status) {
         List<GateAction> actions = new ArrayList<GateAction>();
+        boolean checking = status != null && status.isChecking();
         if (spec != null && spec.isFixableInApp()) {
-            if (!spec.getInstallOptions().isEmpty()) {
+            if (checking) {
+                // Avoid pushing users into an install while a background probe
+                // may be about to report an already-working runtime.
+            } else if (!spec.getInstallOptions().isEmpty()) {
                 for (DependencySpec.InstallOption option : spec.getInstallOptions()) {
                     String label = option.formatButtonLabel();
                     if (label != null && !label.trim().isEmpty()) {
@@ -279,12 +287,17 @@ public final class FeatureDependencyGate {
                                             String analysis,
                                             String requirement) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Missing dependency: ").append(spec.getDisplayName()).append('\n');
+        boolean checking = status != null && status.isChecking();
+        sb.append(checking ? "Dependency status is still being checked: " : "Missing dependency: ")
+                .append(spec.getDisplayName()).append('\n');
         sb.append("Analysis you tried to run: ").append(analysis).append('\n');
         if (!requirement.isEmpty()) {
             sb.append("Required for: ").append(requirement).append('\n');
         }
         sb.append("Rest of the plugin still works.\n");
+        if (checking) {
+            sb.append("Try again in a moment, or open Dependencies and click Refresh.\n");
+        }
         sb.append(spec.isRestartRequired()
                 ? "Restart Fiji after repair: required."
                 : "Restart Fiji after repair: not required.");
@@ -353,10 +366,13 @@ public final class FeatureDependencyGate {
                                                   DependencyStatus status,
                                                   String plainMessage,
                                                   List<GateAction> actions) {
-            PipelineDialog dialog = new PipelineDialog("Missing Dependency - " + analysis);
+            boolean checking = status != null && status.isChecking();
+            PipelineDialog dialog = new PipelineDialog(
+                    (checking ? "Checking Dependency - " : "Missing Dependency - ") + analysis);
             dialog.setDefaultButtonsVisible(false);
-            dialog.addHeader("Dependency Required");
-            dialog.addMessage(htmlLine("Missing dependency: " + spec.getDisplayName()));
+            dialog.addHeader(checking ? "Dependency Check In Progress" : "Dependency Required");
+            dialog.addMessage(htmlLine((checking ? "Checking dependency: " : "Missing dependency: ")
+                    + spec.getDisplayName()));
             dialog.addMessage(htmlLine("Analysis you tried to run: " + analysis));
             if (!requirement.isEmpty()) {
                 dialog.addMessage(htmlLine("Required for: " + requirement));

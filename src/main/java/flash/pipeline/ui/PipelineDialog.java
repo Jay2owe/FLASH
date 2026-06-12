@@ -73,6 +73,9 @@ public class PipelineDialog {
     private boolean customLocation = false;
     private Phase currentPhase;
     private String breadcrumbStepText;
+    private final List<String> workflowSteps = new ArrayList<String>();
+    private int workflowActiveIndex = -1;
+    private boolean workflowBreadcrumbEnabled = false;
     private Supplier<Boolean> cancelConfirmation;
 
     // Ordered lists for retrieval
@@ -231,9 +234,52 @@ public class PipelineDialog {
         repaintBreadcrumb();
     }
 
+    /** Shows a compact analysis-local tracker instead of the generic phase breadcrumb. */
+    public void setWorkflowTracker(String[] steps, int activeIndex) {
+        workflowSteps.clear();
+        if (steps != null) {
+            for (int i = 0; i < steps.length; i++) {
+                String step = steps[i] == null ? "" : steps[i].trim();
+                if (!step.isEmpty()) {
+                    workflowSteps.add(step);
+                }
+            }
+        }
+        workflowBreadcrumbEnabled = !workflowSteps.isEmpty();
+        if (!workflowBreadcrumbEnabled) {
+            workflowActiveIndex = -1;
+        } else if (activeIndex < 0) {
+            workflowActiveIndex = -1;
+        } else {
+            workflowActiveIndex = Math.min(activeIndex, workflowSteps.size() - 1);
+        }
+        breadcrumbPanel.setVisible(workflowBreadcrumbEnabled || currentPhase != null);
+        repaintBreadcrumb();
+    }
+
+    /** Clears the analysis-local tracker and returns to the generic phase breadcrumb. */
+    public void clearWorkflowTracker() {
+        workflowSteps.clear();
+        workflowActiveIndex = -1;
+        workflowBreadcrumbEnabled = false;
+        breadcrumbPanel.setVisible(currentPhase != null);
+        repaintBreadcrumb();
+    }
+
     private void repaintBreadcrumb() {
         breadcrumbPanel.removeAll();
         breadcrumbPanel.setLayout(new BoxLayout(breadcrumbPanel, BoxLayout.Y_AXIS));
+
+        if (workflowBreadcrumbEnabled) {
+            repaintWorkflowBreadcrumb();
+            return;
+        }
+
+        if (currentPhase == null) {
+            breadcrumbPanel.revalidate();
+            breadcrumbPanel.repaint();
+            return;
+        }
 
         JPanel chipRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         chipRow.setOpaque(false);
@@ -259,6 +305,35 @@ public class PipelineDialog {
         breadcrumbPanel.add(step);
         breadcrumbPanel.revalidate();
         breadcrumbPanel.repaint();
+    }
+
+    private void repaintWorkflowBreadcrumb() {
+        JPanel chipRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        chipRow.setOpaque(false);
+        chipRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        for (int i = 0; i < workflowSteps.size(); i++) {
+            chipRow.add(makeWorkflowChip(workflowSteps.get(i), i == workflowActiveIndex));
+            if (i < workflowSteps.size() - 1) {
+                JLabel separator = new JLabel("\u25B8");
+                separator.setForeground(HELP_COLOR);
+                separator.setFont(separator.getFont().deriveFont(Font.PLAIN, 11f));
+                chipRow.add(separator);
+            }
+        }
+
+        breadcrumbPanel.add(chipRow);
+        breadcrumbPanel.revalidate();
+        breadcrumbPanel.repaint();
+    }
+
+    private JLabel makeWorkflowChip(String text, boolean active) {
+        JLabel chip = new JLabel(" " + (text == null ? "" : text.trim()) + " ");
+        chip.setOpaque(true);
+        chip.setFont(chip.getFont().deriveFont(active ? Font.BOLD : Font.PLAIN, 11f));
+        chip.setBorder(BorderFactory.createLineBorder(HEADER_COLOR, 1, true));
+        chip.setBackground(active ? HEADER_COLOR : BG_COLOR);
+        chip.setForeground(active ? FlashTheme.TEXT_ON_DARK : HEADER_COLOR);
+        return chip;
     }
 
     private JLabel makePhaseChip(Phase phase) {

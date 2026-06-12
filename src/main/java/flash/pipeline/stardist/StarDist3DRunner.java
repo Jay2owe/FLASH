@@ -3,6 +3,7 @@ package flash.pipeline.stardist;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.image.GpuConcurrency;
 import flash.pipeline.image.ImageOps;
+import flash.pipeline.runtime.TensorFlowCrashSentinel;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationRunFailureException;
 import flash.pipeline.segmentation.StarDistLinkingParams;
@@ -207,6 +208,13 @@ public class StarDist3DRunner {
                                 double qualityMin, double intensityMin,
                                 String modelKey,
                                 File projectRoot) {
+        // Clear any orphaned imagej-tensorflow crash flag from a previous Fiji
+        // session before TrackMate-StarDist triggers the native TensorFlow load
+        // below. Without this, Fiji refuses to load TensorFlow ("Could not load
+        // TensorFlow" dialog) even though TensorFlow is fine. Gated to one retry
+        // so a genuinely-repeatable crash is not turned into a hard-crash loop.
+        TensorFlowCrashSentinel.clearIfStale();
+
         if (!StarDistDetector.isAvailable()) {
             String message = StarDistDetector.getAvailabilityMessage();
             IJ.log("WARNING: " + message);
@@ -307,19 +315,23 @@ public class StarDist3DRunner {
                         String message = "StarDist TrackMate input check failed: "
                                 + safeTrackMateMessage(trackmate.getErrorMessage());
                         IJ.log("WARNING: " + message);
+                        markTensorFlowRuntimeFailureIfLikely(message);
                         throw new IllegalStateException(message);
                     }
 
                     if (!trackmate.execDetection()) {
-                        logTrackMateFailure("detection", trackmate.getErrorMessage());
+                        String safeMessage = safeTrackMateMessage(trackmate.getErrorMessage());
+                        logTrackMateFailure("detection", safeMessage);
+                        markTensorFlowRuntimeFailureIfLikely(safeMessage);
                         throw new IllegalStateException("StarDist detection failed: "
-                                + safeTrackMateMessage(trackmate.getErrorMessage()));
+                                + safeMessage);
                     }
 
                     if (!trackmate.computeSpotFeatures(false)) {
                         String message = "StarDist feature computation failed: "
                                 + safeTrackMateMessage(trackmate.getErrorMessage());
                         IJ.log("WARNING: " + message);
+                        markTensorFlowRuntimeFailureIfLikely(message);
                         throw new IllegalStateException(message);
                     }
 
@@ -350,6 +362,7 @@ public class StarDist3DRunner {
                         String message = "StarDist tracking failed: "
                                 + safeTrackMateMessage(trackmate.getErrorMessage());
                         IJ.log("WARNING: " + message);
+                        markTensorFlowRuntimeFailureIfLikely(message);
                         throw new IllegalStateException(message);
                     }
                     int nTracks = model.getTrackModel().nTracks(true);
@@ -468,9 +481,15 @@ public class StarDist3DRunner {
             IJ.log("    StarDist" + chTag + ": " + nObjects + " objects detected (" + timeMs + " ms)"
                     + (filterInfo.length() > 0 ? " [filters:" + filterInfo + "]" : ""));
 
+            // TensorFlow demonstrably loaded (we have a result), so re-arm the
+            // automatic crash-flag clear for any future genuinely-orphaned sentinel.
+            TensorFlowCrashSentinel.noteTensorFlowLoadedOk();
             return labelImp;
 
         } catch (Exception e) {
+            if (markTensorFlowRuntimeFailureIfLikely(e)) {
+                IJ.log("WARNING: " + StarDistDetector.getAvailabilityMessage());
+            }
             IJ.log("WARNING: StarDist failed for channel='" + channelName
                     + "', input='" + (input == null ? "<null>" : input.getTitle())
                     + "', modelKey='" + modelKey + "', probThresh=" + probThresh
@@ -480,6 +499,7 @@ public class StarDist3DRunner {
                     + ", maxFrameGap=" + maxFrameGap + ": " + exceptionSummary(e));
             throw failure("StarDist failed: " + exceptionSummary(e), e);
         } catch (LinkageError e) {
+            StarDistDetector.markRuntimeFailure(e);
             IJ.log("WARNING: StarDist failed due to an incompatible runtime: "
                     + e.getClass().getSimpleName() + " - " + e.getMessage());
             IJ.log("WARNING: " + StarDistDetector.getAvailabilityMessage());
@@ -834,6 +854,41 @@ public class StarDist3DRunner {
                     + "or cloud-sync-conflicted StarDist jars. Use Dependencies > Auto-Fix StarDist, "
                     + "close Fiji, and restart Fiji before retrying.");
         }
+    }
+
+    private static boolean markTensorFlowRuntimeFailureIfLikely(String message) {
+        if (!looksLikeTensorFlowRuntimeFailure(message)) {
+            return false;
+        }
+        StarDistDetector.markRuntimeFailure(new IllegalStateException(
+                safeTrackMateMessage(message)));
+        return true;
+    }
+
+    private static boolean markTensorFlowRuntimeFailureIfLikely(Throwable throwable) {
+        Throwable current = throwable;
+        int depth = 0;
+        while (current != null && depth++ < 8) {
+            if (looksLikeTensorFlowRuntimeFailure(current.getClass().getName())
+                    || looksLikeTensorFlowRuntimeFailure(current.getMessage())) {
+                StarDistDetector.markRuntimeFailure(throwable);
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static boolean looksLikeTensorFlowRuntimeFailure(String text) {
+        if (text == null) {
+            return false;
+        }
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("tensorflow")
+                || lower.contains("libtensorflow")
+                || lower.contains("tensorflow_jni")
+                || lower.contains("tf library")
+                || lower.contains("tf native");
     }
 
     private static String safeTrackMateMessage(String message) {

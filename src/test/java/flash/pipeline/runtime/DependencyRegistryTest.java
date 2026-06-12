@@ -90,25 +90,21 @@ public class DependencyRegistryTest {
     }
 
     @Test
-    public void cellposeProbeWaitsForAsyncResultInsteadOfReportingPendingAsMissing() {
-        // Regression: the previous implementation returned a "still running"
-        // missing status immediately when the cache was unknown, so the
-        // startup dependency warning fired on every restart -- pushing users
-        // through a no-op Cellpose reinstall even when the runtime was
-        // healthy. cellposeProbe now blocks on the runtime probe (bounded by
-        // the runtime's own 20s subprocess timeout) and reports the actual
-        // result. With an empty Python path the underlying probe short-
-        // circuits to "not configured" without launching Python, so this
-        // assertion is fast and deterministic.
+    public void cellposeProbeResolvedEmptyPathReportsMissingInsteadOfStillRunning() throws Exception {
+        // Empty path short-circuits without launching Python. Once the async
+        // probe resolves, dependency reporting must show the real status, not
+        // the old "still running" false-missing message.
         String originalPath = CellposeRuntime.getPythonPath();
         CellposeRuntime.setPythonPath("");
         try {
-            DependencyStatus status = DependencyRegistry.snapshotStatuses(Collections.singletonList(
+            CellposeRuntime.probeAsync().get(1, java.util.concurrent.TimeUnit.SECONDS);
+
+            DependencyStatus resolved = DependencyRegistry.snapshotStatuses(Collections.singletonList(
                     DependencyRegistry.get(DependencyId.CELLPOSE_RUNTIME)))
                     .get(DependencyId.CELLPOSE_RUNTIME);
 
-            assertTrue(status.getDetailMessage(), status.isMissing());
-            String message = status.getDetailMessage();
+            assertTrue(resolved.getDetailMessage(), resolved.isMissing());
+            String message = resolved.getDetailMessage();
             assertTrue(message, message.toLowerCase().contains("not configured"));
             assertFalse("Pending probe must not be reported as 'still running' missing: " + message,
                     message.toLowerCase().contains("still running"));

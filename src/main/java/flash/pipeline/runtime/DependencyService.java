@@ -199,7 +199,7 @@ public final class DependencyService {
         List<DependencySpec> missing = new ArrayList<DependencySpec>();
         for (DependencySpec spec : getFixableDependencies()) {
             DependencyStatus status = statusCache.get(spec.getId());
-            if (status != null && !status.isPresent()) {
+            if (status != null && status.needsAttention()) {
                 missing.add(spec);
             }
         }
@@ -221,7 +221,7 @@ public final class DependencyService {
         List<DialogRow> rows = new ArrayList<DialogRow>();
         for (DependencySpec spec : getVisibleDependencies()) {
             DependencyStatus status = statusCache.get(spec.getId());
-            if (status != null && !status.isPresent()) {
+            if (status != null && status.needsAttention()) {
                 rows.add(buildDialogRow(spec, status));
             }
         }
@@ -248,12 +248,12 @@ public final class DependencyService {
             if (hasRegisteredFixer(spec)) {
                 if (status.isPresent()) {
                     alreadySatisfied.add(spec);
-                } else {
+                } else if (status.needsAttention()) {
                     toFix.add(spec);
                     totalBytes += defaultEstimatedBytes(spec);
                     restartRequired = restartRequired || spec.isRestartRequired();
                 }
-            } else if (spec.isVisibleInDependenciesDialog() && !status.isPresent()) {
+            } else if (spec.isVisibleInDependenciesDialog() && status.needsAttention()) {
                 blocked.add(spec);
             }
         }
@@ -367,6 +367,10 @@ public final class DependencyService {
     private List<DialogAction> buildActions(DependencySpec spec, DependencyStatus status) {
         List<DialogAction> actions = new ArrayList<DialogAction>();
         boolean present = status != null && status.isPresent();
+        if (status != null && status.isChecking()) {
+            actions.add(new DialogAction(DialogAction.VERIFY, "Refresh Status"));
+            return actions;
+        }
 
         if (present) {
             String verifyLabel = resolveVerifyLabel(spec, status);
@@ -444,6 +448,9 @@ public final class DependencyService {
         }
         if (status.isPresent()) {
             return "Present";
+        }
+        if (status.isChecking()) {
+            return "Checking";
         }
         if (status.isError()) {
             return "Error";

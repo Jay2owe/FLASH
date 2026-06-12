@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.jar.JarFile;
 
 /**
@@ -1223,17 +1224,31 @@ public final class DependencyRegistry {
         return new DependencySpec.Probe() {
             @Override
             public DependencyStatus probe(ProbeContext context) {
-                // Block until the runtime probe resolves. The probe was kicked
-                // off async in FLASH_Pipeline.run() so this usually returns the
-                // already-finished result; falling through to the sync path is
-                // also fine -- the internal probe is bounded by its own 20s
-                // process timeout. Reporting a still-pending probe as missing
-                // (the previous behavior) made the startup warning fire on
-                // every restart even when Cellpose was correctly installed,
-                // pushing users through a no-op reinstall loop.
-                Status status = CellposeRuntime.probeConfigured();
+                CompletableFuture<Status> probe = CellposeRuntime.probeAsync();
+                if (!probe.isDone()) {
+                    return DependencyStatus.checking(
+                            "Checking Cellpose runtime in the background. "
+                                    + "Open Dependencies or click Refresh to see the resolved status.");
+                }
+
+                Status status;
+                try {
+                    status = probe.get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return DependencyStatus.error("Cellpose runtime probe was interrupted.");
+                } catch (Exception e) {
+                    Throwable cause = e.getCause() == null ? e : e.getCause();
+                    return DependencyStatus.error("Cellpose runtime probe failed: "
+                            + cause.getClass().getSimpleName() + ": " + safeMessage(cause));
+                }
                 if (status == null) {
                     return DependencyStatus.error("Cellpose runtime probe returned no status.");
+                }
+                if (status.unknown) {
+                    return DependencyStatus.checking(
+                            "Checking Cellpose runtime in the background. "
+                                    + "Open Dependencies or click Refresh to see the resolved status.");
                 }
                 if (status.ready) {
                     return DependencyStatus.present(status.summary());

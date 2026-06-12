@@ -1,13 +1,19 @@
 package flash.pipeline.cellpose;
 
+import flash.pipeline.runtime.DependencyId;
+import flash.pipeline.runtime.DependencyRegistry;
+import flash.pipeline.runtime.DependencySpec;
+import flash.pipeline.runtime.DependencyStatus;
 import org.junit.After;
 import org.junit.Test;
 
+import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -145,6 +151,138 @@ public class CellposeRuntimeCacheTest {
         } finally {
             CellposeRuntime.setPythonPath(original);
         }
+    }
+
+    @Test
+    public void dependencyProbeReportsCheckingWithoutWaitingForSlowBackend() throws Exception {
+        DependencyRegistry.snapshotStatuses(Collections.<DependencySpec>emptyList());
+        final CountDownLatch started = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        CellposeRuntime.setProbeBackendForTest(new CellposeRuntime.ProbeBackend() {
+            @Override public CellposeRuntime.Status probeConfigured() {
+                started.countDown();
+                await(release);
+                return readyStatus(false);
+            }
+        });
+
+        final CountDownLatch returned = new CountDownLatch(1);
+        final AtomicReference<DependencyStatus> statusRef = new AtomicReference<DependencyStatus>();
+        final AtomicReference<Throwable> failureRef = new AtomicReference<Throwable>();
+        Thread snapshotThread = new Thread(new Runnable() {
+            @Override public void run() {
+                try {
+                    statusRef.set(DependencyRegistry.snapshotStatuses(Collections.singletonList(
+                            DependencyRegistry.get(DependencyId.CELLPOSE_RUNTIME)))
+                            .get(DependencyId.CELLPOSE_RUNTIME));
+                } catch (Throwable t) {
+                    failureRef.set(t);
+                } finally {
+                    returned.countDown();
+                }
+            }
+        }, "cellpose-dependency-probe-test");
+        snapshotThread.setDaemon(true);
+        snapshotThread.start();
+
+        try {
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+            assertTrue("Dependency snapshot should not wait for the slow Cellpose backend.",
+                    returned.await(500, TimeUnit.MILLISECONDS));
+            if (failureRef.get() != null) {
+                throw new AssertionError(failureRef.get());
+            }
+            DependencyStatus status = statusRef.get();
+            assertTrue(status.getDetailMessage(), status.isChecking());
+            assertFalse(status.getDetailMessage(), status.needsAttention());
+        } finally {
+            release.countDown();
+            snapshotThread.join(1000);
+        }
+        assertTrue(CellposeRuntime.probeAsync().get(1, TimeUnit.SECONDS).ready);
+    }
+
+    @Test
+    public void dependencyProbeReportsCheckingWhenStaleMissingCacheRefreshes() throws Exception {
+        final AtomicLong now = new AtomicLong(1_000L);
+        final AtomicInteger calls = new AtomicInteger();
+        final CountDownLatch refreshStarted = new CountDownLatch(1);
+        final CountDownLatch releaseRefresh = new CountDownLatch(1);
+        CellposeRuntime.setClockForTest(new java.util.function.LongSupplier() {
+            @Override public long getAsLong() {
+                return now.get();
+            }
+        });
+        CellposeRuntime.setProbeBackendForTest(new CellposeRuntime.ProbeBackend() {
+            @Override public CellposeRuntime.Status probeConfigured() {
+                int call = calls.incrementAndGet();
+                if (call == 1) {
+                    return missingStatus(call);
+                }
+                refreshStarted.countDown();
+                await(releaseRefresh);
+                return readyStatus(false);
+            }
+        });
+
+        assertFalse(CellposeRuntime.probeAsync().get(1, TimeUnit.SECONDS).ready);
+        now.addAndGet(CellposeRuntime.MISSING_TTL_MS + 1L);
+
+        DependencyStatus status = snapshotCellposeDependencyStatus();
+
+        try {
+            assertTrue(refreshStarted.await(1, TimeUnit.SECONDS));
+            assertTrue(status.getDetailMessage(), status.isChecking());
+            assertFalse(status.getDetailMessage(), status.needsAttention());
+        } finally {
+            releaseRefresh.countDown();
+        }
+        assertTrue(CellposeRuntime.probeAsync().get(1, TimeUnit.SECONDS).ready);
+    }
+
+    @Test
+    public void dependencyProbeReportsCheckingWhenStaleReadyCacheRefreshes() throws Exception {
+        final AtomicLong now = new AtomicLong(1_000L);
+        final AtomicInteger calls = new AtomicInteger();
+        final CountDownLatch refreshStarted = new CountDownLatch(1);
+        final CountDownLatch releaseRefresh = new CountDownLatch(1);
+        CellposeRuntime.setClockForTest(new java.util.function.LongSupplier() {
+            @Override public long getAsLong() {
+                return now.get();
+            }
+        });
+        CellposeRuntime.setProbeBackendForTest(new CellposeRuntime.ProbeBackend() {
+            @Override public CellposeRuntime.Status probeConfigured() {
+                int call = calls.incrementAndGet();
+                if (call == 1) {
+                    return readyStatus(false);
+                }
+                refreshStarted.countDown();
+                await(releaseRefresh);
+                return missingStatus(call);
+            }
+        });
+
+        assertTrue(CellposeRuntime.probeAsync().get(1, TimeUnit.SECONDS).ready);
+        now.addAndGet(CellposeRuntime.READY_TTL_MS + 1L);
+
+        DependencyStatus status = snapshotCellposeDependencyStatus();
+
+        try {
+            assertTrue(refreshStarted.await(1, TimeUnit.SECONDS));
+            assertTrue(status.getDetailMessage(), status.isChecking());
+            assertFalse("Stale ready cache must not allow the feature while refresh is running.",
+                    status.isPresent());
+        } finally {
+            releaseRefresh.countDown();
+        }
+        assertFalse(CellposeRuntime.probeAsync().get(1, TimeUnit.SECONDS).ready);
+    }
+
+    private static DependencyStatus snapshotCellposeDependencyStatus() {
+        return DependencyRegistry.snapshotStatuses(Collections.singletonList(
+                DependencyRegistry.get(DependencyId.CELLPOSE_RUNTIME)))
+                .get(DependencyId.CELLPOSE_RUNTIME);
     }
 
     private static CellposeRuntime.Status readyStatus(boolean gpu) {

@@ -74,7 +74,9 @@ final class CellposeRuntimeFixer implements DependencyFixer {
         if (status == null) {
             return "Status is unavailable.";
         }
-        String label = status.isPresent() ? "Present" : (status.isError() ? "Error" : "Missing");
+        String label = status.isPresent()
+                ? "Present"
+                : (status.isChecking() ? "Checking" : (status.isError() ? "Error" : "Missing"));
         String detail = status.getDetailMessage();
         if (detail == null || detail.trim().isEmpty()) {
             return label + ".";

@@ -1,6 +1,10 @@
 package flash.pipeline.intelligence;
 
 import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.io.LifIO;
+import flash.pipeline.project.ProjectFile;
+import flash.pipeline.project.ProjectService;
 import ij.IJ;
 
 import javax.swing.JOptionPane;
@@ -48,7 +52,8 @@ public final class PreFlightChecks {
 
     /** Extensions that should not be scanned for truncation (only raw microscopy). */
     private static final Set<String> RAW_IMAGE_EXTS = new HashSet<String>(
-            Arrays.asList("lif", "czi", "nd2", "tif", "tiff", "ome.tif", "ome.tiff"));
+            Arrays.asList("lif", "lof", "czi", "nd2", "lsm", "oib", "oif", "ims",
+                    "tif", "tiff", "ome.tif", "ome.tiff"));
 
     private PreFlightChecks() {}
 
@@ -220,12 +225,18 @@ public final class PreFlightChecks {
         public final long estimatedOutputBytes;
         public final boolean warn;
         public final boolean likelyInsufficient;
+        public final boolean projectScoped;
         public DiskSpaceResult(long input, long free, long estOut, boolean warn, boolean insufficient) {
+            this(input, free, estOut, warn, insufficient, false);
+        }
+        public DiskSpaceResult(long input, long free, long estOut, boolean warn,
+                               boolean insufficient, boolean projectScoped) {
             this.inputBytes = input;
             this.freeBytes = free;
             this.estimatedOutputBytes = estOut;
             this.warn = warn;
             this.likelyInsufficient = insufficient;
+            this.projectScoped = projectScoped;
         }
     }
 
@@ -235,7 +246,11 @@ public final class PreFlightChecks {
 
     public static DiskSpaceResult checkDiskSpace(DirectoryFileScan scan) {
         File dir = scan == null ? new File("") : scan.directory;
-        long inputBytes = sumRawImageBytes(scan == null ? new File[0] : scan.cleanFiles);
+        ProjectInputEstimate projectEstimate = estimateProjectInputBytes(dir);
+        boolean projectScoped = projectEstimate.available;
+        long inputBytes = projectScoped
+                ? projectEstimate.bytes
+                : sumRawImageBytes(scan == null ? new File[0] : scan.cleanFiles);
         long estimatedOutput = (long) (inputBytes * OUTPUT_SIZE_MULTIPLIER);
         long free;
         try {
@@ -247,7 +262,8 @@ public final class PreFlightChecks {
         }
         boolean warn = free < (long) (estimatedOutput * 1.5);
         boolean insufficient = free < (long) (estimatedOutput * 1.1);
-        return new DiskSpaceResult(inputBytes, free, estimatedOutput, warn, insufficient);
+        return new DiskSpaceResult(inputBytes, free, estimatedOutput, warn,
+                insufficient, projectScoped);
     }
 
     // ---------------------------------------------
@@ -333,6 +349,141 @@ public final class PreFlightChecks {
             total += f.length();
         }
         return total;
+    }
+
+    private static ProjectInputEstimate estimateProjectInputBytes(File selectedDirectory) {
+        if (selectedDirectory == null) {
+            return ProjectInputEstimate.unavailable();
+        }
+        File projectJson = ProjectService.resolveProjectJson(selectedDirectory);
+        if (projectJson == null) {
+            return ProjectInputEstimate.unavailable();
+        }
+        ProjectFile project = ProjectService.load(projectJson);
+        if (project == null || project.items == null) {
+            return ProjectInputEstimate.unavailable();
+        }
+
+        long total = 0L;
+        boolean sawIncludedSource = false;
+        for (ProjectFile.Item item : project.items) {
+            if (item == null || !item.include) continue;
+            if (item.path == null || item.path.trim().isEmpty()) continue;
+            File source = new File(item.path);
+            if (!source.isFile()) continue;
+            sawIncludedSource = true;
+            if (isContainerSource(source.getName())) {
+                total += estimateContainerItemBytes(source, item);
+            } else if (RAW_IMAGE_EXTS.contains(extension(source.getName()))) {
+                total += source.length();
+            }
+        }
+        return sawIncludedSource
+                ? ProjectInputEstimate.available(total)
+                : ProjectInputEstimate.unavailable();
+    }
+
+    private static long estimateContainerItemBytes(File source, ProjectFile.Item item) {
+        long sourceBytes = source == null ? 0L : source.length();
+        int included = includedSeriesCount(item);
+        if (included == 0) {
+            return 0L;
+        }
+        int totalSeries = totalSeriesCount(item);
+        if (included > 0 && totalSeries <= included) {
+            int probed = probeSeriesCount(source);
+            if (probed > included) {
+                totalSeries = probed;
+            }
+        }
+        if (included > 0 && totalSeries > included) {
+            return Math.max(1L, Math.round((double) sourceBytes
+                    * (double) included / (double) totalSeries));
+        }
+        return sourceBytes;
+    }
+
+    private static int includedSeriesCount(ProjectFile.Item item) {
+        int explicit = countUniqueIntegers(item == null ? null : item.series);
+        if (explicit > 0) {
+            return explicit;
+        }
+        if (item == null || item.seriesMeta == null || item.seriesMeta.isEmpty()) {
+            return -1;
+        }
+        int count = 0;
+        for (ProjectFile.SeriesItem series : item.seriesMeta) {
+            if (series != null && series.include) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static int totalSeriesCount(ProjectFile.Item item) {
+        if (item == null || item.seriesMeta == null || item.seriesMeta.isEmpty()) {
+            return -1;
+        }
+        Set<Integer> indexes = new HashSet<Integer>();
+        for (ProjectFile.SeriesItem series : item.seriesMeta) {
+            if (series != null) {
+                indexes.add(Integer.valueOf(series.index));
+            }
+        }
+        return indexes.size();
+    }
+
+    private static int countUniqueIntegers(List<Integer> values) {
+        if (values == null || values.isEmpty()) {
+            return 0;
+        }
+        Set<Integer> unique = new HashSet<Integer>();
+        for (Integer value : values) {
+            if (value != null) {
+                unique.add(value);
+            }
+        }
+        return unique.size();
+    }
+
+    private static int probeSeriesCount(File source) {
+        if (source == null || !source.isFile()) {
+            return -1;
+        }
+        try {
+            return LifIO.getSeriesCount(source);
+        } catch (Exception ignored) {
+            return -1;
+        } catch (LinkageError ignored) {
+            return -1;
+        }
+    }
+
+    private static boolean isContainerSource(String name) {
+        if (name == null) return false;
+        String lower = name.toLowerCase(Locale.ROOT);
+        for (String ext : ImageSourceDispatcher.CONTAINER_EXTENSIONS) {
+            if (lower.endsWith(ext)) return true;
+        }
+        return false;
+    }
+
+    private static final class ProjectInputEstimate {
+        final boolean available;
+        final long bytes;
+
+        private ProjectInputEstimate(boolean available, long bytes) {
+            this.available = available;
+            this.bytes = bytes;
+        }
+
+        static ProjectInputEstimate available(long bytes) {
+            return new ProjectInputEstimate(true, Math.max(0L, bytes));
+        }
+
+        static ProjectInputEstimate unavailable() {
+            return new ProjectInputEstimate(false, 0L);
+        }
     }
 
     private static boolean containsNonAscii(String s) {
