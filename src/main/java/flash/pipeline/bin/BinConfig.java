@@ -28,10 +28,10 @@ public class BinConfig {
 
     public final List<String> channelNames = new ArrayList<>();
     public final List<String> channelColors = new ArrayList<>();
-    public final List<String> channelThresholds = new ArrayList<>();       // object threshold: "default" or number
+    public final List<String> channelThresholds = new ArrayList<>();       // object threshold: "default", "auto:Otsu:dark", or number
     public final List<String> channelSizes = new ArrayList<>();            // particle size: "min-max"
-    public final List<String> channelMinMax = new ArrayList<>();           // display range: "None" or "min-max"
-    public final List<String> channelIntensityThresholds = new ArrayList<>(); // intensity threshold: "default" or number
+    public final List<String> channelMinMax = new ArrayList<>();           // display range: "None", "min-max", or "auto:percent"
+    public final List<String> channelIntensityThresholds = new ArrayList<>(); // intensity threshold: "default", "auto:Otsu:dark", or number
     public final List<String> segmentationMethods = new ArrayList<>();
     public final List<String> channelFilterPresets = new ArrayList<>();
     public ZSliceMode zSliceMode = ZSliceMode.FULL;

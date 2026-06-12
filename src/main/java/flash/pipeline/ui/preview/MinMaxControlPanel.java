@@ -30,6 +30,7 @@ public final class MinMaxControlPanel extends JPanel {
     private final FijiStyleRangeSliderPanel brightnessSlider = new FijiStyleRangeSliderPanel("Brightness");
     private final FijiStyleRangeSliderPanel contrastSlider = new FijiStyleRangeSliderPanel("Contrast");
     private final boolean includeSetButton;
+    private final String autoButtonLabel;
 
     private double domainMin = 0.0;
     private double domainMax = 255.0;
@@ -45,8 +46,14 @@ public final class MinMaxControlPanel extends JPanel {
     }
 
     public MinMaxControlPanel(boolean includeSetButton) {
+        this(includeSetButton, "Auto");
+    }
+
+    public MinMaxControlPanel(boolean includeSetButton, String autoButtonLabel) {
         super(new BorderLayout(0, 6));
         this.includeSetButton = includeSetButton;
+        this.autoButtonLabel = autoButtonLabel == null || autoButtonLabel.trim().isEmpty()
+                ? "Auto" : autoButtonLabel.trim();
         setBorder(BorderFactory.createTitledBorder("Brightness/Contrast"));
         histogramPanel.setMinimumSize(new Dimension(220, HISTOGRAM_MINIMUM_HEIGHT));
         histogramPanel.setPreferredSize(new Dimension(320, HISTOGRAM_PREFERRED_HEIGHT));
@@ -114,7 +121,7 @@ public final class MinMaxControlPanel extends JPanel {
     private JPanel buildActions() {
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         actions.setOpaque(false);
-        JButton auto = new JButton("Auto");
+        JButton auto = new JButton(autoButtonLabel);
         flash.pipeline.ui.FlashIcons.apply(auto, flash.pipeline.ui.FlashIcons.wand());
         JButton reset = new JButton("Reset");
         flash.pipeline.ui.FlashIcons.apply(reset, flash.pipeline.ui.FlashIcons.refresh());

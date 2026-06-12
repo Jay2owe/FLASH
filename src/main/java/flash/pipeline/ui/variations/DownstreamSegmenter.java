@@ -1,6 +1,7 @@
 package flash.pipeline.ui.variations;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.image.ThresholdOps;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.ui.config.CellposeParameterStage;
 import flash.pipeline.ui.config.ClassicalSegmentationStage;
@@ -11,7 +12,6 @@ import flash.pipeline.ui.variations.strategy.ClassicalSweep;
 import flash.pipeline.ui.variations.strategy.StarDistPerCell;
 
 import ij.ImagePlus;
-import ij.process.ImageProcessor;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -378,37 +378,8 @@ public class DownstreamSegmenter {
     }
 
     private static int thresholdFor(String token, ImagePlus crop) {
-        String value = safe(token);
-        if (value.length() == 0 || "default".equalsIgnoreCase(value)) {
-            double auto = defaultDarkThreshold(crop);
-            return Double.isFinite(auto) ? nonNegativeInt(auto) : 0;
-        }
-        try {
-            return nonNegativeInt(Double.parseDouble(value));
-        } catch (NumberFormatException e) {
-            double auto = defaultDarkThreshold(crop);
-            return Double.isFinite(auto) ? nonNegativeInt(auto) : 0;
-        }
-    }
-
-    private static double defaultDarkThreshold(ImagePlus image) {
-        if (image == null || image.getProcessor() == null) {
-            return Double.NaN;
-        }
-        ImageProcessor processor = image.getProcessor().duplicate();
-        if (processor == null) {
-            return Double.NaN;
-        }
-        try {
-            processor.setAutoThreshold("Default dark");
-            double threshold = processor.getMinThreshold();
-            return Double.isFinite(threshold)
-                    && threshold != ImageProcessor.NO_THRESHOLD
-                    ? threshold
-                    : Double.NaN;
-        } catch (RuntimeException e) {
-            return Double.NaN;
-        }
+        double threshold = ThresholdOps.thresholdFromTokenCurrentSlice(crop, token, true);
+        return Double.isFinite(threshold) ? nonNegativeInt(threshold) : 0;
     }
 
     private static int nonNegativeInt(double value) {

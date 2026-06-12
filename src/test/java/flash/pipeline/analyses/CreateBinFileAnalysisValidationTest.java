@@ -34,10 +34,12 @@ public class CreateBinFileAnalysisValidationTest {
         assertTrue(CreateBinFileAnalysis.isValidDisplayRangeToken("None"));
         assertTrue(CreateBinFileAnalysis.isValidDisplayRangeToken("0-255"));
         assertTrue(CreateBinFileAnalysis.isValidDisplayRangeToken("10.5-200.25"));
+        assertTrue(CreateBinFileAnalysis.isValidDisplayRangeToken("auto:0.35"));
 
         assertFalse(CreateBinFileAnalysis.isValidDisplayRangeToken(""));
         assertFalse(CreateBinFileAnalysis.isValidDisplayRangeToken("0"));
         assertFalse(CreateBinFileAnalysis.isValidDisplayRangeToken("low-high"));
+        assertFalse(CreateBinFileAnalysis.isValidDisplayRangeToken("auto:bad"));
     }
 
     @Test

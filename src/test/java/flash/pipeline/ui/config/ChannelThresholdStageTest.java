@@ -78,6 +78,35 @@ public class ChannelThresholdStageTest {
     }
 
     @Test
+    public void lockInCanWriteAlgorithmicThresholdToken() {
+        RecordingThresholdStore store = new RecordingThresholdStore("default");
+        ChannelThresholdStage stage = new ChannelThresholdStage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.setAlgorithmThresholdForTest("Otsu", "Dark");
+
+        assertTrue(stage.lockIn(context));
+
+        assertEquals("auto:Otsu:dark", store.objectToken);
+        assertEquals("auto:Otsu:dark", store.intensityToken);
+        assertEquals("auto:Otsu:dark", stage.currentThresholdTokenForTest());
+    }
+
+    @Test
+    public void savedMethodAliasReloadsAsAlgorithmicThresholdToken() {
+        RecordingThresholdStore store = new RecordingThresholdStore("IsoData");
+        ChannelThresholdStage stage = new ChannelThresholdStage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+
+        assertEquals("auto:IsoData:dark", stage.currentThresholdTokenForTest());
+    }
+
+    @Test
     public void restartKeepsCurrentEditedThresholdAfterStageRebuild() {
         RecordingThresholdStore store = new RecordingThresholdStore("20");
         ChannelThresholdStage stage = new ChannelThresholdStage(store, new RecordingPreviewAdapter());

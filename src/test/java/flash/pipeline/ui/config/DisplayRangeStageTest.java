@@ -36,7 +36,7 @@ public class DisplayRangeStageTest {
         assertNotNull(actions.adjustedPreview);
         assertEquals(20.0, actions.adjustedPreview.getDisplayRangeMin(), 0.0001);
         assertEquals(80.0, actions.adjustedPreview.getDisplayRangeMax(), 0.0001);
-        assertTrue(actions.status.contains("Display range preview"));
+        assertTrue(actions.status.contains("Manual display range preview"));
     }
 
     @Test
@@ -53,6 +53,22 @@ public class DisplayRangeStageTest {
 
         assertEquals("12-88", store.token);
         assertEquals("12-88", stage.currentRangeTokenForTest());
+    }
+
+    @Test
+    public void lockInWritesAutoEnhanceToken() {
+        RecordingRangeStore store = new RecordingRangeStore("None");
+        DisplayRangeStage stage = new DisplayRangeStage(store, new RecordingPreviewAdapter());
+        ConfigQcContext context = context();
+
+        stage.buildControls(context, new RecordingActions());
+        stage.onEnter(context, new PreviewPairPanel("Original", "Adjusted"));
+        stage.setAutoSaturationForTest(1.25);
+
+        assertTrue(stage.lockIn(context));
+
+        assertEquals("auto:1.25", store.token);
+        assertEquals("auto:1.25", stage.currentRangeTokenForTest());
     }
 
     @Test
@@ -114,7 +130,9 @@ public class DisplayRangeStageTest {
         JScrollPane scroll = findFirst(controls, JScrollPane.class);
         HistogramPanel histogram = findFirst(controls, HistogramPanel.class);
 
-        assertTrue(hasLabel(controls, "Adjust min/max on the channel projection."));
+        assertTrue(hasLabel(controls, "Choose one display method for this channel."));
+        assertTrue(hasRadioButton(controls, "Manual min/max display range"));
+        assertTrue(hasRadioButton(controls, "Auto-enhance contrast"));
         assertFalse(hasLabel(controls, "C1 - IBA1"));
         assertFalse(hasLabel(controls, "Image 1 / 1: QC image"));
         assertFalse(hasLabel(controls, "Adjust the displayed min/max range on the channel projection."));
@@ -146,6 +164,20 @@ public class DisplayRangeStageTest {
     private static boolean hasLabel(Component component, String text) {
         JLabel label = findLabel(component, text);
         return label != null;
+    }
+
+    private static boolean hasRadioButton(Component component, String text) {
+        if (component instanceof javax.swing.JRadioButton
+                && text.equals(((javax.swing.JRadioButton) component).getText())) {
+            return true;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (int i = 0; i < children.length; i++) {
+                if (hasRadioButton(children[i], text)) return true;
+            }
+        }
+        return false;
     }
 
     private static JLabel findLabel(Component component, String text) {

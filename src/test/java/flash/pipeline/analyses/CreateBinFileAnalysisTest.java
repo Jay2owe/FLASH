@@ -1914,6 +1914,38 @@ public class CreateBinFileAnalysisTest {
     }
 
     @Test
+    public void setupPreviewZSubsetPreservesConfiguredThirdChannelFromUnderReportedStack() throws Exception {
+        CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
+        CreateBinFileAnalysis.BinUserConfig cfg = threeChannelConfig();
+        cfg.zSliceMode = ZSliceMode.PER_IMAGE;
+        cfg.zSliceSelections.put(Integer.valueOf(0),
+                new ZSliceSelection(0, "interleaved-z", 4, ZSliceRange.parse("2-3")));
+
+        ImagePlus subset = invokeApplyQcZSliceSubset(
+                analysis,
+                cfg,
+                0,
+                underReportedThreeChannelZStack("interleaved-z"));
+        assertEquals(3, subset.getNChannels());
+        assertEquals(2, subset.getNSlices());
+        assertEquals(6, subset.getStackSize());
+
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                temp.getRoot(),
+                temp.getRoot(),
+                cfg,
+                Arrays.asList(subset),
+                cfg.names,
+                2);
+        ImagePlus extracted = invokeDuplicateCurrentChannel(analysis, context, 3);
+
+        assertEquals(1, extracted.getNChannels());
+        assertEquals(2, extracted.getStackSize());
+        assertEquals(103, extracted.getStack().getProcessor(1).get(0, 0));
+        assertEquals(153, extracted.getStack().getProcessor(2).get(0, 0));
+    }
+
+    @Test
     public void setupPreviewFailsLoudlyWhenConfiguredChannelCannotBeExtracted() throws Exception {
         CreateBinFileAnalysis analysis = new CreateBinFileAnalysis();
         CreateBinFileAnalysis.BinUserConfig cfg = threeChannelConfig();
@@ -2065,6 +2097,16 @@ public class CreateBinFileAnalysisTest {
         stack.addSlice("C1", byteSlice(11, 12));
         stack.addSlice("C2", byteSlice(22, 23));
         stack.addSlice("C3", byteSlice(33, 34));
+        return new ImagePlus(title, stack);
+    }
+
+    private static ImagePlus underReportedThreeChannelZStack(String title) {
+        ImageStack stack = new ImageStack(2, 1);
+        for (int z = 1; z <= 4; z++) {
+            stack.addSlice("Z" + z + " C1", byteSlice(z * 50 + 1, z * 50 + 1));
+            stack.addSlice("Z" + z + " C2", byteSlice(z * 50 + 2, z * 50 + 2));
+            stack.addSlice("Z" + z + " C3", byteSlice(z * 50 + 3, z * 50 + 3));
+        }
         return new ImagePlus(title, stack);
     }
 
@@ -2489,6 +2531,23 @@ public class CreateBinFileAnalysisTest {
                 "duplicateCurrentChannel", ConfigQcContext.class, int.class);
         method.setAccessible(true);
         return (ImagePlus) method.invoke(analysis, context, Integer.valueOf(channelNum));
+    }
+
+    private static ImagePlus invokeApplyQcZSliceSubset(CreateBinFileAnalysis analysis,
+                                                       CreateBinFileAnalysis.BinUserConfig cfg,
+                                                       int seriesIndex,
+                                                       ImagePlus image) throws Exception {
+        Method method = CreateBinFileAnalysis.class.getDeclaredMethod(
+                "applyQcZSliceSubset",
+                CreateBinFileAnalysis.BinUserConfig.class,
+                int.class,
+                ImagePlus.class);
+        method.setAccessible(true);
+        return (ImagePlus) method.invoke(
+                analysis,
+                cfg,
+                Integer.valueOf(seriesIndex),
+                image);
     }
 
     private static ChannelThresholdStage invokeCreateChannelThresholdStage(

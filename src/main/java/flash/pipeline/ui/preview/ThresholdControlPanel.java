@@ -1,5 +1,6 @@
 package flash.pipeline.ui.preview;
 
+import flash.pipeline.image.ThresholdOps;
 import ij.ImagePlus;
 import ij.process.ImageProcessor;
 
@@ -7,6 +8,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -44,6 +46,7 @@ public final class ThresholdControlPanel extends JPanel {
     private final JComboBox<String> methodCombo = new JComboBox<String>(METHODS);
     private final JComboBox<String> backgroundCombo = new JComboBox<String>(BACKGROUNDS);
     private final JComboBox<String> previewCombo = new JComboBox<String>(PREVIEWS);
+    private final JCheckBox algorithmCheck = new JCheckBox("Use method during runs");
     private final JLabel previewLabel = new JLabel("Preview:");
     private final JButton autoButton = new JButton("Auto");
     private final JButton resetButton = new JButton("Reset");
@@ -64,6 +67,7 @@ public final class ThresholdControlPanel extends JPanel {
     public ThresholdControlPanel() {
         super(new BorderLayout(0, 6));
         setBorder(BorderFactory.createTitledBorder("Threshold"));
+        algorithmCheck.setOpaque(false);
         flash.pipeline.ui.FlashIcons.apply(autoButton, flash.pipeline.ui.FlashIcons.wand());
         flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
         flash.pipeline.ui.FlashIcons.apply(setButton, flash.pipeline.ui.FlashIcons.check());
@@ -104,11 +108,13 @@ public final class ThresholdControlPanel extends JPanel {
     }
 
     public void setThreshold(double lower, double upper) {
+        setAlgorithmThresholdSelected(false);
         applyThreshold(lower, upper, false, false);
         refreshLayoutAndPaint();
     }
 
     public void setThresholdPreservingRange(double lower, double upper) {
+        setAlgorithmThresholdSelected(false);
         applyThreshold(lower, upper, false, false, true);
         refreshLayoutAndPaint();
     }
@@ -137,6 +143,29 @@ public final class ThresholdControlPanel extends JPanel {
 
     public void setBackgroundMode(String background) {
         setComboSelection(backgroundCombo, background);
+    }
+
+    public boolean isAlgorithmThresholdSelected() {
+        return algorithmCheck.isSelected();
+    }
+
+    public void setAlgorithmThresholdSelected(boolean selected) {
+        if (algorithmCheck.isSelected() != selected) {
+            algorithmCheck.setSelected(selected);
+        }
+    }
+
+    public String getAutoThresholdToken() {
+        return ThresholdOps.formatAutoToken(getMethod(), getBackgroundMode());
+    }
+
+    public void setAutoThresholdToken(String token) {
+        ThresholdOps.AutoThresholdSpec spec = ThresholdOps.autoThresholdSpecForToken(token, false);
+        if (spec == null) return;
+        setMethod(spec.method);
+        setBackgroundMode(spec.background);
+        setAlgorithmThresholdSelected(true);
+        applyAutoThresholdSelection(false);
     }
 
     public String getPreviewMode() {
@@ -185,6 +214,10 @@ public final class ThresholdControlPanel extends JPanel {
         return resetButton;
     }
 
+    JCheckBox algorithmCheckForTest() {
+        return algorithmCheck;
+    }
+
     private JPanel buildControls() {
         JPanel controls = new JPanel();
         controls.setOpaque(false);
@@ -219,6 +252,12 @@ public final class ThresholdControlPanel extends JPanel {
         gbc.gridwidth = 3;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         selectors.add(previewCombo, gbc);
+
+        gbc.gridy = 2;
+        gbc.gridx = 0;
+        gbc.gridwidth = 4;
+        gbc.fill = GridBagConstraints.NONE;
+        selectors.add(algorithmCheck, gbc);
         return selectors;
     }
 
@@ -247,11 +286,30 @@ public final class ThresholdControlPanel extends JPanel {
     private void wireControls() {
         lowerSlider.setListener((value, adjusting) -> {
             if (updating) return;
+            setAlgorithmThresholdSelected(false);
             applyThreshold(Math.min(value, upperValue), upperValue, true, adjusting);
         });
         upperSlider.setListener((value, adjusting) -> {
             if (updating) return;
+            setAlgorithmThresholdSelected(false);
             applyThreshold(lowerValue, Math.max(value, lowerValue), true, adjusting);
+        });
+        methodCombo.addActionListener(e -> {
+            if (!updating && algorithmCheck.isSelected()) {
+                applyAutoThresholdSelection(true);
+            }
+        });
+        backgroundCombo.addActionListener(e -> {
+            if (!updating && algorithmCheck.isSelected()) {
+                applyAutoThresholdSelection(true);
+            }
+        });
+        algorithmCheck.addActionListener(e -> {
+            if (!updating && algorithmCheck.isSelected()) {
+                applyAutoThresholdSelection(true);
+            } else if (!updating && listener != null) {
+                listener.thresholdChanged(lowerValue, upperValue, false);
+            }
         });
         previewCombo.addActionListener(e -> {
             if (!updating && listener != null) {
@@ -332,24 +390,25 @@ public final class ThresholdControlPanel extends JPanel {
     private double[] calculateAutoThreshold(String method, String background) {
         ImageProcessor processor = duplicateCurrentProcessor();
         if (processor != null) {
-            try {
-                processor.setAutoThreshold(method + " " + background.toLowerCase(Locale.US));
-                double lower = processor.getMinThreshold();
-                double upper = processor.getMaxThreshold();
-                if (isValidThreshold(lower)) {
-                    if (!isValidThreshold(upper) || upper < lower) {
-                        upper = imageDomainMax;
-                    }
-                    return new double[]{
-                            FijiStyleRangeSliderPanel.clamp(lower, imageDomainMin, imageDomainMax),
-                            FijiStyleRangeSliderPanel.clamp(upper, imageDomainMin, imageDomainMax)
-                    };
-                }
-            } catch (RuntimeException ignored) {
-                // Keep the embedded control usable even if an ImageJ method is unavailable.
+            ThresholdOps.ThresholdRange range = ThresholdOps.autoThresholdRange(
+                    processor, method, background.toLowerCase(Locale.US));
+            if (range.hasValues()) {
+                double upper = Double.isInfinite(range.upper) ? imageDomainMax : range.upper;
+                return new double[]{
+                        FijiStyleRangeSliderPanel.clamp(range.lower, imageDomainMin, imageDomainMax),
+                        FijiStyleRangeSliderPanel.clamp(upper, imageDomainMin, imageDomainMax)
+                };
             }
         }
         return new double[]{imageDomainMin, imageDomainMax};
+    }
+
+    private void applyAutoThresholdSelection(boolean fire) {
+        double[] autoThreshold = calculateAutoThreshold(getMethod(), getBackgroundMode());
+        applyThreshold(autoThreshold[0], autoThreshold[1], fire, false);
+        if (fire && listener != null) {
+            listener.autoRequested(getMethod(), getBackgroundMode());
+        }
     }
 
     private ImageProcessor duplicateCurrentProcessor() {

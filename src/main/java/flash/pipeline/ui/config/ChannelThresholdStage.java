@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.image.ThresholdOps;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import flash.pipeline.ui.preview.ThresholdControlPanel;
@@ -149,10 +150,10 @@ public final class ChannelThresholdStage implements ConfigQcStage {
             setError("No threshold preview is available.");
             return false;
         }
-        String token = formatThreshold(control.getLowerThreshold());
+        String token = currentThresholdToken();
         thresholdStore.set(token);
         restartLowerThreshold = null;
-        setStatus("Locked threshold: " + token + ".");
+        setStatus("Locked threshold: " + ThresholdOps.describeToken(token) + ".");
         return true;
     }
 
@@ -191,7 +192,14 @@ public final class ChannelThresholdStage implements ConfigQcStage {
     }
 
     String currentThresholdTokenForTest() {
-        return control == null ? "" : formatThreshold(control.getLowerThreshold());
+        return currentThresholdToken();
+    }
+
+    void setAlgorithmThresholdForTest(String method, String background) {
+        if (control != null) {
+            control.setAutoThresholdToken(ThresholdOps.formatAutoToken(method, background));
+            updateThresholdPreview("Threshold preview.");
+        }
     }
 
     private JComponent buildControlPanel(ThresholdControlPanel control) {
@@ -220,6 +228,10 @@ public final class ChannelThresholdStage implements ConfigQcStage {
                 // Fall through to automatic suggestion.
             }
         }
+        if (ThresholdOps.isAutoThresholdToken(token)) {
+            control.setAutoThresholdToken(token);
+            return;
+        }
         double auto = defaultDarkThreshold(thresholdSource);
         if (Double.isFinite(auto)) {
             control.setThreshold(auto, upper);
@@ -246,7 +258,23 @@ public final class ChannelThresholdStage implements ConfigQcStage {
         if (old != null && old != adjustedPreview) {
             previewAdapter.close(old);
         }
-        setStatus(text + " Lower: " + formatThreshold(control.getLowerThreshold()));
+        setStatus(text + " " + thresholdStatusText());
+    }
+
+    private String currentThresholdToken() {
+        if (control == null) return "";
+        return control.isAlgorithmThresholdSelected()
+                ? control.getAutoThresholdToken()
+                : formatThreshold(control.getLowerThreshold());
+    }
+
+    private String thresholdStatusText() {
+        String token = currentThresholdToken();
+        if (ThresholdOps.isAutoThresholdToken(token)) {
+            return "Method: " + ThresholdOps.describeToken(token)
+                    + ". Preview lower: " + formatThreshold(control.getLowerThreshold()) + ".";
+        }
+        return "Lower: " + formatThreshold(control.getLowerThreshold()) + ".";
     }
 
     private void closeImages() {

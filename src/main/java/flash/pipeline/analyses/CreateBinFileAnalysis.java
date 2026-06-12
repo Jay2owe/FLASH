@@ -16,6 +16,8 @@ import flash.pipeline.analyses.wizard.ChannelSetupSupport;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.image.FilterMacroEditorModel;
 import flash.pipeline.image.FilterExecutor;
+import flash.pipeline.image.ConfiguredChannelExtractor;
+import flash.pipeline.image.DisplayRangeSetting;
 import flash.pipeline.image.ImageOps;
 import flash.pipeline.image.WindowManagerLock;
 import flash.pipeline.image.NamedFilterLoader;
@@ -5989,6 +5991,9 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private BinConfig toBinConfig(BinUserConfig cfg) {
         BinConfig binCfg = new BinConfig();
         if (cfg != null) {
+            if (cfg.names != null) {
+                binCfg.channelNames.addAll(cfg.names);
+            }
             binCfg.zSliceMode = cfg.zSliceMode == null ? ZSliceMode.FULL : cfg.zSliceMode;
             binCfg.zSliceSelections.putAll(cfg.zSliceSelections);
         }
@@ -8641,81 +8646,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     private ImagePlus duplicateChannelForSetupPreview(ImagePlus source,
                                                       int channelNum,
                                                       int expectedChannels) {
-        if (source == null) return null;
-        int requested = Math.max(1, channelNum);
-        int reportedChannels = Math.max(1, source.getNChannels());
-        int configuredChannels = Math.max(0, expectedChannels);
-        if (configuredChannels > reportedChannels
-                && canExtractInterleavedConfiguredChannel(source, requested, configuredChannels)) {
-            return duplicateInterleavedConfiguredChannel(source, requested, configuredChannels);
-        }
-
-        if (reportedChannels >= requested) {
-            ImagePlus duplicate = new Duplicator().run(source, requested, requested,
-                    1, Math.max(1, source.getNSlices()),
-                    1, Math.max(1, source.getNFrames()));
-            if (duplicate != null) {
-                return duplicate;
-            }
-        }
-
-        if (canExtractInterleavedConfiguredChannel(source, requested, configuredChannels)) {
-            return duplicateInterleavedConfiguredChannel(source, requested, configuredChannels);
-        }
-
-        if (requested == 1 && reportedChannels == 1) {
-            return source.duplicate();
-        }
-
-        throw new IllegalStateException("Cannot extract C" + requested
-                + " from " + safe(source.getTitle())
-                + ": image reports " + reportedChannels
-                + " channel(s), configured setup has " + configuredChannels + ".");
-    }
-
-    private boolean canExtractInterleavedConfiguredChannel(ImagePlus source,
-                                                          int channelNum,
-                                                          int configuredChannels) {
-        return configuredChannels >= channelNum
-                && source != null
-                && source.getStack() != null
-                && source.getStackSize() >= configuredChannels
-                && source.getStackSize() % configuredChannels == 0;
-    }
-
-    private ImagePlus duplicateInterleavedConfiguredChannel(ImagePlus source,
-                                                           int channelNum,
-                                                           int configuredChannels) {
-        ImageStack in = source.getStack();
-        if (in == null) return null;
-        int totalPlanes = Math.max(1, source.getStackSize());
-        int frames = 1;
-        int reportedFrames = Math.max(1, source.getNFrames());
-        if (reportedFrames > 1
-                && totalPlanes % (configuredChannels * reportedFrames) == 0) {
-            frames = reportedFrames;
-        }
-        int zSlices = Math.max(1, totalPlanes / (configuredChannels * frames));
-        ImageStack out = new ImageStack(source.getWidth(), source.getHeight());
-        for (int t = 0; t < frames; t++) {
-            for (int z = 0; z < zSlices; z++) {
-                int sourceIndex = (t * configuredChannels * zSlices)
-                        + (z * configuredChannels)
-                        + channelNum;
-                ImageProcessor processor = in.getProcessor(sourceIndex);
-                if (processor == null) {
-                    throw new IllegalStateException("Cannot extract C" + channelNum
-                            + " from " + safe(source.getTitle())
-                            + ": source plane " + sourceIndex + " is empty.");
-                }
-                out.addSlice(in.getSliceLabel(sourceIndex), processor.duplicate());
-            }
-        }
-        ImagePlus duplicate = new ImagePlus(source.getTitle(), out);
-        duplicate.setCalibration(source.getCalibration());
-        duplicate.setDimensions(1, zSlices, frames);
-        duplicate.setOpenAsHyperStack(frames > 1);
-        return duplicate;
+        return ConfiguredChannelExtractor.duplicateChannel(source, channelNum, expectedChannels);
     }
 
     private String legacyInteractiveChannelThresholdQC(List<QcImageSelection> images, BinUserConfig cfg,
@@ -10672,7 +10603,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     // ── Parsing helpers ─────────────────────────────────────────────────
 
     static boolean isValidDisplayRangeToken(String token) {
-        return "None".equalsIgnoreCase(token == null ? "" : token.trim()) || parseMinMax(token) != null;
+        return DisplayRangeSetting.isValidToken(token);
     }
 
     static boolean isValidSizeRangeToken(String token) {
@@ -10690,14 +10621,7 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
     }
 
     static double[] parseMinMax(String token) {
-        if (token == null || "None".equalsIgnoreCase(token)) return null;
-        String[] parts = token.split("-");
-        if (parts.length != 2) return null;
-        try {
-            return new double[]{Double.parseDouble(parts[0]), Double.parseDouble(parts[1])};
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        return DisplayRangeSetting.parseManualRange(token);
     }
 
     static double[] parseSizeRange(String token) {

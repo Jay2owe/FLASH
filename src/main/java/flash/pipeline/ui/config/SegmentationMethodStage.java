@@ -2,17 +2,15 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.image.ConfiguredChannelExtractor;
 import flash.pipeline.segmentation.SegmentationMethod;
 import flash.pipeline.segmentation.SegmentationTokenParser;
 import flash.pipeline.segmentation.catalog.ModelCatalog;
 import flash.pipeline.segmentation.catalog.ModelCatalogIO;
 import flash.pipeline.segmentation.catalog.ModelEntry;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.ImagePlus;
-// Intentional on the setup-preview UI path only; use thread-safe image helpers in worker code.
-import ij.plugin.Duplicator;
-
-import flash.pipeline.ui.FlashTheme;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -184,7 +182,14 @@ public final class SegmentationMethodStage implements ConfigQcStage {
     public void onEnter(ConfigQcContext context, PreviewPairPanel preview) {
         closePreviewSource();
         previewSource = duplicateSelectedChannel(context);
-        if (preview == null || previewSource == null) {
+        if (preview == null) {
+            return;
+        }
+        if (previewSource == null) {
+            preview.clearImages();
+            preview.setAdjustedState(PreviewPairPanel.PreviewState.ERROR,
+                    "Could not prepare the segmentation source for "
+                            + (context == null ? "this channel" : context.getChannelLabel()) + ".");
             return;
         }
         preview.setOriginal(previewSource);
@@ -449,35 +454,17 @@ public final class SegmentationMethodStage implements ConfigQcStage {
 
         int channel = Math.max(1, context.getChannelNumber());
         try {
-            int channels = Math.max(1, source.getNChannels());
-            int slices = Math.max(1, source.getNSlices());
-            int frames = Math.max(1, source.getNFrames());
-            int selected = Math.min(channel, channels);
-            ImagePlus duplicate = new Duplicator().run(
-                    source,
-                    selected,
-                    selected,
-                    1,
-                    slices,
-                    1,
-                    frames);
+            int expectedChannels = context.getChannelNames() == null
+                    ? 0
+                    : context.getChannelNames().size();
+            ImagePlus duplicate = ConfiguredChannelExtractor.duplicateChannel(
+                    source, channel, expectedChannels);
             if (duplicate != null) {
-                duplicate.setTitle(previewTitle(context, selected));
+                duplicate.setTitle(previewTitle(context, channel));
                 return duplicate;
             }
         } catch (RuntimeException e) {
-            // Fall through to a normal duplicate so the UI still has a preview.
-        }
-
-        try {
-            ImagePlus duplicate = source.duplicate();
-            if (duplicate != null) {
-                int selected = Math.min(channel, Math.max(1, duplicate.getNChannels()));
-                duplicate.setPosition(selected, 1, 1);
-                duplicate.setTitle(previewTitle(context, selected));
-                return duplicate;
-            }
-        } catch (RuntimeException e) {
+            setStatus("Could not prepare segmentation source: " + e.getMessage());
             return null;
         }
         return null;

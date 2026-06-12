@@ -93,6 +93,24 @@ public class ClassicalSegmentationStageTest {
     }
 
     @Test
+    public void lockInCanWriteAlgorithmicThresholdToken() {
+        RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
+        RecordingThresholdStore thresholdStore = new RecordingThresholdStore("20");
+        RecordingSizeStore sizeStore = new RecordingSizeStore("1-Infinity");
+        ClassicalSegmentationStage stage = stage(thresholdStore, sizeStore, adapter);
+
+        stage.buildControls(context(), new RecordingActions());
+        stage.onEnter(context(), new PreviewPairPanel("Original", "Objects"));
+        stage.setAlgorithmThresholdForTest("IsoData", "Dark");
+
+        assertTrue(stage.lockIn(context()));
+
+        assertEquals("auto:IsoData:dark", thresholdStore.token);
+        assertEquals("1-Infinity", sizeStore.token);
+        assertEquals("auto:IsoData:dark", stage.currentThresholdTokenForTest());
+    }
+
+    @Test
     public void normalLeftPaneIsThresholdPreviewNotRawSource() {
         RecordingPreviewAdapter adapter = new RecordingPreviewAdapter();
         ClassicalSegmentationStage stage = stage(

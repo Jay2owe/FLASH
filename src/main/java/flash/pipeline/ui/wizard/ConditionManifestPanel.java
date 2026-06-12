@@ -15,8 +15,10 @@ import javax.swing.JTable;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import java.awt.BorderLayout;
+import java.awt.FlowLayout;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -58,6 +60,11 @@ public final class ConditionManifestPanel {
      *                  {@code null} or blank the shared default copy is used.
      */
     public ConditionManifestPanel(Set<String> animals, Map<String, String> prefill, String introHtml) {
+        this(animals, prefill, introHtml, null, -1);
+    }
+
+    public ConditionManifestPanel(Set<String> animals, Map<String, String> prefill, String introHtml,
+                                  String[] workflowSteps, int workflowActiveIndex) {
         if (animals == null) {
             throw new IllegalArgumentException("animals is required.");
         }
@@ -98,7 +105,16 @@ public final class ConditionManifestPanel {
                 introHtml != null && !introHtml.trim().isEmpty()
                         ? introHtml
                         : DEFAULT_INTRO_HTML);
-        panel.add(instructions, BorderLayout.NORTH);
+        JComponent tracker = workflowRow(workflowSteps, workflowActiveIndex);
+        if (tracker != null) {
+            JPanel header = new JPanel(new BorderLayout(0, 6));
+            header.setOpaque(false);
+            header.add(tracker, BorderLayout.NORTH);
+            header.add(instructions, BorderLayout.CENTER);
+            panel.add(header, BorderLayout.NORTH);
+        } else {
+            panel.add(instructions, BorderLayout.NORTH);
+        }
         panel.add(scrollPane, BorderLayout.CENTER);
 
         this.component = panel;
@@ -167,7 +183,21 @@ public final class ConditionManifestPanel {
                                                            String dialogTitle,
                                                            String primaryButtonText,
                                                            String introHtml) {
-        ConditionManifestPanel panel = new ConditionManifestPanel(animals, prefill, introHtml);
+        return showDialog(parent, directory, animals, prefill, dialogTitle, primaryButtonText,
+                introHtml, null, -1);
+    }
+
+    public static LinkedHashMap<String, String> showDialog(java.awt.Component parent,
+                                                           String directory,
+                                                           Set<String> animals,
+                                                           Map<String, String> prefill,
+                                                           String dialogTitle,
+                                                           String primaryButtonText,
+                                                           String introHtml,
+                                                           String[] workflowSteps,
+                                                           int workflowActiveIndex) {
+        ConditionManifestPanel panel = new ConditionManifestPanel(
+                animals, prefill, introHtml, workflowSteps, workflowActiveIndex);
         String primary = primaryButtonText == null || primaryButtonText.trim().isEmpty()
                 ? NextStepLabels.SELECT_REPRESENTATIVES
                 : primaryButtonText;
@@ -194,6 +224,44 @@ public final class ConditionManifestPanel {
             }
         }
         return assignments;
+    }
+
+    private static JComponent workflowRow(String[] steps, int activeIndex) {
+        if (steps == null || steps.length == 0) {
+            return null;
+        }
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        row.setOpaque(false);
+        int visibleIndex = 0;
+        for (int i = 0; i < steps.length; i++) {
+            String step = steps[i] == null ? "" : steps[i].trim();
+            if (step.isEmpty()) {
+                continue;
+            }
+            if (visibleIndex > 0) {
+                row.add(workflowSeparator());
+            }
+            row.add(workflowChip(step, i == activeIndex));
+            visibleIndex++;
+        }
+        return visibleIndex == 0 ? null : row;
+    }
+
+    private static JLabel workflowChip(String text, boolean active) {
+        JLabel chip = new JLabel(" " + text + " ");
+        chip.setOpaque(true);
+        chip.setFont(chip.getFont().deriveFont(active ? Font.BOLD : Font.PLAIN, 11f));
+        chip.setBorder(BorderFactory.createLineBorder(FlashTheme.TEXT_HEADER, 1, true));
+        chip.setBackground(active ? FlashTheme.TEXT_HEADER : FlashTheme.SURFACE);
+        chip.setForeground(active ? FlashTheme.TEXT_ON_DARK : FlashTheme.TEXT_HEADER);
+        return chip;
+    }
+
+    private static JLabel workflowSeparator() {
+        JLabel label = new JLabel(">");
+        label.setForeground(FlashTheme.TEXT_MUTED);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
+        return label;
     }
 
     private static final class NullHighlightRenderer extends DefaultTableCellRenderer {

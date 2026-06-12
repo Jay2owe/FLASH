@@ -99,6 +99,8 @@ public final class ConditionReviewSupport {
         public String title = "Condition Assignment";
         public String primaryButtonText = "Save conditions";
         public String introHtml;
+        public String[] workflowSteps;
+        public int workflowActiveIndex = -1;
         public boolean requireAtLeastTwoConditions;
     }
 
@@ -204,6 +206,7 @@ public final class ConditionReviewSupport {
         LinkedHashMap<String, String> prefill = evaluate(directory, animals).resolvedAssignments;
         return ConditionManifestPanel.showDialog(
                 (Component) owner, directory, animals, prefill,
-                opt.title, opt.primaryButtonText, opt.introHtml);
+                opt.title, opt.primaryButtonText, opt.introHtml,
+                opt.workflowSteps, opt.workflowActiveIndex);
     }
 }

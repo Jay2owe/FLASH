@@ -64,6 +64,31 @@ public class ThresholdControlPanelTest {
     }
 
     @Test
+    public void autoThresholdTokenSelectsRuntimeMethod() {
+        ThresholdControlPanel panel = new ThresholdControlPanel();
+        panel.setImage(image(0, 0, 255, 255));
+
+        panel.setAutoThresholdToken("Otsu");
+
+        assertTrue(panel.isAlgorithmThresholdSelected());
+        assertEquals("Otsu", panel.getMethod());
+        assertEquals("Dark", panel.getBackgroundMode());
+        assertEquals("auto:Otsu:dark", panel.getAutoThresholdToken());
+    }
+
+    @Test
+    public void manualThresholdEditClearsRuntimeMethodSelection() {
+        ThresholdControlPanel panel = new ThresholdControlPanel();
+        panel.setImage(image(0, 0, 255, 255));
+        panel.setAutoThresholdToken("auto:IsoData:dark");
+
+        panel.setThreshold(10.0, 255.0);
+
+        assertTrue(!panel.isAlgorithmThresholdSelected());
+        assertEquals(10.0, panel.getLowerThreshold(), 0.0001);
+    }
+
+    @Test
     public void lowerSliderCannotCrossUpperThreshold() {
         ThresholdControlPanel panel = new ThresholdControlPanel();
         panel.setImage(image(0, 100));

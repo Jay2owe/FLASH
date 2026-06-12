@@ -2,6 +2,7 @@ package flash.pipeline.ui.config;
 
 import flash.pipeline.help.SetupHelpCatalog;
 import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.image.ThresholdOps;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
 import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.ui.Debouncer;
@@ -221,14 +222,19 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
                 LoadedRunParameters.particleSize(parameters, channel);
         if (threshold.value != null && threshold.value.trim().length() > 0
                 && !"default".equalsIgnoreCase(threshold.value.trim())) {
-            thresholdStore.set(threshold.value.trim());
+            String token = threshold.value.trim();
+            thresholdStore.set(token);
             if (thresholdControl != null) {
-                try {
-                    double lower = Double.parseDouble(threshold.value.trim());
-                    thresholdControl.setThresholdPreservingRange(lower,
-                            upperThresholdFor(lower, filteredSource));
-                } catch (NumberFormatException ignored) {
-                    // Keep the stored token; invalid legacy values are skipped by the UI.
+                if (ThresholdOps.isAutoThresholdToken(token)) {
+                    thresholdControl.setAutoThresholdToken(token);
+                } else {
+                    try {
+                        double lower = Double.parseDouble(token);
+                        thresholdControl.setThresholdPreservingRange(lower,
+                                upperThresholdFor(lower, filteredSource));
+                    } catch (NumberFormatException ignored) {
+                        // Keep the stored token; invalid legacy values are skipped by the UI.
+                    }
                 }
             }
         }
@@ -312,7 +318,7 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             restartLowerThreshold = null;
             restartUpperThreshold = null;
             restartSize = null;
-            setStatus("Locked Classical segmentation: threshold " + threshold
+            setStatus("Locked Classical segmentation: threshold " + ThresholdOps.describeToken(threshold)
                     + ", sizes " + size.toToken() + ".");
             return true;
         } catch (RuntimeException e) {
@@ -320,7 +326,6 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             return false;
         }
     }
-
     @Override
     public void skipCurrentImage(ConfigQcContext context) {
         setStatus("Skipped this image; saved Classical segmentation settings are unchanged.");
@@ -386,6 +391,13 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     void setThresholdForTest(double lower, double upper) {
         if (thresholdControl != null) {
             thresholdControl.setThreshold(lower, upper);
+            updateThresholdPreview(true);
+        }
+    }
+
+    void setAlgorithmThresholdForTest(String method, String background) {
+        if (thresholdControl != null) {
+            thresholdControl.setAutoThresholdToken(ThresholdOps.formatAutoToken(method, background));
             updateThresholdPreview(true);
         }
     }
@@ -565,6 +577,10 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
             return;
         }
         String token = ChannelThresholdStage.normalizeThresholdToken(thresholdStore.get());
+        if (ThresholdOps.isAutoThresholdToken(token)) {
+            thresholdControl.setAutoThresholdToken(token);
+            return;
+        }
         if (ChannelThresholdStage.isNumericThresholdToken(token)) {
             try {
                 double lower = Double.parseDouble(token);
@@ -1001,11 +1017,15 @@ public final class ClassicalSegmentationStage implements ConfigQcStage {
     private String currentThresholdToken() {
         return thresholdControl == null
                 ? ""
-                : ChannelThresholdStage.formatThreshold(thresholdControl.getLowerThreshold());
+                : (thresholdControl.isAlgorithmThresholdSelected()
+                ? thresholdControl.getAutoThresholdToken()
+                : ChannelThresholdStage.formatThreshold(thresholdControl.getLowerThreshold()));
     }
 
     private int currentThresholdValue() {
-        return Integer.parseInt(currentThresholdToken());
+        return thresholdControl == null
+                ? 0
+                : Math.max(0, (int) Math.round(thresholdControl.getLowerThreshold()));
     }
 
     private String thresholdStaleText() {

@@ -202,6 +202,29 @@ public class SegmentationMethodStageTest {
         stage.onLeave(context);
     }
 
+    @Test
+    public void onEnterUsesConfiguredThirdChannelWhenImageReportsOneChannel() throws Exception {
+        SegmentationMethodStage stage = new SegmentationMethodStage(new RecordingStore());
+        ImagePlus source = underReportedThreeChannelStack("Image A");
+        ConfigQcContext context = ConfigQcContext.fromImages(
+                null,
+                null,
+                null,
+                Arrays.asList(source),
+                Arrays.asList("C1", "C2", "C3"),
+                2);
+        PreviewPairPanel preview = new PreviewPairPanel("Original", "Adjusted");
+
+        stage.onEnter(context, preview);
+
+        ImagePlus shown = originalImageFrom(preview);
+        assertNotNull(shown);
+        assertEquals(1, shown.getNChannels());
+        assertEquals(33, shown.getStack().getProcessor(1).getPixel(0, 0));
+
+        stage.onLeave(context);
+    }
+
     private static void selectRadio(JComponent root, String actionCommand) {
         JRadioButton button = findRadio(root, actionCommand);
         if (button == null) {
@@ -310,6 +333,20 @@ public class SegmentationMethodStageTest {
         image.setOpenAsHyperStack(true);
         image.setPosition(1, 1, 1);
         return image;
+    }
+
+    private static ImagePlus underReportedThreeChannelStack(String title) {
+        ImageStack stack = new ImageStack(2, 2);
+        ByteProcessor channelOne = new ByteProcessor(2, 2);
+        ByteProcessor channelTwo = new ByteProcessor(2, 2);
+        ByteProcessor channelThree = new ByteProcessor(2, 2);
+        channelOne.set(0, 0, 11);
+        channelTwo.set(0, 0, 22);
+        channelThree.set(0, 0, 33);
+        stack.addSlice("C1", channelOne);
+        stack.addSlice("C2", channelTwo);
+        stack.addSlice("C3", channelThree);
+        return new ImagePlus(title, stack);
     }
 
     private static ImagePlus originalImageFrom(PreviewPairPanel preview) throws Exception {
