@@ -7,6 +7,7 @@ import flash.pipeline.analyses.wizard.AggregationPreset;
 import flash.pipeline.analyses.wizard.AggregationPresetIO;
 import flash.pipeline.analyses.wizard.SpatialPreset;
 import flash.pipeline.analyses.wizard.SpatialPresetIO;
+import flash.pipeline.atlas.AtlasRegionColumns;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
@@ -310,6 +311,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         Set<String> safeAnimals = animals == null ? new LinkedHashSet<String>() : animals;
 
         PipelineDialog dialog = new PipelineDialog("Master Data Aggregation", PipelineDialog.Phase.EXPORT);
+        dialog.setWorkflowTracker(new String[]{"Setup", "Run"}, 0);
 
         JPanel main = new JPanel(new GridBagLayout());
         main.setBorder(BorderFactory.createEmptyBorder(12, 16, 8, 16));
@@ -1248,12 +1250,20 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             Integer regionCol = colIdx.get("Region");
             Integer scnCol = colIdx.get("SCN");
             Integer hemisphereCol = colIdx.get("Hemisphere");
+            Integer objectVolumeCol = colIdx.get("Volume (micron^3)");
             if (animalCol == null) {
                 IJ.log("  'Animal Name' column not found in " + csvFile.getName() + ", skipping");
                 continue;
             }
             AggregationConfig.Granularity granularity = aggregationConfig.getGranularity();
+            int skippedZeroVolumeRows = 0;
             for (String[] row : rows) {
+                // REGRESSION GUARD: zero-volume rows are no-object placeholders,
+                // not detections, and must not contribute to object summaries.
+                if (!hasPositiveObjectVolume(row, objectVolumeCol)) {
+                    skippedZeroVolumeRows++;
+                    continue;
+                }
                 String animal = safeGet(row, animalCol).trim();
                 if (animal.isEmpty()) continue;
                 String groupKey = composeGroupKey(animal, granularity,
@@ -1276,6 +1286,11 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                     }
                     scns.add(sectionKey);
                 }
+            }
+            if (skippedZeroVolumeRows > 0) {
+                IJ.log("  Skipped " + skippedZeroVolumeRows
+                        + " zero-volume object row(s) in " + csvFile.getName()
+                        + " so placeholders are not counted in summaries.");
             }
 
             // Update numSections from this channel data if not already set (keyed by parent animal)
@@ -1395,64 +1410,16 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                     summableColumns.add(prefix + "VolNonColocCount" + p);
                 }
 
-                // Distance / spatial / intensity-coloc metrics.
-                // Scan header for columns matching known generated patterns.
+                // Object, colocalization, and spatial metrics.
+                // Keep this data-driven: object/spatial producers add new numeric columns over
+                // time, and the project summary should not require a new allowlist entry for each.
                 for (int hi = 0; hi < header.length; hi++) {
                     String h = header[hi].trim();
                     String normalizedHeader = normalizeAggregationMetricHeader(h);
-                    boolean isTextureCol = normalizedHeader.startsWith("MorphTexture_");
-                    boolean isRoiCostesCol = normalizedHeader.startsWith(channelName + "_ROICostesTa_")
-                            || normalizedHeader.startsWith(channelName + "_ROICostesTb_")
-                            || normalizedHeader.startsWith(channelName + "_ROICostesP_");
-                    boolean isSpatialCol = normalizedHeader.contains("_DistToClosest_")
-                            || h.contains("_DistTo_")
-                            || normalizedHeader.contains("_VolContains")
-                            || normalizedHeader.startsWith("Voronoi_")
-                            || CHANNEL_AGNOSTIC_MORPH_COLS.contains(normalizedHeader)
-                            || isTextureCol
-                            || normalizedHeader.equals("Cluster")
-                            || normalizedHeader.startsWith(channelName + "_ObjPearson_")
-                            || normalizedHeader.startsWith(channelName + "_ObjMandersM1_")
-                            || normalizedHeader.startsWith(channelName + "_ObjMandersM2_")
-                            || normalizedHeader.startsWith(channelName + "_ObjCostesTa_")
-                            || normalizedHeader.startsWith(channelName + "_ObjCostesTb_")
-                            || normalizedHeader.startsWith(channelName + "_ObjPearsonT_")
-                            || normalizedHeader.startsWith(channelName + "_ObjCostesP_")
-                            || isRoiCostesCol
-                            || normalizedHeader.startsWith(channelName + "_Pearson_")
-                            || normalizedHeader.startsWith(channelName + "_Manders_M1_")
-                            || normalizedHeader.startsWith(channelName + "_Manders_M2_")
-                            || normalizedHeader.startsWith(channelName + "_Costes_Ta_")
-                            || normalizedHeader.startsWith(channelName + "_Costes_Tb_")
-                            || normalizedHeader.startsWith(channelName + "_Costes_p_");
-                    if (!isSpatialCol) continue;
-
-                    // Output column name: strip threshold digits from VolContains for clean aggregated names
-                    String cleanH = normalizedHeader.replaceAll("(_VolContains)\\d+(_)", "$1$2");
-                    boolean modal = "MorphTexture_ClassLabel".equals(cleanH)
-                            || "MorphTexture_Class3DLabel".equals(cleanH);
-                    // Add channel prefix for columns that don't already contain it
-                    // (channel-agnostic Morph_, MorphTexture_, Voronoi_, Cluster - see needsChannelPrefix).
-                    boolean needsPrefix = needsChannelPrefix(cleanH);
-                    String outCol = (needsPrefix ? prefix : "") + cleanH + (modal ? "Mode" : "Mean");
-                    metrics.put(outCol, modal
-                            ? modalIntegerValue(animalRows, hi)
-                            : (isRoiCostesCol
-                                    ? meanFiniteValueByUniqueSection(
-                                            animalRows, hi, scnCol, roiCol, regionCol, hemisphereCol)
-                                    : meanFiniteValue(animalRows, hi)));
-                    if (textureClassFractions && modal) {
-                        ClassFractionAggregation fractions = classFractionValues(
-                                animalRows, hi, (needsPrefix ? prefix : "") + cleanH + "_Fraction_");
-                        metrics.putAll(fractions.values);
-                        if (fractions.capped
-                                && classFractionCapWarnings.add(channelName + "|" + cleanH)) {
-                            IJ.log("  WARNING: Texture class fraction aggregation for "
-                                    + channelName + " " + cleanH + " observed class label "
-                                    + fractions.maxLabel + " and is capped at "
-                                    + MAX_TEXTURE_CLASS_FRACTION_COLUMNS + " fraction columns.");
-                        }
-                    }
+                    if (skipObjectSummaryMetricColumn(h, normalizedHeader)) continue;
+                    aggregateObjectMetricColumn(
+                            metrics, summableColumns, channelName, animalRows, hi, normalizedHeader,
+                            scnCol, roiCol, regionCol, hemisphereCol, classFractionCapWarnings);
                 }
 
                 // numSections for this group (stored once, not per-channel)
@@ -2404,6 +2371,153 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         return n > 0 ? sum / n : 0.0;
     }
 
+    private void aggregateObjectMetricColumn(LinkedHashMap<String, Double> metrics,
+                                             Set<String> summableColumns,
+                                             String channelName,
+                                             List<String[]> rows,
+                                             int columnIndex,
+                                             String normalizedHeader,
+                                             Integer scnCol,
+                                             Integer roiCol,
+                                             Integer regionCol,
+                                             Integer hemisphereCol,
+                                             Set<String> classFractionCapWarnings) {
+        String cleanH = normalizedHeader.replaceAll("(_VolContains)\\d+(_)", "$1$2");
+        FiniteColumnStats stats = finiteColumnStats(rows, columnIndex);
+        if (stats.n == 0) {
+            return;
+        }
+
+        boolean needsPrefix = needsObjectMetricChannelPrefix(cleanH, channelName);
+        String outputBase = (needsPrefix ? channelName + "_" : "") + cleanH;
+
+        if (isModalObjectMetric(cleanH)) {
+            metrics.put(outputBase + "Mode", modalIntegerValue(rows, columnIndex));
+            if (textureClassFractions && cleanH.startsWith("MorphTexture_Class")) {
+                ClassFractionAggregation fractions = classFractionValues(
+                        rows, columnIndex, outputBase + "_Fraction_");
+                metrics.putAll(fractions.values);
+                if (fractions.capped
+                        && classFractionCapWarnings.add(channelName + "|" + cleanH)) {
+                    IJ.log("  WARNING: Texture class fraction aggregation for "
+                            + channelName + " " + cleanH + " observed class label "
+                            + fractions.maxLabel + " and is capped at "
+                            + MAX_TEXTURE_CLASS_FRACTION_COLUMNS + " fraction columns.");
+                }
+            }
+            return;
+        }
+
+        if (isBinaryObjectFlagMetric(cleanH, stats)) {
+            String countColumn = outputBase + "Count";
+            metrics.put(countColumn, (double) stats.positiveCount);
+            summableColumns.add(countColumn);
+            metrics.put(outputBase + "%", stats.n == 0
+                    ? 0.0 : ((double) stats.positiveCount / stats.n) * 100.0);
+            return;
+        }
+
+        if (isCountLikeObjectMetric(cleanH)) {
+            String totalColumn = outputBase + "Total";
+            metrics.put(totalColumn, stats.sum);
+            summableColumns.add(totalColumn);
+            metrics.put(outputBase + "Mean", stats.sum / stats.n);
+            return;
+        }
+
+        boolean repeatedSectionMetric = isRepeatedSectionObjectMetric(cleanH, channelName);
+        metrics.put(outputBase + "Mean", repeatedSectionMetric
+                ? meanFiniteValueByUniqueSection(rows, columnIndex, scnCol, roiCol, regionCol, hemisphereCol)
+                : stats.sum / stats.n);
+    }
+
+    private static boolean skipObjectSummaryMetricColumn(String rawHeader, String normalizedHeader) {
+        if (rawHeader == null || rawHeader.trim().isEmpty()) return true;
+        String h = rawHeader.trim();
+        if (RunIdCsv.RUN_ID_COLUMN.equals(h)) return true;
+        if ("Animal Name".equals(h) || "AnimalName".equals(h)
+                || AggregationConditionSupport.CONDITION_COLUMN.equals(h)
+                || "ROI".equals(h) || "ROI Set".equals(h)
+                || "Region".equals(h) || "Hemisphere".equals(h)
+                || "SCN".equals(h) || "Label".equals(h)) {
+            return true;
+        }
+        if (AtlasRegionColumns.isAtlasColumn(h)) return true;
+        if ("Volume (micron^3)".equals(h)
+                || "Surface (micron^2)".equals(h)
+                || "IntDen".equals(h)
+                || "Mean".equals(h)
+                || "XM".equals(h)
+                || "YM".equals(h)) {
+            return true;
+        }
+        if (h.startsWith("Colocalisation with ")) return true;
+        return normalizedHeader != null && normalizedHeader.contains("_VolOverlap");
+    }
+
+    private static boolean needsObjectMetricChannelPrefix(String header, String channelName) {
+        if (header == null || header.isEmpty()) return false;
+        if (needsChannelPrefix(header)) return true;
+        if (channelName != null && !channelName.isEmpty()
+                && header.startsWith(channelName + "_")) {
+            return false;
+        }
+        if (header.startsWith("Morph_")) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isRepeatedSectionObjectMetric(String header, String channelName) {
+        if (header == null || channelName == null) return false;
+        return header.startsWith(channelName + "_ROICostesTa_")
+                || header.startsWith(channelName + "_ROICostesTb_")
+                || header.startsWith(channelName + "_ROICostesP_");
+    }
+
+    private static boolean isModalObjectMetric(String header) {
+        return "Cluster".equals(header)
+                || "MorphTexture_ClassLabel".equals(header)
+                || "MorphTexture_Class3DLabel".equals(header);
+    }
+
+    private static boolean isBinaryObjectFlagMetric(String header, FiniteColumnStats stats) {
+        if (header == null || stats == null || !stats.allBinary) return false;
+        return header.contains("_CPCColoc_")
+                || header.contains("_BBCPCColoc_")
+                || header.matches(".*_VolColoc\\d+_.*")
+                || header.matches(".*_BBColoc\\d+_.*")
+                || header.matches(".*_BBVolColoc\\d+_.*")
+                || header.endsWith("Flag");
+    }
+
+    private static boolean isCountLikeObjectMetric(String header) {
+        if (header == null) return false;
+        return header.contains("_CPCContains_")
+                || header.contains("_BBCPCContains_")
+                || header.contains("_VolContains_")
+                || header.endsWith("_CPCTargetsHit")
+                || header.endsWith("_BBCPCTargetsHit");
+    }
+
+    private static FiniteColumnStats finiteColumnStats(List<String[]> rows, int columnIndex) {
+        FiniteColumnStats stats = new FiniteColumnStats();
+        if (rows == null) return stats;
+        for (String[] row : rows) {
+            double value = parseDouble(safeGet(row, columnIndex));
+            if (Double.isNaN(value)) continue;
+            stats.n++;
+            stats.sum += value;
+            if (value > 0.0) {
+                stats.positiveCount++;
+            }
+            if (!(value == 0.0 || value == 1.0)) {
+                stats.allBinary = false;
+            }
+        }
+        return stats;
+    }
+
     private static String repeatedSectionMetricKey(String[] row,
                                                    Integer scnCol,
                                                    Integer roiCol,
@@ -2495,6 +2609,13 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
             this.capped = capped;
             this.maxLabel = maxLabel;
         }
+    }
+
+    private static final class FiniteColumnStats {
+        double sum = 0.0;
+        int n = 0;
+        int positiveCount = 0;
+        boolean allBinary = true;
     }
 
     private static final class ClassifiedIntensityCsv {
@@ -2712,6 +2833,12 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
     private static String safeGet(String[] arr, Integer idx) {
         if (idx == null || idx < 0 || idx >= arr.length) return "";
         return arr[idx];
+    }
+
+    private static boolean hasPositiveObjectVolume(String[] row, Integer volumeCol) {
+        if (volumeCol == null) return true;
+        double volume = parseDouble(safeGet(row, volumeCol));
+        return !Double.isNaN(volume) && volume > 0.0;
     }
 
     private static int columnIndex(Map<String, Integer> colIdx, String preferred, String legacy) {

@@ -45,6 +45,7 @@ import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.ResolvedImageMetadata;
 import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.progress.AnalysisProgressReporter;
 import flash.pipeline.recipes.RecipeReplayModelResolver;
 import flash.pipeline.results.ObjectAnalysisDetailsWriter;
 import flash.pipeline.results.ObjectCsvColumnOrder;
@@ -239,6 +240,21 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                                    boolean lockBBOverlap,
                                                    boolean lockBBCpc,
                                                    boolean lockBBVol);
+
+        default SpatialSetupConfig.DerivedConfig launch(String directory,
+                                                   List<String> channelNames,
+                                                   Map<String, Double> markerThresholds,
+                                                   Map<String, Double> bbThresholds,
+                                                   boolean lockVolumetricColoc,
+                                                   boolean lockCpcColoc,
+                                                   boolean lockBBOverlap,
+                                                   boolean lockBBCpc,
+                                                   boolean lockBBVol,
+                                                   String[] workflowSteps,
+                                                   int workflowActiveIndex) {
+            return launch(directory, channelNames, markerThresholds, bbThresholds,
+                    lockVolumetricColoc, lockCpcColoc, lockBBOverlap, lockBBCpc, lockBBVol);
+        }
     }
 
     private static final SpatialOptionsDialogLauncher DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER =
@@ -253,6 +269,23 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                                                   boolean lockBBOverlap,
                                                                   boolean lockBBCpc,
                                                                   boolean lockBBVol) {
+                    return launch(directory, channelNames, markerThresholds, bbThresholds,
+                            lockVolumetricColoc, lockCpcColoc, lockBBOverlap, lockBBCpc, lockBBVol,
+                            new String[]{"Setup", "Spatial Analysis", "Run"}, 1);
+                }
+
+                @Override
+                public SpatialSetupConfig.DerivedConfig launch(String directory,
+                                                                  List<String> channelNames,
+                                                                  Map<String, Double> markerThresholds,
+                                                                  Map<String, Double> bbThresholds,
+                                                                  boolean lockVolumetricColoc,
+                                                                  boolean lockCpcColoc,
+                                                                  boolean lockBBOverlap,
+                                                                  boolean lockBBCpc,
+                                                                  boolean lockBBVol,
+                                                                  String[] workflowSteps,
+                                                                  int workflowActiveIndex) {
                     SpatialAnalysis spatialOptions = new SpatialAnalysis();
                     spatialOptions.setSuppressDialogs(false);
                     spatialOptions.setMarkerThresholds(markerThresholds == null
@@ -264,7 +297,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     return spatialOptions.showOptionsDialogForChainedRun(
                             directory, channelNames, lockVolumetricColoc, lockCpcColoc,
                             lockBBOverlap, lockBBCpc, lockBBVol,
-                            NextStepLabels.RUN_3D_OBJECT_ANALYSIS);
+                            NextStepLabels.RUN_3D_OBJECT_ANALYSIS,
+                            workflowSteps, workflowActiveIndex);
                 }
             };
 
@@ -320,6 +354,11 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     private boolean useDeconvolvedInput = true;
     private CLIConfig cliConfig = null;
     private AnalysisRunContext runRecordContext = null;
+    private AnalysisProgressReporter objectProgressReporter = AnalysisProgressReporter.disabled();
+    private final ThreadLocal<AnalysisProgressReporter.WorkHandle> objectImageProgress =
+            new ThreadLocal<AnalysisProgressReporter.WorkHandle>();
+    private final ThreadLocal<AnalysisProgressReporter.WorkHandle> objectRoiProgress =
+            new ThreadLocal<AnalysisProgressReporter.WorkHandle>();
 
     /** Shared lock for all legacy ImageJ1/plugin paths that touch WindowManager or Prefs. */
     private static final ReentrantLock COUNTER3D_LOCK = WindowManagerLock.LOCK;
@@ -967,9 +1006,13 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
                 final Runnable updatePrimaryLabel = new Runnable() {
                     @Override public void run() {
+                        boolean processLengthSelected = isSelected(objectBindings.extractProcessLengthToggle);
+                        boolean spatialSelected = isSelected(objectBindings.runSpatialToggle);
                         gdOpts.setPrimaryButtonText(NextStepLabels.afterThreeDObjectMain(
-                                isSelected(objectBindings.extractProcessLengthToggle),
-                                isSelected(objectBindings.runSpatialToggle)));
+                                processLengthSelected,
+                                spatialSelected));
+                        gdOpts.setWorkflowTracker(
+                                threeDObjectWorkflow(processLengthSelected, spatialSelected), 0);
                     }
                 };
                 objectBindings.primaryLabelUpdater = updatePrimaryLabel;
@@ -1046,6 +1089,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 }
 
                 PipelineDialog gdPA = new PipelineDialog("Process Analysis", PipelineDialog.Phase.ANALYSE);
+                gdPA.setWorkflowTracker(threeDObjectWorkflow(true, runSpatial), 1);
                 gdPA.enableBackButton();
                 gdPA.setPrimaryButtonText(NextStepLabels.afterThreeDObjectProcess(runSpatial));
                 gdPA.addAnalysisHelpHeader("3D Object Analysis", FLASH_Pipeline.IDX_3D_OBJECT);
@@ -1239,44 +1283,55 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             return;
         }
 
-        if (parallelThreads > 1) {
-            // ── Parallel processing: bounded producer-consumer queue ──
-            List<Integer> indicesToProcess = new ArrayList<Integer>();
-            for (int i = 0; i < totalImages; i++) {
-                indicesToProcess.add(i);
+        int plannedProgressUnits = totalImages + countPlannedObjectRoiTasks(totalImages, roiSets);
+        objectProgressReporter = createProgressReporter("3D Object Analysis", plannedProgressUnits);
+        objectProgressReporter.setPhase("image and ROI analysis");
+        try {
+            if (parallelThreads > 1) {
+                // ── Parallel processing: bounded producer-consumer queue ──
+                List<Integer> indicesToProcess = new ArrayList<Integer>();
+                for (int i = 0; i < totalImages; i++) {
+                    indicesToProcess.add(i);
+                }
+                // WindowManager-dependent work is serialized separately, so StarDist no longer
+                // forces the whole analysis down to a single worker.
+                int effectiveLoaders = 1;
+                int effectiveWorkers = Math.max(1, parallelThreads - effectiveLoaders);
+                int bufferSize = Math.min(4, Math.max(2, effectiveWorkers));
+                int safeWorkers = AdaptiveParallelism.computeAndLog(supplier, effectiveWorkers, bufferSize);
+                BoundedImageLoader loader = new BoundedImageLoader(supplier, indicesToProcess, bufferSize,
+                        effectiveLoaders, useTifCache && !useDeconvolvedInput, directory);
+                try {
+                    List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+                    List<String> names = new ArrayList<String>();
+                    for (SeriesMeta m : metas) names.add(m.name);
+                    loader.setSeriesNames(names);
+                } catch (Exception e) {
+                    String message = "    - WARNING: Could not read series names for 3D object loader progress in "
+                            + directory + ": " + e.getMessage();
+                    IJ.log(message);
+                    recordWarn(message);
+                }
+                loader.start();
+                IJ.log("Thread split: " + effectiveLoaders + " loaders, " + safeWorkers + " workers");
+                compactLog = true;
+                processImagesParallel(loader, safeWorkers, directory, cfg, outDir, imageRoot, channelTables,
+                        roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
+                        analysisStartTime);
+                compactLog = false;
+            } else {
+                compactLog = false;
+                // ── Sequential processing: deferred loading with prefetch ──
+                processImagesSequential(supplier, totalImages, directory, cfg, outDir, imageRoot, channelTables,
+                        roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
+                        analysisStartTime);
             }
-            // WindowManager-dependent work is serialized separately, so StarDist no longer
-            // forces the whole analysis down to a single worker.
-            int effectiveLoaders = 1;
-            int effectiveWorkers = Math.max(1, parallelThreads - effectiveLoaders);
-            int bufferSize = Math.min(4, Math.max(2, effectiveWorkers));
-            int safeWorkers = AdaptiveParallelism.computeAndLog(supplier, effectiveWorkers, bufferSize);
-            BoundedImageLoader loader = new BoundedImageLoader(supplier, indicesToProcess, bufferSize,
-                    effectiveLoaders, useTifCache && !useDeconvolvedInput, directory);
-            try {
-                List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
-                List<String> names = new ArrayList<String>();
-                for (SeriesMeta m : metas) names.add(m.name);
-                loader.setSeriesNames(names);
-            } catch (Exception e) {
-                String message = "    - WARNING: Could not read series names for 3D object loader progress in "
-                        + directory + ": " + e.getMessage();
-                IJ.log(message);
-                recordWarn(message);
-            }
-            loader.start();
-            IJ.log("Thread split: " + effectiveLoaders + " loaders, " + safeWorkers + " workers");
-            compactLog = true;
-            processImagesParallel(loader, safeWorkers, directory, cfg, outDir, imageRoot, channelTables,
-                    roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
-                    analysisStartTime);
+        } finally {
+            objectProgressReporter.finish("3D Object image and ROI processing finished");
+            objectProgressReporter = AnalysisProgressReporter.disabled();
+            objectImageProgress.remove();
+            objectRoiProgress.remove();
             compactLog = false;
-        } else {
-            compactLog = false;
-            // ── Sequential processing: deferred loading with prefetch ──
-            processImagesSequential(supplier, totalImages, directory, cfg, outDir, imageRoot, channelTables,
-                    roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
-                    analysisStartTime);
         }
 
         IJ.showProgress(1.0);
@@ -1946,10 +2001,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         if (wizardSpatialConfig != null || !canShowGuiDecisionDialog()) {
             return true;
         }
+        String[] workflow = threeDObjectWorkflow(wizardExtractProcessLength, true);
         SpatialSetupConfig.DerivedConfig spatialConfig =
                 spatialOptionsDialogLauncher.launch(
                         directory, channelNames, markerThresholds, bbThresholds,
-                        doVolumetric, doCpc, doBBOverlap, doBBCpc, doBBVol);
+                        doVolumetric, doCpc, doBBOverlap, doBBCpc, doBBVol,
+                        workflow, workflowStepIndex(workflow, "Spatial Analysis"));
         if (spatialConfig == null) {
             IJ.log("[FLASH] 3D Object Analysis cancelled because Spatial Analysis options were cancelled.");
             if (canShowGuiDecisionDialog()) {
@@ -2075,6 +2132,31 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
     private static boolean isSelected(ToggleSwitch toggle) {
         return toggle != null && toggle.isSelected();
+    }
+
+    private static String[] threeDObjectWorkflow(boolean processLength, boolean spatial) {
+        List<String> steps = new ArrayList<String>();
+        steps.add("Setup");
+        if (processLength) {
+            steps.add("Process Analysis");
+        }
+        if (spatial) {
+            steps.add("Spatial Analysis");
+        }
+        steps.add("Run");
+        return steps.toArray(new String[steps.size()]);
+    }
+
+    private static int workflowStepIndex(String[] workflow, String stepName) {
+        if (workflow == null || stepName == null) {
+            return 0;
+        }
+        for (int i = 0; i < workflow.length; i++) {
+            if (stepName.equals(workflow[i])) {
+                return i;
+            }
+        }
+        return 0;
     }
 
     private static double readFirstThreshold(List<JTextField> thresholdFields) {
@@ -2294,7 +2376,11 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             IJ.log("  > ROI set: " + roiBase);
         }
 
+        boolean progressSuccess = false;
+        beginObjectRoiProgress(scnIndex, imageBindTokens == null ? scnIndex : imageBindTokens.length,
+                imp == null ? animalName : imp.getTitle(), roiBase, "channel segmentation");
         try {
+            updateObjectProgress("channel segmentation");
             boolean[] channelHasObjects =
                     run3DObjectsCounterPerChannel(directory, cfg, imp, outDir, imageRoot, channelTables, scnIndex,
                             animalName, parts,
@@ -2302,6 +2388,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             region, seriesRegionLabel, roiLabel, roiBase);
 
             IJ.log("  > Colocalization");
+            updateObjectProgress("colocalization");
             if (doVolumetric) {
                 appendColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
@@ -2328,12 +2415,24 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
 
             if (extractProcessLength && processChannels != null) {
+                updateObjectProgress("process length");
                 processLengthExtractionWithTables(cfg, channelTables, imp, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel, processChannels, nuclearMarkerIndex);
             }
 
+            updateObjectProgress("saving object label images");
             saveObjectsImages(cfg, imageRoot, animalName, hemisphere, roiLabel);
+            progressSuccess = true;
         } finally {
+            if (progressSuccess) {
+                completeObjectRoiProgress("image " + scnIndex + " ROI "
+                        + (roiBase == null || roiBase.isEmpty() ? FULL_IMAGE_ROI_SET_NAME : roiBase)
+                        + " complete");
+            } else {
+                failObjectRoiProgress("image " + scnIndex + " ROI "
+                        + (roiBase == null || roiBase.isEmpty() ? FULL_IMAGE_ROI_SET_NAME : roiBase)
+                        + " failed");
+            }
             clearRegistry();
         }
     }
@@ -2351,6 +2450,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         Future<ImagePlus> nextImage = null;
 
         for (int i = 0; i < totalImages; i++) {
+            beginObjectImageProgress(i + 1, totalImages, "image " + (i + 1), "loading");
             IJ.showStatus("Loading image " + (i + 1) + "/" + totalImages + "...");
             IJ.showProgress(i, totalImages);
 
@@ -2363,6 +2463,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     IJ.log(message);
                     recordError(message, e);
                     nextImage = null;
+                    failObjectImageProgress("image " + (i + 1) + " load failed");
                     continue;
                 }
                 nextImage = null;
@@ -2374,10 +2475,14 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     String message = "ERROR: Failed to open image " + (i + 1) + ": " + e.getMessage();
                     IJ.log(message);
                     recordError(message, e);
+                    failObjectImageProgress("image " + (i + 1) + " open failed");
                     continue;
                 }
             }
-            if (imp == null) continue;
+            if (imp == null) {
+                completeObjectImageProgress("image " + (i + 1) + " skipped (not loaded)");
+                continue;
+            }
             imp = applyConfiguredZSliceSubset(cfg, i, imp, "3D Object Analysis");
 
             // Write calibration from the first successfully-loaded image
@@ -2398,6 +2503,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
 
             String imgTitle = imp.getTitle();
+            updateObjectProgress("loaded " + imgTitle);
             int scnIndex = i + 1;
 
             ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(directory, imgTitle, i + 1);
@@ -2428,6 +2534,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
 
             logOrientationResolution(metadata);
+            updateObjectProgress("orientation");
             OrientationOps.applyTransform(imp, metadata);
 
             // Determine if the count-once-assign-per-ROI optimisation can be used.
@@ -2448,8 +2555,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 if (useSharedCounting) {
                     // Count all objects on the full image once, then assign per ROI
                     if (!compactLog) IJ.log("  Counting objects on full image (shared across " + roiSets.length + " ROI sets)...");
+                    updateObjectProgress("shared full-image counting");
                     FullImageCountData fullData = countAllChannelsFullImage(directory, cfg, imp, outDir,
                             animalName, parts == null ? "" : parts.hemisphere, null);
+                    completeObjectImageProgress("prepared " + imgTitle + " (shared full-image count)");
                     try {
                         for (RoiSetData roiSet : roiSets) {
                             processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoot,
@@ -2461,6 +2570,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     }
                 } else {
                     // Original path: count per ROI set
+                    completeObjectImageProgress("prepared " + imgTitle);
                     for (RoiSetData roiSet : roiSets) {
                         processRoiSetForImage(directory, cfg, imp, outDir, imageRoot, channelTables,
                                 i, scnIndex, animalName, parts,
@@ -2471,6 +2581,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             } catch (Exception ex) {
                 IJ.handleException(ex);
                 recordError("3D Object Analysis failed while processing image " + (i + 1), ex);
+                failObjectImageProgress("image " + (i + 1) + " failed");
             } finally {
                 imp.changes = false;
                 imp.close();
@@ -2535,8 +2646,15 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         int scnIndex = idx + 1;
                         String imgTitle = imp == null ? "<null image>" : imp.getTitle();
                         String partLabel = imgTitle;
+                        beginObjectImageProgress(scnIndex, total, partLabel,
+                                "worker " + workerNum + " loaded image");
                         imp = applyConfiguredZSliceSubset(cfg, idx, imp, "3D Object Analysis");
                         imgTitle = imp == null ? imgTitle : imp.getTitle();
+                        updateObjectProgress("loaded " + imgTitle);
+                        if (imp == null) {
+                            completeObjectImageProgress("image " + scnIndex + " skipped (not loaded)");
+                            continue;
+                        }
 
                         // Write calibration from the first image (thread-safe)
                         if (calibrationWritten.compareAndSet(false, true)) {
@@ -2584,6 +2702,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             }
 
                             logOrientationResolution(metadata);
+                            updateObjectProgress("orientation");
                             OrientationOps.applyTransform(imp, metadata);
 
                             // Check if count-once optimisation applies (incl. heap budget)
@@ -2599,8 +2718,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
                             if (useSharedCounting) {
                                 if (!compactLog) IJ.log("  Counting objects on full image (shared across " + roiSets.length + " ROI sets)...");
+                                updateObjectProgress("shared full-image counting");
                                 FullImageCountData fullData = countAllChannelsFullImage(directory, cfg, imp, outDir,
                                         animalName, parts == null ? "" : parts.hemisphere, null);
+                                completeObjectImageProgress("prepared " + partLabel + " (shared full-image count)");
                                 try {
                                     for (RoiSetData roiSet : roiSets) {
                                         processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoot,
@@ -2611,6 +2732,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                     cleanupFullImageData(fullData);
                                 }
                             } else {
+                                completeObjectImageProgress("prepared " + partLabel);
                                 for (RoiSetData roiSet : roiSets) {
                                     processRoiSetForImage(directory, cfg, imp, outDir, imageRoot, localChannelTables,
                                             idx, scnIndex, animalName, parts,
@@ -2665,14 +2787,17 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             failures.add(contextual);
                             IJ.log("[" + scnIndex + "/" + total + "] ERROR: " + contextual.getMessage());
                             recordError(contextual.getMessage(), contextual);
+                            failObjectImageProgress("image " + scnIndex + " failed");
                             int done = completed.incrementAndGet();
                             IJ.showProgress(done, total);
                             IJ.showStatus("Processing " + done + "/" + total + " (failed)");
                         } finally {
                             // Close image after processing
-                            imp.changes = false;
-                            imp.close();
-                            imp.flush();
+                            if (imp != null) {
+                                imp.changes = false;
+                                imp.close();
+                                imp.flush();
+                            }
 
                             ParallelContext.exitParallel();
                             // Clear thread-local registry
@@ -2824,16 +2949,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
 
             String thrToken = cfg.channelThresholds.get(c);
-            Double threshold = tryParseDouble(thrToken);
-            if (threshold == null) {
-                if ("default".equalsIgnoreCase(thrToken)) {
-                    threshold = ThresholdOps.defaultDarkThresholdAtSlice6(filteredImg);
-                } else {
-                    subtracted.changes = false;
-                    subtracted.close();
-                    subtracted.flush();
-                    continue;
-                }
+            double threshold = ThresholdOps.thresholdFromTokenAtSlice(filteredImg, thrToken, 6, false);
+            if (!Double.isFinite(threshold)) {
+                subtracted.changes = false;
+                subtracted.close();
+                subtracted.flush();
+                continue;
             }
 
             String sizeToken = cfg.channelSizes.get(c);
@@ -3290,6 +3411,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         }
 
         // Use a thread pool for parallel filtering (cap at 4 to avoid memory pressure)
+        updateObjectProgress("filtering " + n + " channel(s)");
         int filterThreads = Math.min(n, 4);
         final ImagePlus[] cellposeCompanionSources = snapshotCellposeCompanionSources(chans, cpSecondChannel, channelNames);
         if (filterThreads > 1) {
@@ -3405,6 +3527,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
 
             String channelName = fr.channelName;
+            updateObjectProgress("counting " + channelName + " (" + (c + 1) + "/" + n + ")");
             if (!compactLog) IJ.log("  > Channel " + (c + 1) + "/" + n + ": " + channelName);
 
             if (fr.skipped) {
@@ -3473,7 +3596,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         }
                     }
 
-                    int objectCount = res.getStatistics() == null ? 0 : res.getStatistics().size();
+                    int objectCount = countCountableObjectRows(res.getStatistics());
                     if (!compactLog) {
                         IJ.log("    - [Ch " + (c + 1) + "] " + fr.segmentationSummary
                                 + ": " + objectCount + " objects detected");
@@ -3545,7 +3668,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                 stats,
                                 objectMap,
                                 recounted.getMaskedImage(),
-                                stats != null && stats.size() > 0 && objectMap != null);
+                                hasCountableObjectRows(stats) && objectMap != null);
                     } else if (useNative) {
                         // Native mcib3d path — thread-safe, no lock needed
                         res = ocWrapper.runNative(
@@ -3580,12 +3703,13 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         }
                     }
 
-                    int objectCount = res.getStatistics() == null ? 0 : res.getStatistics().size();
+                    int objectCount = countCountableObjectRows(res.getStatistics());
                     long counterMs = System.currentTimeMillis() - counterStart;
-                    // Always log object count with channel tag (matches StarDist format)
-                    IJ.log("    " + (fr.enhancedClassical ? "EnhancedClassical" : "3DObjectCounter")
-                            + " [" + channelName + "]: "
-                            + objectCount + " objects detected (" + counterMs + " ms)");
+                    if (!compactLog) {
+                        IJ.log("    " + (fr.enhancedClassical ? "EnhancedClassical" : "3DObjectCounter")
+                                + " [" + channelName + "]: "
+                                + objectCount + " objects detected (" + counterMs + " ms)");
+                    }
                     if (!compactLog && verboseLogging) {
                         IJ.log("    [DEBUG] Size range (voxels): " + fr.minSizeVox + "-" + fr.maxSizeVox);
                         IJ.log("    [DEBUG] Redirect target: " + channelName + "_unfiltered");
@@ -3604,9 +3728,11 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         int beforeFilter = objectCount;
                         int removed = region.filterByCentroid(res.getObjectsMap());
                         int afterFilter = beforeFilter - removed;
-                        IJ.log("    3DObjectCounter [" + channelName + "] ROI filter: "
-                                + beforeFilter + " \u2192 " + afterFilter
-                                + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
+                        if (!compactLog) {
+                            IJ.log("    3DObjectCounter [" + channelName + "] ROI filter: "
+                                    + beforeFilter + " \u2192 " + afterFilter
+                                    + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
+                        }
 
                         // Choice (a): keep whole objects — crop to the region bounding
                         // box only (no shape mask). Coordinates become region-relative.
@@ -3631,7 +3757,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             // QC invariant: cropping relocates objects, it must not
                             // destroy or create them. A mismatch flags a coordinate
                             // problem (e.g. the wrong ROI driving the geometry).
-                            int finalCount = res.getStatistics() == null ? 0 : res.getStatistics().size();
+                            int finalCount = countCountableObjectRows(res.getStatistics());
                             logRegionCropQc(channelName, roiSetName, afterFilter, finalCount);
                         }
                     }
@@ -3642,7 +3768,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     registerImage(channelName + "_objects", objects, false);
                 }
 
-                channelHasObjects[c] = res.isFoundObjects() && objects != null;
+                channelHasObjects[c] = hasCountableObjectRows(res.getStatistics()) && objects != null;
 
                 appendStatsToChannelTable(res.getStatistics(), channelTables.get(channelName), scnIndex, animalName, hemisphere, regionLabel, roiLabel);
 
@@ -3780,6 +3906,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         }
 
         // Parallel filter (same logic as run3DObjectsCounterPerChannel Phase A)
+        updateObjectProgress("filtering " + n + " channel(s) for shared count");
         int filterThreads = Math.min(n, 4);
         final ImagePlus[] cellposeCompanionSources = snapshotCellposeCompanionSources(chans, cpSecondChannel, channelNames);
         if (filterThreads > 1) {
@@ -3869,6 +3996,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             if (fr == null || fr.skipped) continue;
 
             String channelName = fr.channelName;
+            updateObjectProgress("shared count " + channelName + " (" + (c + 1) + "/" + n + ")");
             if (!compactLog) IJ.log("  > [shared count] Channel " + (c + 1) + "/" + n + ": " + channelName);
 
             try {
@@ -3877,10 +4005,11 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             fr.labelImage, fr.unfiltered,
                             fr.minSizeVox, fr.maxSizeVox,
                             true, true);
-                    int objectCount = countResults[c].getStatistics() == null
-                            ? 0 : countResults[c].getStatistics().size();
-                    IJ.log("    3DObjectCounter [" + channelName + "]: "
-                            + objectCount + " objects detected (" + fr.segmentationName + ", full image)");
+                    int objectCount = countCountableObjectRows(countResults[c].getStatistics());
+                    if (!compactLog) {
+                        IJ.log("    3DObjectCounter [" + channelName + "]: "
+                                + objectCount + " objects detected (" + fr.segmentationName + ", full image)");
+                    }
                 } else {
                     // Classical: threshold + native counting
                     long counterStart = System.currentTimeMillis();
@@ -3917,7 +4046,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                 stats,
                                 objectMap,
                                 recounted.getMaskedImage(),
-                                stats != null && stats.size() > 0 && objectMap != null);
+                                hasCountableObjectRows(stats) && objectMap != null);
                     } else {
                         countResults[c] = ocWrapper.runNative(
                                 fr.filtered,
@@ -3927,14 +4056,15 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                                 fr.unfiltered,  // redirect
                                 true, true);
                     }
-                    int objectCount = countResults[c].getStatistics() == null
-                            ? 0 : countResults[c].getStatistics().size();
+                    int objectCount = countCountableObjectRows(countResults[c].getStatistics());
                     long counterMs = System.currentTimeMillis() - counterStart;
-                    IJ.log("    " + (fr.enhancedClassical ? "EnhancedClassical" : "3DObjectCounter")
-                            + " [" + channelName + "]: "
-                            + objectCount + " objects detected (" + counterMs + " ms, full image)");
+                    if (!compactLog) {
+                        IJ.log("    " + (fr.enhancedClassical ? "EnhancedClassical" : "3DObjectCounter")
+                                + " [" + channelName + "]: "
+                                + objectCount + " objects detected (" + counterMs + " ms, full image)");
+                    }
                 }
-                channelHasObjects[c] = countResults[c].isFoundObjects()
+                channelHasObjects[c] = hasCountableObjectRows(countResults[c].getStatistics())
                         && countResults[c].getObjectsMap() != null;
             } catch (Throwable t) {
                 IJ.log("    ERROR counting " + channelName
@@ -3987,6 +4117,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             IJ.log("  > Assigning objects to ROI set: " + roiBase);
         }
 
+        boolean progressSuccess = false;
+        beginObjectRoiProgress(scnIndex, imageBindTokens == null ? scnIndex : imageBindTokens.length,
+                imp == null ? animalName : imp.getTitle(), roiBase, "assigning shared-count objects");
         try {
             ObjectsCounter3DWrapper ocWrapper = new ObjectsCounter3DWrapper();
             boolean[] channelHasObjects = new boolean[fullData.numChannels];
@@ -3997,6 +4130,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 if (fr == null || fr.skipped || fullRes == null) continue;
 
                 String channelName = fr.channelName;
+                updateObjectProgress("assigning " + channelName + " to ROI");
 
                 // Clone the full-image label map
                 ImagePlus roiLabels = fullRes.getObjectsMap() != null
@@ -4011,13 +4145,15 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 int afterFilter = -1;
                 if (region != null && roiLabels != null) {
                     int beforeFilter = fullData.channelHasObjects[c]
-                            ? (fullRes.getStatistics() != null ? fullRes.getStatistics().size() : 0)
+                            ? countCountableObjectRows(fullRes.getStatistics())
                             : 0;
                     int removed = region.filterByCentroid(roiLabels);
                     afterFilter = beforeFilter - removed;
-                    IJ.log("    3DObjectCounter [" + channelName + "] ROI filter: "
-                            + beforeFilter + " \u2192 " + afterFilter
-                            + " objects (" + removed + " outside " + roiBase + " ROI removed)");
+                    if (!compactLog) {
+                        IJ.log("    3DObjectCounter [" + channelName + "] ROI filter: "
+                                + beforeFilter + " \u2192 " + afterFilter
+                                + " objects (" + removed + " outside " + roiBase + " ROI removed)");
+                    }
                 }
 
                 // Crop to the region bounding box ONLY (choice a — keep whole objects);
@@ -4037,7 +4173,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 }
                 // QC invariant: cropping relocates objects, it must not lose/create them.
                 if (afterFilter >= 0) {
-                    int finalCount = roiRes.getStatistics() == null ? 0 : roiRes.getStatistics().size();
+                    int finalCount = countCountableObjectRows(roiRes.getStatistics());
                     logRegionCropQc(channelName, roiBase, afterFilter, finalCount);
                 }
 
@@ -4054,7 +4190,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     registerImage(channelName + "_objects", roiObjMap, false);
                 }
 
-                channelHasObjects[c] = roiRes.isFoundObjects() && roiObjMap != null;
+                channelHasObjects[c] = hasCountableObjectRows(roiRes.getStatistics()) && roiObjMap != null;
 
                 // Append per-ROI stats to channel table
                 appendStatsToChannelTable(roiRes.getStatistics(), channelTables.get(channelName),
@@ -4095,18 +4231,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         skelDup.setTitle(skelName);
 
                         String thrToken = cfg.channelThresholds.get(c);
-                        Double skelThr = tryParseDouble(thrToken);
-                        if (skelThr == null && "default".equalsIgnoreCase(thrToken)) {
-                            ij.ImageStack binStack = skelDup.getStack();
-                            for (int s = 1; s <= binStack.getSize(); s++) {
-                                ij.process.ImageProcessor ip = binStack.getProcessor(s);
-                                ip.setAutoThreshold("Default dark");
-                                double lower = ip.getMinThreshold();
-                                for (int p = 0; p < ip.getWidth() * ip.getHeight(); p++) {
-                                    ip.set(p, ip.get(p) >= (int) lower ? 255 : 0);
-                                }
-                            }
-                            skelDup.updateAndDraw();
+                        Double skelThr = ThresholdOps.parseNumericThreshold(thrToken);
+                        if (skelThr == null
+                                && ThresholdOps.autoThresholdSpecForToken(thrToken, false) != null) {
+                            ThresholdOps.applyStackThresholdInPlace(skelDup, thrToken, false);
                         } else if (skelThr != null) {
                             ij.ImageStack maskStack = skelDup.getStack();
                             int thrInt = (int) Math.round(skelThr);
@@ -4132,6 +4260,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
             // Colocalization (using per-ROI label images from registry)
             IJ.log("  > Colocalization");
+            updateObjectProgress("colocalization");
             if (doVolumetric) {
                 appendColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel);
@@ -4159,13 +4288,25 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
             // Process length extraction
             if (extractProcessLength && processChannels != null) {
+                updateObjectProgress("process length");
                 processLengthExtractionWithTables(cfg, channelTables, imp, scnIndex, animalName,
                         hemisphere, seriesRegionLabel, roiLabel, processChannels, nuclearMarkerIndex);
             }
 
             // Save objects images
+            updateObjectProgress("saving object label images");
             saveObjectsImages(cfg, imageRoot, animalName, hemisphere, roiLabel);
+            progressSuccess = true;
         } finally {
+            if (progressSuccess) {
+                completeObjectRoiProgress("image " + scnIndex + " ROI "
+                        + (roiBase == null || roiBase.isEmpty() ? FULL_IMAGE_ROI_SET_NAME : roiBase)
+                        + " complete");
+            } else {
+                failObjectRoiProgress("image " + scnIndex + " ROI "
+                        + (roiBase == null || roiBase.isEmpty() ? FULL_IMAGE_ROI_SET_NAME : roiBase)
+                        + " failed");
+            }
             clearRegistry();
         }
     }
@@ -4288,8 +4429,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     int beforeFilter = StarDist3DRunner.countLabels(labelImage);
                     int removed = region.filterByCentroid(labelImage);
                     afterFilter = beforeFilter - removed;
-                    IJ.log("    StarDist [" + channelName + "] ROI filter: " + beforeFilter
-                            + " → " + afterFilter + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
+                    if (!compactLog) {
+                        IJ.log("    StarDist [" + channelName + "] ROI filter: " + beforeFilter
+                                + " → " + afterFilter + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
+                    }
                 }
 
                 // 4. Crop to the region bounding box ONLY (choice a — keep whole
@@ -4424,8 +4567,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     int beforeFilter = Cellpose3DRunner.countLabels(labelImage);
                     int removed = region.filterByCentroid(labelImage);
                     afterFilter = beforeFilter - removed;
-                    IJ.log("    Cellpose [" + channelName + "] ROI filter: " + beforeFilter
-                            + " -> " + afterFilter + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
+                    if (!compactLog) {
+                        IJ.log("    Cellpose [" + channelName + "] ROI filter: " + beforeFilter
+                                + " -> " + afterFilter + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
+                    }
                 }
 
                 // Crop to the region bounding box ONLY (choice a — keep whole objects);
@@ -4561,19 +4706,11 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     ImagePlus skelDup = ImageOps.duplicateThreadSafe(skelSource);
                     skelDup.setTitle(skelName);
 
-                    Double skelThr = tryParseDouble(thrToken);
-                    if (skelThr == null && "default".equalsIgnoreCase(thrToken)) {
+                    Double skelThr = ThresholdOps.parseNumericThreshold(thrToken);
+                    if (skelThr == null
+                            && ThresholdOps.autoThresholdSpecForToken(thrToken, false) != null) {
                         // Thread-safe make binary (replaces IJ.run "Make Binary")
-                        ij.ImageStack binStack = skelDup.getStack();
-                        for (int s = 1; s <= binStack.getSize(); s++) {
-                            ij.process.ImageProcessor ip = binStack.getProcessor(s);
-                            ip.setAutoThreshold("Default dark");
-                            double lower = ip.getMinThreshold();
-                            for (int p = 0; p < ip.getWidth() * ip.getHeight(); p++) {
-                                ip.set(p, ip.get(p) >= (int) lower ? 255 : 0);
-                            }
-                        }
-                        skelDup.updateAndDraw();
+                        ThresholdOps.applyStackThresholdInPlace(skelDup, thrToken, false);
                     } else if (skelThr != null) {
                         // Thread-safe threshold + convert to mask
                         ij.ImageStack maskStack = skelDup.getStack();
@@ -4608,14 +4745,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             }
 
             // Threshold
-            Double threshold = tryParseDouble(thrToken);
-            if (threshold == null) {
-                if ("default".equalsIgnoreCase(thrToken)) {
-                    threshold = ThresholdOps.defaultDarkThresholdAtSlice6(filtered);
-                } else {
-                    return new ChannelFilterResult(c, channelName, ch, filtered,
-                            null, 0, 0, true, "unrecognised threshold '" + thrToken + "'");
-                }
+            double threshold = ThresholdOps.thresholdFromTokenAtSlice(filtered, thrToken, 6, false);
+            if (!Double.isFinite(threshold)) {
+                return new ChannelFilterResult(c, channelName, ch, filtered,
+                        null, 0, 0, true, "unrecognised threshold '" + thrToken + "'");
             }
 
             // Particle Size (n Voxels)
@@ -4693,37 +4826,62 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 stats,
                 objects,
                 result.getMaskedImage(),
-                stats != null && stats.size() > 0 && objects != null);
+                hasCountableObjectRows(stats) && objects != null);
     }
 
+
+    private static boolean hasCountableObjectRows(ResultsTable table) {
+        return countCountableObjectRows(table) > 0;
+    }
+
+    private static int countCountableObjectRows(ResultsTable table) {
+        if (table == null || table.size() == 0) return 0;
+        String[] headings = table.getHeadings();
+        int count = 0;
+        for (int row = 0; row < table.size(); row++) {
+            if (isCountableObjectRow(table, row, headings)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static boolean isCountableObjectRow(ResultsTable table, int row, String[] headings) {
+        String volumeColumn = objectVolumeColumn(headings);
+        if (volumeColumn == null) {
+            return true;
+        }
+        double volume;
+        try {
+            volume = table.getValue(volumeColumn, row);
+        } catch (Exception e) {
+            return false;
+        }
+        return Double.isFinite(volume) && volume > 0.0;
+    }
+
+    private static String objectVolumeColumn(String[] headings) {
+        if (headings == null) return null;
+        for (String heading : headings) {
+            if ("Volume (micron^3)".equals(heading)) {
+                return heading;
+            }
+        }
+        for (String heading : headings) {
+            if (heading != null && heading.startsWith("Volume (") && heading.endsWith("^3)")) {
+                return heading;
+            }
+        }
+        return null;
+    }
 
     private void appendStatsToChannelTable(ij.measure.ResultsTable rt, ij.measure.ResultsTable channelTable,
                                            int scnIndex, String animalName, String hemisphere, String region, String roiLabel) {
         if (channelTable == null) return;
 
-        // Macro behavior: if no objects, create a 1-row table filled with zeros and SCN/Animal Name.
+        // REGRESSION GUARD: zero objects must not create zero-volume object rows.
+        // Summary aggregation counts object CSV rows, so placeholders inflate object totals.
         if (rt == null || rt.size() == 0) {
-            channelTable.incrementCounter();
-            int destRow = channelTable.size() - 1;
-            channelTable.setValue("Region", destRow, region == null ? "" : region);
-            channelTable.setValue("Hemisphere", destRow, hemisphere == null ? "" : hemisphere);
-            channelTable.setValue("SCN", destRow, scnIndex);
-            channelTable.setValue("ROI", destRow, roiLabel == null ? "" : roiLabel);
-            channelTable.setValue("Animal Name", destRow, animalName);
-            AtlasRegionColumns.writeTo(channelTable, destRow, region, roiLabel);
-            channelTable.setValue("Volume (micron^3)", destRow, 0);
-            channelTable.setValue("Surface (micron^2)", destRow, 0);
-            channelTable.setValue("IntDen", destRow, 0);
-            channelTable.setValue("Mean", destRow, 0);
-            channelTable.setValue("XM", destRow, 0);
-            channelTable.setValue("YM", destRow, 0);
-            channelTable.setValue("ZM", destRow, 0);
-            channelTable.setValue("BX", destRow, 0);
-            channelTable.setValue("BY", destRow, 0);
-            channelTable.setValue("BZ", destRow, 0);
-            channelTable.setValue("B-width", destRow, 0);
-            channelTable.setValue("B-height", destRow, 0);
-            channelTable.setValue("B-depth", destRow, 0);
             return;
         }
 
@@ -4740,6 +4898,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         int rows = rt.size();
         String[] headings = rt.getHeadings();
         for (int r = 0; r < rows; r++) {
+            if (!isCountableObjectRow(rt, r, headings)) {
+                continue;
+            }
             channelTable.incrementCounter();
             int destRow = channelTable.size() - 1;
 
@@ -6085,9 +6246,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     }
                 } else {
                     // IMPORTANT: Do not create a dummy row here.
-                    // If there are no objects for a given SCN/channel, appendStatsToChannelTable(...) is
-                    // responsible for creating a 1-row (SCN/Animal filled) row of zeros.
-                    // Creating rows here causes an extra leading row with SCN=0/Animal Name=0.
+                    // Zero-object channels must stay rowless; otherwise summary aggregation
+                    // treats the placeholder as a real object.
                 }
             }
         }
@@ -6404,6 +6564,115 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         return value != null
                 && !value.isEmpty()
                 && Character.isDigit(value.charAt(value.length() - 1));
+    }
+
+    private AnalysisProgressReporter createProgressReporter(String analysisName, int totalUnits) {
+        return AnalysisProgressReporter.create(analysisName, totalUnits,
+                AnalysisProgressReporter.imageJSink(),
+                new AnalysisProgressReporter.Recorder() {
+                    @Override public void recordProgressSnapshot(Map<String, Object> snapshot) {
+                        if (runRecordContext != null) {
+                            runRecordContext.recordProgressSnapshot(snapshot);
+                        }
+                    }
+                });
+    }
+
+    private int countPlannedObjectRoiTasks(int totalImages, RoiSetData[] roiSets) {
+        if (totalImages <= 0 || roiSets == null || roiSets.length == 0) {
+            return 0;
+        }
+        int count = 0;
+        boolean previousVerbose = verboseLogging;
+        try {
+            verboseLogging = false;
+            for (int imageIndex = 0; imageIndex < totalImages; imageIndex++) {
+                for (RoiSetData roiSet : roiSets) {
+                    RegionBinding binding = resolveRegionForImage(roiSet, imageIndex);
+                    if (binding == null || !binding.skip) {
+                        count++;
+                    }
+                }
+            }
+        } finally {
+            verboseLogging = previousVerbose;
+        }
+        return count;
+    }
+
+    private AnalysisProgressReporter.WorkHandle beginObjectImageProgress(int scnIndex,
+                                                                         int totalImages,
+                                                                         String label,
+                                                                         String detail) {
+        String safeLabel = label == null || label.trim().isEmpty()
+                ? "image " + scnIndex + "/" + totalImages
+                : label;
+        AnalysisProgressReporter.WorkHandle handle = objectProgressReporter.begin(
+                "image " + scnIndex + "/" + totalImages + ": " + safeLabel,
+                detail);
+        objectImageProgress.set(handle);
+        return handle;
+    }
+
+    private void completeObjectImageProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = objectImageProgress.get();
+        if (handle != null) {
+            objectProgressReporter.complete(handle, summary);
+            objectImageProgress.remove();
+        }
+    }
+
+    private void failObjectImageProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = objectImageProgress.get();
+        if (handle != null) {
+            objectProgressReporter.fail(handle, summary);
+            objectImageProgress.remove();
+        }
+    }
+
+    private AnalysisProgressReporter.WorkHandle beginObjectRoiProgress(int scnIndex,
+                                                                       int totalImages,
+                                                                       String imageLabel,
+                                                                       String roiLabel,
+                                                                       String detail) {
+        StringBuilder label = new StringBuilder();
+        label.append("image ").append(scnIndex).append("/").append(totalImages);
+        if (imageLabel != null && !imageLabel.trim().isEmpty()) {
+            label.append(": ").append(imageLabel.trim());
+        }
+        if (roiLabel != null && !roiLabel.trim().isEmpty()) {
+            label.append(" | ROI ").append(roiLabel.trim());
+        }
+        AnalysisProgressReporter.WorkHandle handle =
+                objectProgressReporter.begin(label.toString(), detail);
+        objectRoiProgress.set(handle);
+        return handle;
+    }
+
+    private void completeObjectRoiProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = objectRoiProgress.get();
+        if (handle != null) {
+            objectProgressReporter.complete(handle, summary);
+            objectRoiProgress.remove();
+        }
+    }
+
+    private void failObjectRoiProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = objectRoiProgress.get();
+        if (handle != null) {
+            objectProgressReporter.fail(handle, summary);
+            objectRoiProgress.remove();
+        }
+    }
+
+    private void updateObjectProgress(String detail) {
+        AnalysisProgressReporter.WorkHandle handle = objectRoiProgress.get();
+        if (handle == null) {
+            handle = objectImageProgress.get();
+        }
+        if (handle != null) {
+            objectProgressReporter.update(handle, detail);
+        }
     }
 
     private AnalysisRunContext.InputHandle recordInputStart(File source, int seriesIndex) {

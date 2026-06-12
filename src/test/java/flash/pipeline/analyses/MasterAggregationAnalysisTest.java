@@ -74,6 +74,89 @@ public class MasterAggregationAnalysisTest {
     }
 
     @Test
+    public void execute_ignoresZeroVolumeObjectRowsWhenCountingObjects() throws Exception {
+        File root = temp.newFolder("master-agg-zero-volume-objects");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
+        assertTrue(objects.mkdirs());
+
+        writeCsv(new File(objects, "CK1D.csv"),
+                "Region,Hemisphere,ROI,Animal Name,SCN,Label,Volume (micron^3),Surface (micron^2),IntDen,Mean,XM,YM,ZM",
+                "SCN,LH,SCN1,Mouse1,1,1,0,0,0,0,0,0,0\n"
+                        + "SCN,LH,SCN1,Mouse1,1,2,NaN,0,0,0,0,0,0\n"
+                        + "SCN,LH,SCN1,Mouse1,1,3,10,5,100,10,1,1,1");
+
+        MasterAggregationAnalysis analysis = new MasterAggregationAnalysis();
+        analysis.setSuppressDialogs(true);
+        analysis.execute(root.getAbsolutePath());
+
+        List<String> lines = Files.readAllLines(
+                aggregationFile(root, "3D Objects.csv").toPath(),
+                StandardCharsets.UTF_8);
+        Map<String, String> row = csvRow(lines.get(0), lines.get(1));
+
+        assertEquals("1", row.get("CK1D_Count"));
+        assertEquals("10", row.get("CK1D_VolumeTotal"));
+        assertEquals("5", row.get("CK1D_SurfaceTotal"));
+    }
+
+    @Test
+    public void execute_aggregatesAllNumericObjectAndSpatialMetrics() throws Exception {
+        File root = temp.newFolder("master-agg-object-spatial-metrics");
+        File objects = FlashProjectLayout.forDirectory(root.getAbsolutePath()).tablesObjectsWriteDir();
+        assertTrue(objects.mkdirs());
+
+        writeCsv(new File(objects, "A.csv"),
+                "Region,Hemisphere,ROI,Animal Name,SCN,Label,Volume (micron^3),Surface (micron^2),"
+                        + "IntDen,Mean,XM,YM,ZM,B-width,B-height,B-volume (voxels),Length,"
+                        + "A_CPCColoc_B,A_CPCContains_B,A_CPCTargetsHit,A_CPCPattern,"
+                        + "A_BBColoc_B,A_BBColoc30_B,A_BBCPCColoc_B,A_BBCPCContains_B,"
+                        + "A_BBVolColoc_B,A_BBVolColocTotal_B,A_BBVolColoc30_B,A_VolContains30_B,"
+                        + "Morph_Sphericity,Morph_NewComposite_A_B,Voronoi_TerritoryArea_um2,"
+                        + "Cluster,MorphTexture_ClassLabel,CustomFutureScore",
+                "SCN,LH,SCN1,Mouse1,1,1,10,5,100,10,1,1,3,2,4,8,100,"
+                        + "1,2,1,B,55,1,0,1,25,40,0,2,0.5,9,100,2,1,7\n"
+                        + "SCN,LH,SCN1,Mouse1,1,2,20,7,200,20,3,5,5,6,8,48,200,"
+                        + "0,1,0,None,15,0,1,3,35,60,1,3,0.7,11,200,2,2,9");
+
+        MasterAggregationAnalysis analysis = new MasterAggregationAnalysis();
+        analysis.setSuppressDialogs(true);
+        analysis.execute(root.getAbsolutePath());
+
+        List<String> lines = Files.readAllLines(
+                aggregationFile(root, "3D Objects.csv").toPath(),
+                StandardCharsets.UTF_8);
+        Map<String, String> row = csvRow(lines.get(0), lines.get(1));
+
+        assertEquals("2", row.get("A_Count"));
+        assertEquals(4.0, Double.parseDouble(row.get("A_ZMMean")), 0.0001);
+        assertEquals(4.0, Double.parseDouble(row.get("A_B-widthMean")), 0.0001);
+        assertEquals(28.0, Double.parseDouble(row.get("A_B-volume (voxels)Mean")), 0.0001);
+        assertEquals(150.0, Double.parseDouble(row.get("A_LengthMean")), 0.0001);
+        assertEquals("1", row.get("A_CPCColoc_BCount"));
+        assertEquals(50.0, Double.parseDouble(row.get("A_CPCColoc_B%")), 0.0001);
+        assertEquals("3", row.get("A_CPCContains_BTotal"));
+        assertEquals(1.5, Double.parseDouble(row.get("A_CPCContains_BMean")), 0.0001);
+        assertEquals("1", row.get("A_CPCTargetsHitTotal"));
+        assertEquals("1", row.get("A_BBColoc30_BCount"));
+        assertEquals(35.0, Double.parseDouble(row.get("A_BBColoc_BMean")), 0.0001);
+        assertEquals("1", row.get("A_BBCPCColoc_BCount"));
+        assertEquals("4", row.get("A_BBCPCContains_BTotal"));
+        assertEquals(30.0, Double.parseDouble(row.get("A_BBVolColoc_BMean")), 0.0001);
+        assertEquals(50.0, Double.parseDouble(row.get("A_BBVolColocTotal_BMean")), 0.0001);
+        assertEquals("1", row.get("A_BBVolColoc30_BCount"));
+        assertEquals("5", row.get("A_VolContains_BTotal"));
+        assertEquals(2.5, Double.parseDouble(row.get("A_VolContains_BMean")), 0.0001);
+        assertEquals(0.6, Double.parseDouble(row.get("A_Morph_SphericityMean")), 0.0001);
+        assertEquals(10.0, Double.parseDouble(row.get("Morph_NewComposite_A_BMean")), 0.0001);
+        assertFalse(row.containsKey("A_Morph_NewComposite_A_BMean"));
+        assertEquals(150.0, Double.parseDouble(row.get("A_Voronoi_TerritoryArea_um2Mean")), 0.0001);
+        assertEquals("2", row.get("A_ClusterMode"));
+        assertEquals("1", row.get("A_MorphTexture_ClassLabelMode"));
+        assertEquals(8.0, Double.parseDouble(row.get("A_CustomFutureScoreMean")), 0.0001);
+        assertFalse(row.containsKey("A_CPCPatternMean"));
+    }
+
+    @Test
     public void chooseRoiPropertiesFile_prefersMatchingAnimalsWhenMultipleFilesExist() throws Exception {
         File root = temp.newFolder("master-agg-roi-choice");
         File attrs = roiTables(root);

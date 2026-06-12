@@ -6,7 +6,9 @@ import ij.IJ;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -27,6 +29,9 @@ import java.util.concurrent.TimeUnit;
 public final class AnalysisRunContext implements AutoCloseable {
 
     private static final long FINGERPRINT_TIMEOUT_MS = 5000L;
+    private static final String K_PROGRESS_LATEST = "progressLatest";
+    private static final String K_PROGRESS_SNAPSHOTS = "progressSnapshots";
+    private static final int MAX_PROGRESS_SNAPSHOTS = 200;
 
     private final RunRecord record;
     private final File runFile;
@@ -172,6 +177,31 @@ public final class AnalysisRunContext implements AutoCloseable {
                 return;
             }
             record.parameters.putAll(params);
+        }
+    }
+
+    public void recordProgressSnapshot(Map<String, Object> snapshot) {
+        if (snapshot == null || snapshot.isEmpty()) {
+            return;
+        }
+        synchronized (lock) {
+            if (closed) {
+                return;
+            }
+            Map<String, Object> copy = new LinkedHashMap<String, Object>(snapshot);
+            record.extras.put(K_PROGRESS_LATEST, copy);
+            Object existing = record.extras.get(K_PROGRESS_SNAPSHOTS);
+            List<Object> snapshots;
+            if (existing instanceof List) {
+                snapshots = new ArrayList<Object>((List<?>) existing);
+            } else {
+                snapshots = new ArrayList<Object>();
+            }
+            snapshots.add(copy);
+            while (snapshots.size() > MAX_PROGRESS_SNAPSHOTS) {
+                snapshots.remove(0);
+            }
+            record.extras.put(K_PROGRESS_SNAPSHOTS, snapshots);
         }
     }
 

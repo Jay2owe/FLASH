@@ -25,6 +25,7 @@ import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.objects.BoundingBoxColoc;
 import flash.pipeline.objects.CpcUtils;
+import flash.pipeline.progress.AnalysisProgressReporter;
 
 import flash.pipeline.help.SpatialHelpCatalog;
 import flash.pipeline.image.AdaptiveParallelism;
@@ -245,6 +246,10 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     private SpatialArtifactStatus spatialArtifactStatus = null;
     private boolean forceRerun = false;
     private AnalysisRunContext runRecordContext = null;
+    private AnalysisProgressReporter spatialProgressReporter =
+            AnalysisProgressReporter.disabled();
+    private final ThreadLocal<AnalysisProgressReporter.WorkHandle> spatialProgressTask =
+            new ThreadLocal<AnalysisProgressReporter.WorkHandle>();
 
     private enum RuntimeDependencyAction {
         PROCEED,
@@ -776,10 +781,15 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         }
 
         activeExecution = context;
+        spatialProgressReporter = createProgressReporter("Spatial Analysis", 0);
+        spatialProgressReporter.setPhase("setup");
         return true;
     }
 
     void endPhasedRun() {
+        spatialProgressReporter.finish("Spatial Analysis progress finished");
+        spatialProgressReporter = AnalysisProgressReporter.disabled();
+        spatialProgressTask.remove();
         activeExecution = null;
     }
 
@@ -1080,17 +1090,21 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
     private void computeInterMarkerDistancePhase(SpatialExecutionContext context) {
         if (context.doDistances || context.doVolumetric) {
+            setSpatialProgressPhase("inter-marker distances");
             IJ.log("--- Computing/reusing inter-marker nearest neighbor distances ---");
             if (context.doDistances) {
                 logArtifactRunPlan("Nearest neighbor distances", SubAnalysis.INTER_MARKER_DISTANCES);
             }
             int totalPairs = (context.channelNames.size() * (context.channelNames.size() - 1)) / 2;
+            addSpatialProgressUnits(totalPairs);
             int pairCount = 1;
             for (int a = 0; a < context.channelNames.size(); a++) {
                 for (int b = a + 1; b < context.channelNames.size(); b++) {
                     String nameA = context.channelNames.get(a);
                     String nameB = context.channelNames.get(b);
                     int currentPair = pairCount++;
+                    beginSpatialProgress("Pair [" + currentPair + "/" + totalPairs + "]: "
+                            + nameA + " <-> " + nameB, "checking reusable columns");
                     boolean distancesAlreadyPresent = !context.forceRerun
                             && (context.existingObjectData.hasDistancePair(nameA, nameB)
                             || (isArtifactDoneForChannel(SubAnalysis.INTER_MARKER_DISTANCES, nameA)
@@ -1107,6 +1121,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                 : "reusing existing volumetric columns");
                         IJ.log("  Pair [" + currentPair + "/" + totalPairs + "]: " + nameA + " <-> " + nameB
                                 + " (" + reuseReason + ")");
+                        skipSpatialProgress("Pair " + nameA + " <-> " + nameB + " reused");
                         continue;
                     }
                     String reuseNote = "";
@@ -1118,9 +1133,16 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     }
                     IJ.log("  Pair [" + currentPair + "/" + totalPairs + "]: " + nameA + " <-> " + nameB
                             + reuseNote);
-                    computeInterMarkerDistances(context.channels.get(nameA), context.channels.get(nameB),
-                            context.calibration,
-                            needsVolumetric);
+                    updateSpatialProgress("computing distances" + (needsVolumetric ? " and volumetric overlap" : ""));
+                    try {
+                        computeInterMarkerDistances(context.channels.get(nameA), context.channels.get(nameB),
+                                context.calibration,
+                                needsVolumetric);
+                        completeSpatialProgress("Pair " + nameA + " <-> " + nameB + " complete");
+                    } catch (RuntimeException e) {
+                        failSpatialProgress("Pair " + nameA + " <-> " + nameB + " failed");
+                        throw e;
+                    }
                 }
             }
         }
@@ -1269,18 +1291,24 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     }
 
     private void runLineDistanceIfNeeded(String directory, SpatialExecutionContext context) {
+        setSpatialProgressPhase("line distances");
         IJ.log("--- Computing line distances from Spatial Analysis ---");
         logArtifactRunPlan("Line distance", SubAnalysis.LINE_DISTANCE);
+        addSpatialProgressUnits(1);
+        beginSpatialProgress("Line distances", "checking existing outputs");
         SpatialArtifactStatus status = currentArtifactStatus();
         if (!context.forceRerun
                 && status != null
                 && status.isFullyDone(SubAnalysis.LINE_DISTANCE)) {
             IJ.log("    Skipping line distance - already present.");
+            skipSpatialProgress("Line distances reused");
             return;
         }
         LineDistanceAnalysis lineAnalysis = new LineDistanceAnalysis();
         lineAnalysis.setVerboseLogging(verboseLogging);
+        updateSpatialProgress("running line distance analysis");
         lineAnalysis.computeDistances(directory, context.linesDir, context.availableLineSets);
+        completeSpatialProgress("Line distances complete");
     }
 
     private SpatialExecutionContext requireActiveExecution() {
@@ -1375,16 +1403,20 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     }
 
     private void writeUpdatedCsvs(File objectsDir, Map<String, ChannelData> channels, String title) {
+        setSpatialProgressPhase(title == null ? "writing CSVs" : title.replace("-", "").trim());
         IJ.log(title);
         int writeCount = 1;
         int totalToWrite = channels.size();
+        addSpatialProgressUnits(totalToWrite);
         for (Map.Entry<String, ChannelData> entry : channels.entrySet()) {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
+            beginSpatialProgress("Write CSV " + channelName, "serializing channel table");
             File outFile = new File(objectsDir, ChannelFilenameCodec.toSafe(channelName) + ".csv");
             CsvTableIO.writeChannelCsv(outFile, cd, currentRunId());
             recordOutput(outFile, "csv");
             IJ.log("  [" + (writeCount++) + "/" + totalToWrite + "] Updated: " + outFile.getName());
+            completeSpatialProgress("Write CSV " + channelName + " complete");
         }
     }
 
@@ -1417,6 +1449,21 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                                                        boolean lockBBCpc,
                                                                        boolean lockBBVol,
                                                                        String primaryButtonLabel) {
+        return showOptionsDialogForChainedRun(directory, channelNames, lockVolumetricColoc,
+                lockCpcColoc, lockBBOverlap, lockBBCpc, lockBBVol, primaryButtonLabel,
+                null, -1);
+    }
+
+    SpatialSetupConfig.DerivedConfig showOptionsDialogForChainedRun(String directory,
+                                                                       List<String> channelNames,
+                                                                       boolean lockVolumetricColoc,
+                                                                       boolean lockCpcColoc,
+                                                                       boolean lockBBOverlap,
+                                                                       boolean lockBBCpc,
+                                                                       boolean lockBBVol,
+                                                                       String primaryButtonLabel,
+                                                                       String[] workflowSteps,
+                                                                       int workflowActiveIndex) {
         List<String> safeChannelNames = channelNames == null
                 ? new ArrayList<String>()
                 : new ArrayList<String>(channelNames);
@@ -1434,7 +1481,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         spatialArtifactStatus = artifactStatus;
         return showSpatialOptionsDialog(directory, safeChannelNames, existingObjectData,
                 LineDistanceAnalysis.lineSetNames(directory), artifactStatus, configuredOptions,
-                lockVolumetricColoc, lockCpcColoc, lockBBOverlap, lockBBCpc, lockBBVol, primaryButtonLabel);
+                lockVolumetricColoc, lockCpcColoc, lockBBOverlap, lockBBCpc, lockBBVol,
+                primaryButtonLabel, workflowSteps, workflowActiveIndex);
     }
 
     private SpatialSetupConfig.DerivedConfig showSpatialOptionsDialog(
@@ -1446,7 +1494,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             SpatialSetupConfig.DerivedConfig initialOptions) {
         return showSpatialOptionsDialog(directory, channelNames, existingObjectData,
                 availableLineSets, artifactStatus, initialOptions,
-                false, false, false, false, false, null);
+                false, false, false, false, false, null, null, -1);
     }
 
     private SpatialSetupConfig.DerivedConfig showSpatialOptionsDialog(
@@ -1462,6 +1510,27 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             boolean lockBBCpc,
             boolean lockBBVol,
             String primaryButtonLabel) {
+        return showSpatialOptionsDialog(directory, channelNames, existingObjectData,
+                availableLineSets, artifactStatus, initialOptions,
+                lockVolumetricColoc, lockCpcColoc, lockBBOverlap, lockBBCpc, lockBBVol,
+                primaryButtonLabel, null, -1);
+    }
+
+    private SpatialSetupConfig.DerivedConfig showSpatialOptionsDialog(
+            String directory,
+            final List<String> channelNames,
+            SpatialObjectDataAvailability existingObjectData,
+            List<String> availableLineSets,
+            SpatialArtifactStatus artifactStatus,
+            SpatialSetupConfig.DerivedConfig initialOptions,
+            boolean lockVolumetricColoc,
+            boolean lockCpcColoc,
+            boolean lockBBOverlap,
+            boolean lockBBCpc,
+            boolean lockBBVol,
+            String primaryButtonLabel,
+            String[] workflowSteps,
+            int workflowActiveIndex) {
         if (channelNames == null || channelNames.isEmpty()) {
             return null;
         }
@@ -1516,6 +1585,15 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         boolean dialogDone = false;
         while (!dialogDone) {
             PipelineDialog opts = new PipelineDialog("Spatial Analysis Options", PipelineDialog.Phase.ANALYSE);
+            boolean chainedRun = primaryButtonLabel != null && primaryButtonLabel.trim().length() > 0;
+            opts.setWorkflowTracker(workflowSteps != null && workflowSteps.length > 0
+                    ? workflowSteps
+                    : chainedRun
+                            ? new String[]{"Setup", "Spatial Analysis", "Run"}
+                            : new String[]{"Setup", "Run"},
+                    workflowSteps != null && workflowSteps.length > 0
+                            ? workflowActiveIndex
+                            : chainedRun ? 1 : 0);
             opts.setPrimaryButtonText(NextStepLabels.spatialOptionsPrimaryLabel(primaryButtonLabel));
             opts.addAnalysisHelpHeader("Spatial Analysis", FLASH_Pipeline.IDX_SPATIAL);
             final SpatialDialogBindings spatialBindings = new SpatialDialogBindings();
@@ -2586,6 +2664,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     }
 
     private void writeSpatialStatisticsOutputs(String directory, Map<String, ChannelData> channels) {
+        setSpatialProgressPhase("spatial statistics");
         logArtifactRunPlan("Spatial statistics", SubAnalysis.RIPLEY);
         File spatialDir = spatialDataOutputDir(directory);
         if (!spatialDir.exists() && !spatialDir.mkdirs()) {
@@ -2595,24 +2674,31 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
         int channelCounter = 1;
         int totalChannels = channels.size();
+        addSpatialProgressUnits(totalChannels);
         for (Map.Entry<String, ChannelData> entry : channels.entrySet()) {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Spatial Statistics: " + channelName);
+            beginSpatialProgress("Spatial statistics " + channelName, "checking prerequisites");
             if (shouldSkipChannel(SubAnalysis.RIPLEY, channelName, "spatial statistics")) {
+                skipSpatialProgress("Spatial statistics " + channelName + " reused");
                 continue;
             }
 
             if (!hasCalibrated2DCentroids(cd)) {
                 IJ.log("    Skipping spatial statistics for " + channelName
                         + ": calibrated centroid columns (" + XM_UM + ", " + YM_UM + ") are unavailable.");
+                skipSpatialProgress("Spatial statistics " + channelName
+                        + " skipped (missing calibrated centroids)");
                 continue;
             }
 
+            updateSpatialProgress("computing Ripley's K");
             List<List<String>> rows = buildSpatialStatisticsRows(cd);
             File outFile = new File(spatialDir, "Spatial_Statistics_" + ChannelFilenameCodec.toSafe(channelName) + ".csv");
             writeCsv(outFile, spatialStatisticsHeader(), rows);
             IJ.log("  Spatial statistics written: " + outFile.getName() + " (" + rows.size() + " rows)");
+            completeSpatialProgress("Spatial statistics " + channelName + " complete");
         }
     }
 
@@ -2997,6 +3083,63 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         return runRecordContext == null ? null : runRecordContext.recordInputStart(file, seriesIndex, null);
     }
 
+    private AnalysisProgressReporter createProgressReporter(String analysisName, int totalUnits) {
+        return AnalysisProgressReporter.create(analysisName, totalUnits,
+                AnalysisProgressReporter.imageJSink(),
+                new AnalysisProgressReporter.Recorder() {
+                    @Override public void recordProgressSnapshot(Map<String, Object> snapshot) {
+                        if (runRecordContext != null) {
+                            runRecordContext.recordProgressSnapshot(snapshot);
+                        }
+                    }
+                });
+    }
+
+    private void setSpatialProgressPhase(String phase) {
+        spatialProgressReporter.setPhase(phase);
+    }
+
+    private void addSpatialProgressUnits(int units) {
+        spatialProgressReporter.addTotalUnits(units);
+    }
+
+    private AnalysisProgressReporter.WorkHandle beginSpatialProgress(String label, String detail) {
+        AnalysisProgressReporter.WorkHandle handle = spatialProgressReporter.begin(label, detail);
+        spatialProgressTask.set(handle);
+        return handle;
+    }
+
+    private void updateSpatialProgress(String detail) {
+        AnalysisProgressReporter.WorkHandle handle = spatialProgressTask.get();
+        if (handle != null) {
+            spatialProgressReporter.update(handle, detail);
+        }
+    }
+
+    private void completeSpatialProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = spatialProgressTask.get();
+        if (handle != null) {
+            spatialProgressReporter.complete(handle, summary);
+            spatialProgressTask.remove();
+        }
+    }
+
+    private void skipSpatialProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = spatialProgressTask.get();
+        if (handle != null) {
+            spatialProgressReporter.skip(handle, summary);
+            spatialProgressTask.remove();
+        }
+    }
+
+    private void failSpatialProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = spatialProgressTask.get();
+        if (handle != null) {
+            spatialProgressReporter.fail(handle, summary);
+            spatialProgressTask.remove();
+        }
+    }
+
     private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
                                 String status,
                                 long startedMillis) {
@@ -3073,6 +3216,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                     SpatialObjectDataAvailability detectedData, LabelImageProvider provider,
                                     boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
         if (channelNames.size() < 2) return;
+        setSpatialProgressPhase("bounding-box colocalization");
         if (!isForceRerunActive()
                 && allBBFamiliesDetected(channels, channelNames, doBBOverlap, doBBCpc, doBBVol)) {
             IJ.log("--- Reusing existing bounding-box columns from 3D Object Analysis; skipping recomputation ---");
@@ -3120,6 +3264,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 Set<SectionKey> allSections = new LinkedHashSet<SectionKey>();
                 allSections.addAll(sectionsA.keySet());
                 allSections.addAll(sectionsB.keySet());
+                addSpatialProgressUnits(allSections.size());
                 for (SectionKey section : allSections) {
                     List<Integer> rowsA = sectionsA.get(section);
                     List<Integer> rowsB = sectionsB.get(section);
@@ -3193,9 +3338,12 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                   List<Integer> rowsA, List<Integer> rowsB, SectionKey section,
                                   LabelImageProvider provider,
                                   boolean doBBOverlap, boolean doBBCpc, boolean doBBVol) {
+        beginSpatialProgress("BB " + nameA + " <-> " + nameB + ": " + section,
+                "loading label images");
         ImagePlus aImg = provider.get(nameA, section);
         ImagePlus bImg = provider.get(nameB, section);
         try {
+            updateSpatialProgress("extracting objects");
             // A missing partner image leaves the partner population empty, which the writer turns
             // into zeros - matching the producer's empty-channel zero-fill. Only the source image is
             // required (for row-label resolution), so each direction is written independently.
@@ -3211,8 +3359,10 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 writeBBSectionDirection(cdB, rowsB, bImg, nameB, nameA, objectsB, objectsA, aImg,
                         doBBOverlap, doBBCpc, doBBVol);
             }
+            completeSpatialProgress("BB " + nameA + " <-> " + nameB + " " + section + " complete");
         } catch (Exception e) {
             IJ.log("    Warning: bounding-box recompute failed for " + section + ": " + e.getMessage());
+            failSpatialProgress("BB " + nameA + " <-> " + nameB + " " + section + " failed");
         } finally {
             closeLabelImage(aImg, provider, nameA, section);
             closeLabelImage(bImg, provider, nameB, section);
@@ -3291,6 +3441,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                 SpatialObjectDataAvailability detectedData, LabelImageProvider provider) {
         if (channelNames.size() < 2) return;
 
+        setSpatialProgressPhase("CPC colocalization");
         logArtifactRunPlan("CPC centroid coincidence", SubAnalysis.CPC);
 
         if (!isForceRerunActive()
@@ -3357,6 +3508,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 // Memory-safety invariant: each CPC worker opens two full label images,
                 // so worker count must go through AdaptiveParallelism rather than
                 // availableProcessors().
+                addSpatialProgressUnits(sectionTasks.size());
                 long estimatedWorkerBytes = estimateCpcWorkerBytes(sectionTasks);
                 int requestedThreads = Math.max(1, Math.min(parallelThreads, sectionTasks.size()));
                 int safeThreads = chooseCpcThreads(estimatedWorkerBytes, requestedThreads, sectionTasks.size());
@@ -3441,6 +3593,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                    AtomicInteger sectionCounter, int totalSections,
                                    LabelImageProvider provider) {
         int sectionNum = sectionCounter.incrementAndGet();
+        beginSpatialProgress("CPC " + nameA + " <-> " + nameB
+                + " [" + sectionNum + "/" + totalSections + "]: " + task.sectionKey,
+                "loading label images");
         ImagePlus aLabelImg = provider.get(nameA, task.sectionKey);
         ImagePlus bLabelImg = provider.get(nameB, task.sectionKey);
 
@@ -3448,13 +3603,17 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             IJ.log("    Warning: label image not found for section " + task.sectionKey);
             closeLabelImage(aLabelImg, provider, nameA, task.sectionKey);
             closeLabelImage(bLabelImg, provider, nameB, task.sectionKey);
+            skipSpatialProgress("CPC " + nameA + " <-> " + nameB + " " + task.sectionKey
+                    + " skipped (missing label image)");
             return;
         }
 
         try {
+            updateSpatialProgress("extracting objects");
             List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aLabelImg);
             List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bLabelImg);
 
+            updateSpatialProgress("testing centroid coincidence");
             List<CpcUtils.ObjectInfo> fwdA = CpcUtils.copyObjects(objectsA);
             CpcUtils.testCoincidence(fwdA, bLabelImg);
 
@@ -3508,9 +3667,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             IJ.log("    [" + sectionNum + "/" + totalSections + "] " + task.sectionKey
                     + ": " + cpcAB + "/" + objectsA.size() + " fwd, "
                     + cpcBA + "/" + objectsB.size() + " rev");
+            completeSpatialProgress("CPC " + nameA + " <-> " + nameB + " " + task.sectionKey
+                    + " complete");
 
         } catch (Exception e) {
             IJ.log("    Warning: CPC failed for " + task.sectionKey + ": " + e.getMessage());
+            failSpatialProgress("CPC " + nameA + " <-> " + nameB + " " + task.sectionKey
+                    + " failed");
         } finally {
             closeLabelImage(aLabelImg, provider, nameA, task.sectionKey);
             closeLabelImage(bLabelImg, provider, nameB, task.sectionKey);
@@ -4215,6 +4378,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
     private void runVoronoiAnalysis(String directory, Map<String, ChannelData> channels,
                                      CalibrationIO.PixelCalibration cal) {
+        setSpatialProgressPhase("Voronoi");
         logArtifactRunPlan("Voronoi territory analysis", SubAnalysis.VORONOI);
         File spatialDir = spatialDataOutputDir(directory);
         try {
@@ -4231,15 +4395,20 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
         int channelCounter = 1;
         int totalChannels = channels.size();
+        addSpatialProgressUnits(totalChannels);
         for (Map.Entry<String, ChannelData> entry : channels.entrySet()) {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Voronoi: " + channelName);
+            beginSpatialProgress("Voronoi " + channelName, "checking prerequisites");
             if (shouldSkipChannel(SubAnalysis.VORONOI, channelName, "Voronoi")) {
+                skipSpatialProgress("Voronoi " + channelName + " reused");
                 continue;
             }
             if (!hasCalibrated2DCentroids(cd)) {
                 IJ.log("    Skipping Voronoi for " + channelName + ": no calibrated centroids.");
+                skipSpatialProgress("Voronoi " + channelName
+                        + " skipped (missing calibrated centroids)");
                 continue;
             }
 
@@ -4247,6 +4416,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             cd.addColumn("Voronoi_NumNeighbors");
 
             Map<SpatialGroupKey, List<Integer>> groups = groupForSpatialStatistics(cd);
+            updateSpatialProgress("computing " + groups.size() + " spatial groups");
 
             // Per-channel Voronoi output
             List<String> voronoiHeader = Arrays.asList(
@@ -4297,6 +4467,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 writeCsv(outFile, voronoiHeader, voronoiRows);
                 IJ.log("  Voronoi written: " + outFile.getName() + " (" + voronoiRows.size() + " cells)");
             }
+            completeSpatialProgress("Voronoi " + channelName + " complete");
         }
 
         // Interaction matrix across all channel types
@@ -4385,6 +4556,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
     private void runCellClustering(String directory, Map<String, ChannelData> channels,
                                     int requestedK) {
+        setSpatialProgressPhase("cell phenotyping");
         logArtifactRunPlan("K-means clustering", SubAnalysis.PHENOTYPING);
         File phenotypeDir = new File(spatialDataOutputDir(directory), "Phenotyping");
         try {
@@ -4402,11 +4574,14 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
         int channelCounter = 1;
         int totalChannels = channels.size();
+        addSpatialProgressUnits(totalChannels);
         for (Map.Entry<String, ChannelData> entry : channels.entrySet()) {
             String channelName = entry.getKey();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Phenotyping: " + channelName);
+            beginSpatialProgress("Phenotyping " + channelName, "checking feature columns");
             ChannelData cd = entry.getValue();
             if (shouldSkipChannel(SubAnalysis.PHENOTYPING, channelName, "phenotyping")) {
+                skipSpatialProgress("Phenotyping " + channelName + " reused");
                 continue;
             }
 
@@ -4431,6 +4606,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
             if (usable.size() < 2) {
                 IJ.log("  Skipping clustering for " + channelName + ": too few feature columns.");
+                skipSpatialProgress("Phenotyping " + channelName + " skipped (too few feature columns)");
                 continue;
             }
 
@@ -4441,6 +4617,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             }
             if (validRows.size() < 4) {
                 IJ.log("  Skipping clustering for " + channelName + ": too few objects (" + validRows.size() + ").");
+                skipSpatialProgress("Phenotyping " + channelName + " skipped (too few objects)");
                 continue;
             }
 
@@ -4452,6 +4629,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             }
 
             // Run clustering
+            updateSpatialProgress("clustering " + validRows.size() + " objects");
             CellClustering.ClusterResult result;
             long seed = channelName.hashCode();
             if (requestedK > 0) {
@@ -4499,6 +4677,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             File outFile = new File(phenotypeDir, "Clusters_" + ChannelFilenameCodec.toSafe(channelName) + ".csv");
             writeCsv(outFile, clusterHeader, clusterRows);
             IJ.log("  Cluster summary: " + outFile.getName());
+            completeSpatialProgress("Phenotyping " + channelName + " complete");
         }
     }
 
@@ -4508,6 +4687,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                      CalibrationIO.PixelCalibration cal,
                                       double bandwidth, String lutName,
                                       LabelImageProvider provider) {
+        setSpatialProgressPhase("density heatmaps");
         logArtifactRunPlan("Density heatmaps", SubAnalysis.DENSITY_HEATMAPS);
         if (cal == null || !cal.isCalibrated()) {
             IJ.log("  Heatmaps require calibration metadata. Skipping.");
@@ -4539,15 +4719,23 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             if (!hasCalibrated2DCentroids(cd)) continue;
 
             Map<SpatialGroupKey, List<Integer>> groups = groupForSpatialStatistics(cd);
+            addSpatialProgressUnits(groups.size());
             for (Map.Entry<SpatialGroupKey, List<Integer>> ge : groups.entrySet()) {
                 SpatialGroupKey key = ge.getKey();
                 SectionKey section = sectionKeyFromSpatialGroup(key);
+                beginSpatialProgress("Density heatmap " + channelName + ": " + section,
+                        "checking section");
                 if (shouldSkipPair(SubAnalysis.DENSITY_HEATMAPS, section, channelName, "density heatmap")) {
+                    skipSpatialProgress("Density heatmap " + channelName + " " + section + " reused");
                     continue;
                 }
                 List<Integer> indices = ge.getValue();
                 double[][] points = extract2DPoints(cd, indices);
-                if (points.length < 2) continue;
+                if (points.length < 2) {
+                    skipSpatialProgress("Density heatmap " + channelName + " " + section
+                            + " skipped (too few points)");
+                    continue;
+                }
 
                 // Convert micron centroids back to pixel coordinates for heatmap generation
                 // (the heatmap is in image pixel space)
@@ -4559,8 +4747,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
                 ImagePlus heatmap = DensityHeatmapGenerator.generate(
                         pixelPts, imgWidth, imgHeight, pixelSize, bandwidth);
-                if (heatmap == null) continue;
+                if (heatmap == null) {
+                    skipSpatialProgress("Density heatmap " + channelName + " " + section
+                            + " skipped (generation returned no image)");
+                    continue;
+                }
 
+                updateSpatialProgress("saving heatmap");
                 DensityHeatmapGenerator.applyLut(heatmap, lutName);
 
                 // Preserve the legacy per-animal Heatmaps subfolder under the spatial image-output root.
@@ -4576,6 +4769,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 recordOutputIfExists(new File(heatmapDir, baseName + ".tif"), "tiff");
                 recordOutputIfExists(new File(heatmapDir, baseName + ".png"), "png");
                 IJ.log("  Heatmap: " + baseName + " (" + points.length + " objects)");
+                completeSpatialProgress("Density heatmap " + channelName + " " + section
+                        + " complete");
 
                 heatmap.close();
                 heatmap.flush();
@@ -4619,6 +4814,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     private void runMorphologyExtraction(String directory, Map<String, ChannelData> channels,
                                           CalibrationIO.PixelCalibration cal,
                                           LabelImageProvider provider) {
+        setSpatialProgressPhase("2D morphology");
         logArtifactRunPlan("2D morphology extraction", SubAnalysis.MORPHOLOGY_2D);
         File imageAnalysisRoot = objectImageOutputReadRoot(directory);
         if (!imageAnalysisRoot.isDirectory()) {
@@ -4665,12 +4861,19 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
             // Group by section (same as CPC) to match label images
             Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
+            addSpatialProgressUnits(sections.size());
 
             for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
                 SectionKey section = se.getKey();
                 List<Integer> rowIndices = se.getValue();
-                if (rowIndices.isEmpty()) continue;
+                beginSpatialProgress("2D morphology " + channelName + ": " + section,
+                        rowIndices == null ? "0 rows" : rowIndices.size() + " rows");
+                if (rowIndices == null || rowIndices.isEmpty()) {
+                    skipSpatialProgress("2D morphology " + channelName + " " + section + " skipped (no rows)");
+                    continue;
+                }
                 if (shouldSkipPair(SubAnalysis.MORPHOLOGY_2D, section, channelName, "2D morphology")) {
+                    skipSpatialProgress("2D morphology " + channelName + " " + section + " reused");
                     continue;
                 }
 
@@ -4685,10 +4888,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 ImagePlus labelImg = provider.get(channelName, section);
                 if (labelImg == null) {
                     IJ.log("    Label image not found: " + labelFileName);
+                    skipSpatialProgress("2D morphology " + channelName + " " + section
+                            + " skipped (missing label image)");
                     continue;
                 }
 
                 try {
+                    updateSpatialProgress("extracting shape features");
                     List<MorphologyExtractor.ObjectMorphology> morphList =
                             MorphologyExtractor.extract(labelImg, pixelSize);
 
@@ -4735,9 +4941,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
                     IJ.log("    " + animalName + "/" + labelFileName + ": "
                             + morphList.size() + " objects measured");
+                    completeSpatialProgress("2D morphology " + channelName + " " + section
+                            + " complete");
                 } catch (Exception e) {
                     IJ.log("    Morphology extraction failed for " + labelFileName
                             + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                    failSpatialProgress("2D morphology " + channelName + " " + section
+                            + " failed");
                 } finally {
                     closeLabelImage(labelImg, provider, channelName, section);
                 }
@@ -4804,6 +5014,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     private void run3DMorphometry(String directory, Map<String, ChannelData> channels,
                                   CalibrationIO.PixelCalibration cal, boolean doComposites,
                                   LabelImageProvider provider) {
+        setSpatialProgressPhase("3D morphometry");
         logArtifactRunPlan("3D shape features", SubAnalysis.SHAPE_FEATURES_3D);
         File imageAnalysisRoot = objectImageOutputReadRoot(directory);
         if (!imageAnalysisRoot.isDirectory()) {
@@ -4847,6 +5058,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
             // Group by section (same as CPC/2D morphology) to match label images
             Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
+            addSpatialProgressUnits(sections.size());
             List<List<String>> shollRows = new ArrayList<List<String>>();
             int totalMeasured = 0;
             int totalArborizationMeasured = 0;
@@ -4855,10 +5067,17 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
                 SectionKey section = se.getKey();
                 List<Integer> rowIndices = se.getValue();
-                if (rowIndices.isEmpty()) continue;
+                beginSpatialProgress("3D morphometry " + channelName + ": " + section,
+                        rowIndices == null ? "0 rows" : rowIndices.size() + " rows");
+                if (rowIndices == null || rowIndices.isEmpty()) {
+                    skipSpatialProgress("3D morphometry " + channelName + " " + section
+                            + " skipped (no rows)");
+                    continue;
+                }
                 if (hasRequired3DData
                         && shouldSkipPair(SubAnalysis.SHAPE_FEATURES_3D, section, channelName,
                         "3D shape features")) {
+                    skipSpatialProgress("3D morphometry " + channelName + " " + section + " reused");
                     continue;
                 }
 
@@ -4869,10 +5088,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 ImagePlus labelImg = provider.get(channelName, section);
                 if (labelImg == null) {
                     IJ.log("    Label image not found for " + animalName + "/" + channelName);
+                    skipSpatialProgress("3D morphometry " + channelName + " " + section
+                            + " skipped (missing label image)");
                     continue;
                 }
 
                 try {
+                    updateSpatialProgress("measuring 3D shape features");
                     // Apply calibration so _UNIT measurements return µm
                     if (cal != null && cal.isCalibrated()) {
                         Calibration ijCal = new Calibration(labelImg);
@@ -4996,9 +5218,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
                     IJ.log("    " + animalName + "/" + labelFileName + ": "
                             + objMap.size() + " objects measured (3D morphometry)");
+                    completeSpatialProgress("3D morphometry " + channelName + " " + section
+                            + " complete");
                 } catch (Exception e) {
                     IJ.log("    3D morphometry failed for " + labelFileName
                             + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                    failSpatialProgress("3D morphometry " + channelName + " " + section
+                            + " failed");
                 } finally {
                     closeLabelImage(labelImg, provider, channelName, section);
                 }
@@ -5101,6 +5327,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 && !context.doObjectTextureClass && !context.doNative3DTexture)) {
             return;
         }
+        setSpatialProgressPhase("object texture");
         IJ.log("  object texture and complexity: selected outputs will run unless complete columns are reused.");
         File imageAnalysisRoot = objectImageOutputReadRoot(directory);
         if (!imageAnalysisRoot.isDirectory()) {
@@ -5133,6 +5360,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             addSelectedTextureColumns(cd, context);
             Map<SectionKey, List<Integer>> sections = groupByCpcSection(directory, channelName, cd);
             int totalObjectRows = countSectionRows(sections);
+            addSpatialProgressUnits(sections.size());
             IJ.log("  " + channelName + ": " + sections.size() + " sections, "
                     + totalObjectRows + " object rows queued for object texture");
             Map<Integer, ObjectTextureFeatures.FeatureVector> vectorsByRow =
@@ -5180,7 +5408,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
                 SectionKey section = se.getKey();
                 List<Integer> rowIndices = se.getValue();
-                if (rowIndices.isEmpty()) continue;
+                beginSpatialProgress("Object texture " + channelName + ": " + section,
+                        rowIndices == null ? "0 rows" : rowIndices.size() + " rows");
+                if (rowIndices == null || rowIndices.isEmpty()) {
+                    skipSpatialProgress("Object texture " + channelName + " " + section
+                            + " skipped (no rows)");
+                    continue;
+                }
                 sectionCounter++;
                 IJ.log("    Object texture measurement [" + sectionCounter + "/"
                         + sections.size() + "]: " + section.labelFileName(channelName)
@@ -5189,6 +5423,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 ImagePlus labelImg = provider.get(channelName, section);
                 if (labelImg == null) {
                     IJ.log("    Label image not found: " + section.labelFileName(channelName));
+                    skipSpatialProgress("Object texture " + channelName + " " + section
+                            + " skipped (missing label image)");
                     continue;
                 }
                 ImagePlus rawStack = null;
@@ -5196,6 +5432,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     rawStack = rawResolver.open(channelName, cd, rowIndices);
                     if (rawStack == null) {
                         IJ.log("    Raw intensity stack not found for " + channelName + " / " + section);
+                        skipSpatialProgress("Object texture " + channelName + " " + section
+                                + " skipped (missing raw stack)");
                         continue;
                     }
                     applyCalibration(rawStack, context.calibration);
@@ -5205,6 +5443,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     for (int rowIdx : rowIndices) {
                         processedRows++;
                         if (shouldLogObjectTextureProgress(processedRows, totalObjectRows)) {
+                            updateSpatialProgress(processedRows + "/" + totalObjectRows + " rows processed");
                             IJ.log("      Object texture measurement: " + processedRows
                                     + "/" + totalObjectRows + " rows processed ("
                                     + elapsedSeconds(measurementStart) + " s)");
@@ -5267,9 +5506,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     IJ.log("    Object texture measurement complete for "
                             + section.labelFileName(channelName) + ": "
                             + totalMeasured + " objects measured so far");
+                    completeSpatialProgress("Object texture " + channelName + " " + section
+                            + " complete");
                 } catch (Exception e) {
                     IJ.log("    Object texture failed for " + section.labelFileName(channelName)
                             + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                    failSpatialProgress("Object texture " + channelName + " " + section
+                            + " failed");
                 } finally {
                     closeImage(rawStack);
                     closeLabelImage(labelImg, provider, channelName, section);
@@ -5298,26 +5541,42 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         long start = System.nanoTime();
         IJ.log("    Collecting texture-class features for " + channelName + ": "
                 + totalRows + " rows across " + sections.size() + " sections");
+        addSpatialProgressUnits(sections.size());
         for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
             SectionKey section = se.getKey();
             List<Integer> rowIndices = se.getValue();
-            if (rowIndices.isEmpty()) continue;
+            beginSpatialProgress("Texture-class feature collection " + channelName + ": " + section,
+                    rowIndices == null ? "0 rows" : rowIndices.size() + " rows");
+            if (rowIndices == null || rowIndices.isEmpty()) {
+                skipSpatialProgress("Texture-class feature collection " + channelName + " "
+                        + section + " skipped (no rows)");
+                continue;
+            }
             sectionCounter++;
             IJ.log("      Texture-class feature collection [" + sectionCounter + "/"
                     + sections.size() + "]: " + section.labelFileName(channelName)
                     + " (" + rowIndices.size() + " rows)");
 
             ImagePlus labelImg = provider.get(channelName, section);
-            if (labelImg == null) continue;
+            if (labelImg == null) {
+                skipSpatialProgress("Texture-class feature collection " + channelName + " "
+                        + section + " skipped (missing label image)");
+                continue;
+            }
             ImagePlus rawStack = null;
             try {
                 rawStack = rawResolver.open(channelName, cd, rowIndices);
-                if (rawStack == null) continue;
+                if (rawStack == null) {
+                    skipSpatialProgress("Texture-class feature collection " + channelName + " "
+                            + section + " skipped (missing raw stack)");
+                    continue;
+                }
                 Map<Integer, mcib3d.geom2.Object3DInt> objMap = loadObjectMap(labelImg);
                 boolean hasLabelCol = cd.colIdx.containsKey("Label");
                 for (int rowIdx : rowIndices) {
                     processedRows++;
                     if (shouldLogObjectTextureProgress(processedRows, totalRows)) {
+                        updateSpatialProgress(processedRows + "/" + totalRows + " rows processed");
                         IJ.log("        Texture-class features: " + processedRows
                                 + "/" + totalRows + " rows processed ("
                                 + elapsedSeconds(start) + " s)");
@@ -5328,9 +5587,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     vectors.put(Integer.valueOf(rowIdx),
                             computeAverageSliceFeatures(obj, labelImg, rawStack));
                 }
+                completeSpatialProgress("Texture-class feature collection " + channelName + " "
+                        + section + " complete");
             } catch (Exception e) {
                 IJ.log("    Texture feature collection failed for " + section.labelFileName(channelName)
                         + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                failSpatialProgress("Texture-class feature collection " + channelName + " "
+                        + section + " failed");
             } finally {
                 closeImage(rawStack);
                 closeLabelImage(labelImg, provider, channelName, section);
@@ -5357,10 +5620,17 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         long start = System.nanoTime();
         IJ.log("    Collecting native-3D texture-class features for " + channelName + ": "
                 + totalRows + " rows across " + sections.size() + " sections");
+        addSpatialProgressUnits(sections.size());
         for (Map.Entry<SectionKey, List<Integer>> se : sections.entrySet()) {
             SectionKey section = se.getKey();
             List<Integer> rowIndices = se.getValue();
-            if (rowIndices.isEmpty()) continue;
+            beginSpatialProgress("Native-3D texture feature collection " + channelName + ": " + section,
+                    rowIndices == null ? "0 rows" : rowIndices.size() + " rows");
+            if (rowIndices == null || rowIndices.isEmpty()) {
+                skipSpatialProgress("Native-3D texture feature collection " + channelName + " "
+                        + section + " skipped (no rows)");
+                continue;
+            }
             sectionCounter++;
             IJ.log("      Native-3D texture feature collection [" + sectionCounter
                     + "/" + sections.size() + "]: "
@@ -5368,17 +5638,26 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     + rowIndices.size() + " rows)");
 
             ImagePlus labelImg = provider.get(channelName, section);
-            if (labelImg == null) continue;
+            if (labelImg == null) {
+                skipSpatialProgress("Native-3D texture feature collection " + channelName + " "
+                        + section + " skipped (missing label image)");
+                continue;
+            }
             ImagePlus rawStack = null;
             try {
                 rawStack = rawResolver.open(channelName, cd, rowIndices);
-                if (rawStack == null) continue;
+                if (rawStack == null) {
+                    skipSpatialProgress("Native-3D texture feature collection " + channelName + " "
+                            + section + " skipped (missing raw stack)");
+                    continue;
+                }
                 applyCalibration(rawStack, calibration);
                 Map<Integer, mcib3d.geom2.Object3DInt> objMap = loadObjectMap(labelImg);
                 boolean hasLabelCol = cd.colIdx.containsKey("Label");
                 for (int rowIdx : rowIndices) {
                     processedRows++;
                     if (shouldLogObjectTextureProgress(processedRows, totalRows)) {
+                        updateSpatialProgress(processedRows + "/" + totalRows + " rows processed");
                         IJ.log("        Native-3D texture features: " + processedRows
                                 + "/" + totalRows + " rows processed ("
                                 + elapsedSeconds(start) + " s)");
@@ -5391,10 +5670,14 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     vectors.put(Integer.valueOf(rowIdx),
                             ObjectTextureFeatures3D.computeFeatures(patch));
                 }
+                completeSpatialProgress("Native-3D texture feature collection " + channelName + " "
+                        + section + " complete");
             } catch (Exception e) {
                 IJ.log("    Native-3D texture feature collection failed for "
                         + section.labelFileName(channelName)
                         + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
+                failSpatialProgress("Native-3D texture feature collection " + channelName + " "
+                        + section + " failed");
             } finally {
                 closeImage(rawStack);
                 closeLabelImage(labelImg, provider, channelName, section);
@@ -5979,6 +6262,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
      * IMDI (Intensity-Morphology Dissociation Index), and MDS (Morphological Diversity).
      */
     private void runPopulationMorphometrics(String directory, Map<String, ChannelData> channels) {
+        setSpatialProgressPhase("population morphometrics");
         logArtifactRunPlan("Population morphometric scoring", SubAnalysis.POPULATION_MORPHO);
         File morphometryDir = spatialMorphometryOutputDir(directory);
         try {
@@ -5991,12 +6275,15 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
         int channelCounter = 1;
         int totalChannels = channels.size();
+        addSpatialProgressUnits(totalChannels);
         for (Map.Entry<String, ChannelData> entry : channels.entrySet()) {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Population Morphometrics: " + channelName);
+            beginSpatialProgress("Population morphometrics " + channelName, "checking prerequisites");
             if (shouldSkipChannel(SubAnalysis.POPULATION_MORPHO, channelName,
                     "population morphometrics")) {
+                skipSpatialProgress("Population morphometrics " + channelName + " reused");
                 continue;
             }
 
@@ -6013,15 +6300,22 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     break;
                 }
             }
-            if (popMissing) continue;
+            if (popMissing) {
+                skipSpatialProgress("Population morphometrics " + channelName
+                        + " skipped (missing prerequisites)");
+                continue;
+            }
 
             int n = cd.rows.size();
             if (n < 3) {
                 IJ.log("  " + channelName + ": Too few objects (" + n + ") for population scoring.");
+                skipSpatialProgress("Population morphometrics " + channelName
+                        + " skipped (too few objects)");
                 continue;
             }
 
             // Collect raw values for normalization
+            updateSpatialProgress("scoring " + n + " objects");
             double[] sphVals = collectColumn(cd, "Morph_Sphericity");
             double[] pbVals = collectColumn(cd, "Morph_PB");
             double[] sriVals = collectColumn(cd, "Morph_SRI");
@@ -6102,6 +6396,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
             IJ.log("  " + channelName + ": population morphometric scoring complete"
                     + (Double.isFinite(mdsEntropy) ? " (MDS entropy=" + formatStat(mdsEntropy) + ")" : ""));
+            completeSpatialProgress("Population morphometrics " + channelName + " complete");
         }
     }
 
@@ -6112,6 +6407,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
      */
     private void runSpatialMorphometrics(String directory, Map<String, ChannelData> channels,
                                           CalibrationIO.PixelCalibration cal) {
+        setSpatialProgressPhase("spatial morphometrics");
         logArtifactRunPlan("Spatial-morphometric analysis", SubAnalysis.SPATIAL_MORPHO);
         File morphometryDir = spatialMorphometryOutputDir(directory);
         try {
@@ -6126,15 +6422,19 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
 
         int channelCounter = 1;
         int totalChannels = channels.size();
+        addSpatialProgressUnits(totalChannels);
         for (Map.Entry<String, ChannelData> entry : channels.entrySet()) {
             String channelName = entry.getKey();
             ChannelData cd = entry.getValue();
             IJ.log("  [" + (channelCounter++) + "/" + totalChannels + "] Spatial Morphometrics: " + channelName);
+            beginSpatialProgress("Spatial morphometrics " + channelName, "checking reusable outputs");
             if (shouldSkipChannel(SubAnalysis.SPATIAL_MORPHO, channelName,
                     "spatial morphometrics")) {
+                skipSpatialProgress("Spatial morphometrics " + channelName + " reused");
                 continue;
             }
             int n = cd.rows.size();
+            updateSpatialProgress("scoring " + n + " objects");
 
             // TDR: Territorial Dominance Ratio
             if (cd.colIdx.containsKey("Voronoi_TerritoryArea_um2")) {
@@ -6224,6 +6524,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     }
                 }
             }
+            completeSpatialProgress("Spatial morphometrics " + channelName + " complete");
         }
     }
 

@@ -1,6 +1,9 @@
 package flash.pipeline.decontamination;
 
 import flash.pipeline.bin.BinConfig;
+import flash.pipeline.decontamination.features.EnvelopeCorrectionFeature;
+import flash.pipeline.decontamination.features.FullForwardModelFeature;
+import flash.pipeline.decontamination.features.RocThresholdSearchFeature;
 import flash.pipeline.decontamination.wizard.SpectralDecontamPreset;
 import flash.pipeline.decontamination.wizard.SpectralDecontamPresetIO;
 import flash.pipeline.decontamination.wizard.SpectralDecontaminationSetup;
@@ -77,6 +80,8 @@ public class SpectralDecontaminationDialog {
         }
 
         PipelineDialog dialog = new PipelineDialog(TITLE);
+        boolean expertSettings = hasExpertSettings(config);
+        dialog.setWorkflowTracker(spectralWorkflow(expertSettings), expertSettings ? 4 : 3);
         dialog.enableBackButton();
         dialog.addHeader("Preview");
         dialog.addMessage("Inspect the same correction stack that batch processing will run on a balanced subset.");
@@ -93,6 +98,7 @@ public class SpectralDecontaminationDialog {
 
     private DialogState showOnce(SpectralDecontaminationConfig config) {
         PipelineDialog dialog = new PipelineDialog(TITLE);
+        dialog.setWorkflowTracker(spectralWorkflow(false), 0);
         String[] channelChoices = channelChoices();
         final SpectralDecontaminationConfig[] loadedFromRun =
                 new SpectralDecontaminationConfig[1];
@@ -308,5 +314,21 @@ public class SpectralDecontaminationDialog {
         ACCEPT,
         BACK,
         CANCEL
+    }
+
+    private static String[] spectralWorkflow(boolean expertSettings) {
+        return expertSettings
+                ? new String[]{"Setup", "Conditions", "Correction Stack", "Expert Settings", "Preview", "Run"}
+                : new String[]{"Setup", "Conditions", "Correction Stack", "Preview", "Run"};
+    }
+
+    private static boolean hasExpertSettings(SpectralDecontaminationConfig config) {
+        if (config == null || !config.hasCorrectionPipeline()) {
+            return false;
+        }
+        CorrectionPipeline pipeline = config.getCorrectionPipeline();
+        return pipeline.getFeatureIds().contains(FullForwardModelFeature.ID)
+                || pipeline.getFeatureIds().contains(EnvelopeCorrectionFeature.ID)
+                || pipeline.getFeatureIds().contains(RocThresholdSearchFeature.ID);
     }
 }

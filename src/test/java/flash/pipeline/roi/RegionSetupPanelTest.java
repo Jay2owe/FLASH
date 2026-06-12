@@ -1,17 +1,21 @@
 package flash.pipeline.roi;
 
+import flash.pipeline.ui.wizard.RegionTableCellEditor;
 import org.junit.Test;
 
+import java.awt.Component;
+import java.awt.Container;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import javax.swing.JTable;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Pure-logic tests for {@link RegionSetupPanel#toSpecs} (the multi-region setup table). The
- * Swing component itself is exercised manually; only the conversion/validation is unit-tested.
+ * Tests for the multi-region setup table conversion and shared editor wiring.
  */
 public class RegionSetupPanelTest {
 
@@ -96,5 +100,31 @@ public class RegionSetupPanelTest {
         List<RegionDrawSpec> specs = RegionSetupPanel.toSpecs(rows, LEADING_DIGITS, "None");
         assertEquals(1, specs.size());
         assertEquals("Hippocampus", specs.get(0).regionName);
+    }
+
+    @Test
+    public void regionColumnUsesAtlasAutocompleteEditor() {
+        RegionSetupPanel panel = new RegionSetupPanel(
+                new String[]{"1 (DAPI)", "2 (GFP)"}, "1 (DAPI)", "SCN");
+
+        JTable table = findTable(panel);
+
+        assertNotNull(table);
+        assertTrue(table.getColumnModel().getColumn(0).getCellEditor()
+                instanceof RegionTableCellEditor);
+    }
+
+    private static JTable findTable(Component component) {
+        if (component instanceof JTable) {
+            return (JTable) component;
+        }
+        if (component instanceof Container) {
+            Component[] children = ((Container) component).getComponents();
+            for (Component child : children) {
+                JTable found = findTable(child);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 }

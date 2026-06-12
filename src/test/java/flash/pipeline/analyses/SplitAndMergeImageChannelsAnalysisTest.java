@@ -228,6 +228,20 @@ public class SplitAndMergeImageChannelsAnalysisTest {
     }
 
     @Test
+    public void channelSettingsGridUsesSavedAutoEnhanceSaturation() {
+        SplitAndMergeImageChannelsAnalysis.ChannelSettingsGrid grid =
+                SplitAndMergeImageChannelsAnalysis.buildChannelSettingsGrid(
+                        new String[]{"DAPI"},
+                        new String[]{"auto:1.25"});
+
+        assertEquals("Automatic", grid.methodBoxes[0].getSelectedItem());
+        assertEquals("", grid.displayRangeFields[0].getText());
+        assertEquals("1.25", grid.saturationFields[0].getText());
+        assertFalse(grid.displayRangeFields[0].isEnabled());
+        assertTrue(grid.saturationFields[0].isEnabled());
+    }
+
+    @Test
     public void executeReturnsGracefullyWhenDispatcherCancelsMissingBin() throws Exception {
         installAllDependenciesPresentForGate();
         File dir = temp.newFolder("cancelled");
@@ -277,6 +291,20 @@ public class SplitAndMergeImageChannelsAnalysisTest {
 
         BinConfig updated = BinConfigIO.readPartialFromDirectory(dir.getAbsolutePath());
         assertEquals(Arrays.asList("10-200", "None"), updated.channelMinMax);
+    }
+
+    @Test
+    public void splitMergeAutomaticWritebackPersistsAutoEnhanceToken() throws Exception {
+        File dir = temp.newFolder("autoDisplay");
+        TestConfigFiles.writeChannelConfig(dir, TestConfigFiles.basicBinConfig("DAPI", "GFAP"));
+
+        invokeUpdateBinMinMax(new SplitAndMergeImageChannelsAnalysis(), dir,
+                new String[]{"Automatic", "None"},
+                new String[]{"None", "None"},
+                2);
+
+        BinConfig updated = BinConfigIO.readPartialFromDirectory(dir.getAbsolutePath());
+        assertEquals(Arrays.asList("auto:0.35", "None"), updated.channelMinMax);
     }
 
     @Test
@@ -571,9 +599,11 @@ public class SplitAndMergeImageChannelsAnalysisTest {
                                               String[] customMinMaxPerCh,
                                               int channelCount) throws Exception {
         Method method = SplitAndMergeImageChannelsAnalysis.class.getDeclaredMethod(
-                "updateBinMinMax", String.class, String[].class, String[].class, int.class);
+                "updateBinMinMax", String.class, String[].class, String[].class,
+                double[].class, int.class);
         method.setAccessible(true);
-        method.invoke(analysis, dir.getAbsolutePath(), processMethodPerCh, customMinMaxPerCh, channelCount);
+        method.invoke(analysis, dir.getAbsolutePath(), processMethodPerCh, customMinMaxPerCh,
+                fill(channelCount, 0.35), channelCount);
     }
 
     private static void invokeSaveSaturations(SplitAndMergeImageChannelsAnalysis analysis,

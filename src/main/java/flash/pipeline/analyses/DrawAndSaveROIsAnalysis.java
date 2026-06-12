@@ -41,9 +41,11 @@ import flash.pipeline.zslice.ZSliceOps;
 import flash.pipeline.zslice.ZSliceMode;
 
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.RoiOrientationPanel;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.wizard.RegionTextFieldSupport;
 
 import ij.IJ;
 import ij.ImagePlus;
@@ -55,10 +57,13 @@ import ij.measure.ResultsTable;
 import ij.gui.Roi;
 import ij.process.LUT;
 
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsEnvironment;
 import java.awt.Insets;
@@ -81,11 +86,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import javax.swing.BorderFactory;
 import javax.swing.JComboBox;
 import javax.swing.JButton;
 import javax.swing.JFileChooser;
+import javax.swing.JDialog;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.UIManager;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -268,6 +277,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         boolean hasExisting = !roiNames.isEmpty();
 
         PipelineDialog pd = new PipelineDialog("Draw ROIs & Orientate Images", PipelineDialog.Phase.SETUP);
+        pd.setWorkflowTracker(new String[]{"Setup", "Choose Images", "Draw ROIs/Orientate", "Save"}, 0);
         pd.addAnalysisHelpHeader("Draw ROIs and Orientate Images", FLASH_Pipeline.IDX_DRAW_ROIS);
         pd.addSubHeader("ROI Set Selection");
 
@@ -898,6 +908,7 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
     private ImportPromptChoice promptForRoiImport() {
         PipelineDialog dialog = new PipelineDialog(
                 "Draw ROIs & Orientate Images", PipelineDialog.Phase.SETUP);
+        dialog.setWorkflowTracker(new String[]{"Setup", "Choose Images", "Draw ROIs/Orientate", "Save"}, 0);
         dialog.addAnalysisHelpHeader("Draw ROIs and Orientate Images",
                 FLASH_Pipeline.IDX_DRAW_ROIS);
         dialog.addMessage("Draw a new ROI set as usual, or import an existing ImageJ ROI zip "
@@ -940,9 +951,13 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         boolean showZSliceSourceChoice = shouldShowZSliceSourceChoice(roiBinCfg);
 
         PipelineDialog dialog = new PipelineDialog("Import ROI Set", PipelineDialog.Phase.SETUP);
+        dialog.setWorkflowTracker(new String[]{"Setup", "Import", "Preview", "Save"}, 1);
         dialog.addHeader("Import ROI Zip");
         dialog.addMessage("Selected file:<br>" + htmlEscape(importZip.getName()));
-        dialog.addStringField("ROI Set Name", importSetNameFromZip(importZip), 18);
+        JTextField roiSetNameField =
+                dialog.addStringField("ROI Set Name", importSetNameFromZip(importZip), 18);
+        RegionTextFieldSupport.Handle roiSetNameSupport =
+                RegionTextFieldSupport.install(roiSetNameField, null);
         ToggleSwitch previewToggle = dialog.addToggle("Preview ROIs before saving", true);
         dialog.addChoice("ROI Channel", roiChannelChoices, defaultRoiChannelChoice);
         dialog.addChoice("Image Adjustment", new String[]{"None", "Automatic", "Manual"}, "None");
@@ -956,21 +971,35 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 + "properties. ROI order must match the image series order.");
         Runnable syncPrimaryLabel = () -> dialog.setPrimaryButtonText(
                 NextStepLabels.importRoiPrimaryLabel(previewToggle.isSelected()));
+        Runnable syncImportTracker = () -> dialog.setWorkflowTracker(
+                previewToggle.isSelected()
+                        ? new String[]{"Setup", "Import", "Preview", "Save"}
+                        : new String[]{"Setup", "Import", "Save"},
+                1);
         previewToggle.addChangeListener(syncPrimaryLabel);
+        previewToggle.addChangeListener(syncImportTracker);
         syncPrimaryLabel.run();
+        syncImportTracker.run();
 
-        if (!dialog.showDialog()) {
-            return null;
+        try {
+            if (!dialog.showDialog()) {
+                return null;
+            }
+
+            // Advance the PipelineDialog text-field cursor, but use the atlas-aware
+            // support so exact Allen Brain Atlas matches save as canonical acronyms.
+            dialog.getNextString();
+            String roiSetName = sanitizeRoiSetName(roiSetNameSupport.canonicalText());
+            boolean preview = dialog.getNextBoolean();
+            int roiChannel = parseRoiChannelChoice(dialog.getNextChoice());
+            String imageProcessing = dialog.getNextChoice();
+            boolean drawOnSubset = showZSliceSourceChoice
+                    && CONFIGURED_SUBSET_SOURCE.equals(dialog.getNextChoice());
+            return new RoiImportOptions(roiSetName, preview, roiChannel,
+                    imageProcessing, drawOnSubset);
+        } finally {
+            roiSetNameSupport.dispose();
         }
-
-        String roiSetName = sanitizeRoiSetName(dialog.getNextString());
-        boolean preview = dialog.getNextBoolean();
-        int roiChannel = parseRoiChannelChoice(dialog.getNextChoice());
-        String imageProcessing = dialog.getNextChoice();
-        boolean drawOnSubset = showZSliceSourceChoice
-                && CONFIGURED_SUBSET_SOURCE.equals(dialog.getNextChoice());
-        return new RoiImportOptions(roiSetName, preview, roiChannel,
-                imageProcessing, drawOnSubset);
     }
 
     private boolean importRoiSet(String directory,
@@ -1238,18 +1267,101 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 "Import without more previews",
                 "Cancel import"
         };
-        int choice = JOptionPane.showOptionDialog(imageJMainWindow(),
+        int choice = showImportPreviewOptionDialog(prep.maxProjection, imageJMainWindow(),
                 "Previewing imported ROI " + (imageIndex + 1) + "/" + totalImages
-                + ".\n\nCheck that the ROI overlay matches the displayed image.",
-                "Import ROI Set Preview",
-                JOptionPane.DEFAULT_OPTION,
-                JOptionPane.QUESTION_MESSAGE,
-                null,
-                options,
-                options[0]);
+                        + ".\n\nCheck that the ROI overlay matches the displayed image.",
+                options);
         if (choice == 0) return ImportPreviewDecision.CONTINUE;
         if (choice == 1) return ImportPreviewDecision.SKIP_REMAINING;
         return ImportPreviewDecision.CANCEL;
+    }
+
+    private static int showImportPreviewOptionDialog(ImagePlus image,
+                                                     Window owner,
+                                                     String message,
+                                                     Object[] options) {
+        JOptionPane pane = new JOptionPane(importPreviewMessage(message),
+                JOptionPane.QUESTION_MESSAGE,
+                JOptionPane.DEFAULT_OPTION,
+                null,
+                options,
+                options == null || options.length == 0 ? null : options[0]);
+        JDialog dialog = pane.createDialog(owner, "Import ROI Set Preview");
+        positionImportPreviewDialogBesideImage(dialog, image, owner);
+        dialog.setVisible(true);
+        Object selected = pane.getValue();
+        dialog.dispose();
+        if (selected == null || selected == JOptionPane.UNINITIALIZED_VALUE) {
+            return JOptionPane.CLOSED_OPTION;
+        }
+        if (options != null) {
+            for (int i = 0; i < options.length; i++) {
+                if (selected.equals(options[i])) {
+                    return i;
+                }
+            }
+        }
+        return selected instanceof Integer
+                ? ((Integer) selected).intValue()
+                : JOptionPane.CLOSED_OPTION;
+    }
+
+    private static JComponent importPreviewMessage(String message) {
+        JPanel panel = new JPanel(new BorderLayout(0, 6));
+        panel.setOpaque(false);
+        panel.add(importPreviewWorkflowRow(), BorderLayout.NORTH);
+        JLabel body = new JLabel("<html><body style='width:320px'>"
+                + htmlEscape(message).replace("\n", "<br>")
+                + "</body></html>");
+        panel.add(body, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private static JComponent importPreviewWorkflowRow() {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        row.setOpaque(false);
+        row.add(workflowChip("Setup", false));
+        row.add(workflowSeparator());
+        row.add(workflowChip("Import", false));
+        row.add(workflowSeparator());
+        row.add(workflowChip("Preview", true));
+        row.add(workflowSeparator());
+        row.add(workflowChip("Save", false));
+        return row;
+    }
+
+    private static JLabel workflowChip(String text, boolean active) {
+        JLabel chip = new JLabel(" " + text + " ");
+        chip.setOpaque(true);
+        chip.setFont(chip.getFont().deriveFont(active ? Font.BOLD : Font.PLAIN, 11f));
+        chip.setBorder(BorderFactory.createLineBorder(FlashTheme.TEXT_HEADER, 1, true));
+        chip.setBackground(active ? FlashTheme.TEXT_HEADER : FlashTheme.SURFACE);
+        chip.setForeground(active ? FlashTheme.TEXT_ON_DARK : FlashTheme.TEXT_HEADER);
+        return chip;
+    }
+
+    private static JLabel workflowSeparator() {
+        JLabel label = new JLabel(">");
+        label.setForeground(FlashTheme.TEXT_MUTED);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
+        return label;
+    }
+
+    private static void positionImportPreviewDialogBesideImage(JDialog dialog,
+                                                               ImagePlus image,
+                                                               Window owner) {
+        if (dialog == null) return;
+        Window imageWindow = image == null ? null : image.getWindow();
+        if (imageWindow != null) {
+            Rectangle bounds = imageWindow.getBounds();
+            Rectangle screenBounds = usableScreenBounds(imageWindow.getGraphicsConfiguration());
+            dialog.setLocation(importPreviewDialogLocationNearImage(
+                    bounds, dialog.getSize(), screenBounds));
+        } else if (owner != null) {
+            dialog.setLocationRelativeTo(owner);
+        } else {
+            dialog.setLocationByPlatform(true);
+        }
     }
 
     private void addImportedFlashRoiPair(RoiManager rm,
@@ -1712,6 +1824,35 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 && anchorBounds != null) {
             y = anchorBounds.y - safeSize.height - gap;
         }
+        return new Point(
+                clamp(x, safeScreen.x, safeScreen.x + safeScreen.width - safeSize.width),
+                clamp(y, safeScreen.y, safeScreen.y + safeScreen.height - safeSize.height));
+    }
+
+    static Point importPreviewDialogLocationNearImage(Rectangle imageBounds,
+                                                      Dimension dialogSize,
+                                                      Rectangle screenBounds) {
+        // Match RoiOrientationPanel placement so import previews use the same side-of-image handoff.
+        Rectangle safeScreen = screenBounds == null
+                ? new Rectangle(Toolkit.getDefaultToolkit().getScreenSize())
+                : screenBounds;
+        Dimension safeSize = dialogSize == null
+                ? new Dimension(1, 1)
+                : dialogSize;
+        if (imageBounds == null) {
+            return new Point(safeScreen.x, safeScreen.y);
+        }
+
+        int gap = 12;
+        int x = imageBounds.x + imageBounds.width + gap;
+        if (x + safeSize.width > safeScreen.x + safeScreen.width) {
+            x = imageBounds.x - safeSize.width - gap;
+        }
+        if (x < safeScreen.x) {
+            x = imageBounds.x;
+        }
+
+        int y = imageBounds.y;
         return new Point(
                 clamp(x, safeScreen.x, safeScreen.x + safeScreen.width - safeSize.width),
                 clamp(y, safeScreen.y, safeScreen.y + safeScreen.height - safeSize.height));

@@ -3,8 +3,11 @@ package flash.pipeline.roi;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
+import flash.pipeline.ui.FlashTheme;
 
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
@@ -13,8 +16,10 @@ import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.table.AbstractTableModel;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.util.ArrayList;
@@ -142,10 +147,16 @@ public final class RegionImageSelectionDialog {
         final JDialog dialog = new JDialog((Frame) null, "Choose images for each region", true);
         dialog.setLayout(new BorderLayout());
 
+        JPanel header = new JPanel();
+        header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
+        header.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+        header.add(workflowRow());
+        header.add(Box.createVerticalStrut(6));
         JLabel note = new JLabel("<html>Region is the image's anatomical label (editable, saved to the project). "
                 + "The checkboxes pick which images each region's ROIs are drawn on.</html>");
-        note.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
-        dialog.add(note, BorderLayout.NORTH);
+        note.setAlignmentX(JLabel.LEFT_ALIGNMENT);
+        header.add(note);
+        dialog.add(header, BorderLayout.NORTH);
 
         JScrollPane scroll = new JScrollPane(table);
         scroll.setPreferredSize(new Dimension(720, 420));
@@ -178,6 +189,38 @@ public final class RegionImageSelectionDialog {
 
         if (!confirmed[0]) return null;
         return new Result(model.selection(), model.editedRegions());
+    }
+
+    private static JPanel workflowRow() {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        row.setOpaque(false);
+        row.setAlignmentX(JPanel.LEFT_ALIGNMENT);
+        row.add(workflowChip("Setup", false));
+        row.add(workflowSeparator());
+        row.add(workflowChip("Choose Images", true));
+        row.add(workflowSeparator());
+        row.add(workflowChip("Draw ROIs/Orientate", false));
+        row.add(workflowSeparator());
+        row.add(workflowChip("Save", false));
+        return row;
+    }
+
+    private static JLabel workflowChip(String text, boolean active) {
+        Color header = FlashTheme.TEXT_HEADER;
+        JLabel chip = new JLabel(" " + text + " ");
+        chip.setOpaque(true);
+        chip.setFont(chip.getFont().deriveFont(active ? Font.BOLD : Font.PLAIN, 11f));
+        chip.setBorder(BorderFactory.createLineBorder(header, 1, true));
+        chip.setBackground(active ? header : FlashTheme.SURFACE);
+        chip.setForeground(active ? FlashTheme.TEXT_ON_DARK : header);
+        return chip;
+    }
+
+    private static JLabel workflowSeparator() {
+        JLabel separator = new JLabel("\u25B8");
+        separator.setForeground(FlashTheme.TEXT_MUTED);
+        separator.setFont(separator.getFont().deriveFont(Font.PLAIN, 11f));
+        return separator;
     }
 
     private static LinkedHashMap<Integer, String> regionsFromRows(List<Row> rows) {

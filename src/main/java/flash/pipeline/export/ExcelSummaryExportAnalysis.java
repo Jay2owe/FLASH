@@ -338,6 +338,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
                 ? ExcelExportPreset.exploratoryDefault() : current };
 
         final PipelineDialog pd = new PipelineDialog("Excel Summary Export", PipelineDialog.Phase.EXPORT);
+        pd.setWorkflowTracker(excelWorkflow(projectRoot), 0);
         pd.addHeader("Preset");
 
         // Custom row: Preset combo + Save-as-preset button (kept out of the
@@ -607,13 +608,35 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
                 ConditionReviewSupport.Options options = new ConditionReviewSupport.Options();
                 options.title = "Excel Summary Export — Condition Assignment";
                 options.primaryButtonText = "Save conditions";
-                ConditionReviewSupport.reviewAndSave(null, directory, current, options);
+                options.workflowSteps = new String[]{"Setup", "Conditions", "Export"};
+                options.workflowActiveIndex = 1;
+                LinkedHashMap<String, String> reviewed =
+                        ConditionReviewSupport.reviewAndSave(null, directory, current, options);
+                if (reviewed != null) {
+                    pd.setWorkflowTracker(excelWorkflow(new File(directory)), 0);
+                }
             }
         });
         JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         row.setOpaque(false);
         row.add(reviewButton);
         pd.addComponent(row);
+    }
+
+    private boolean needsConditionReview(File projectRoot) {
+        if (projectRoot == null) {
+            return false;
+        }
+        String directory = projectRoot.getAbsolutePath();
+        LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
+        return !animals.isEmpty()
+                && ConditionReviewSupport.evaluate(directory, animals).needsReview();
+    }
+
+    private String[] excelWorkflow(File projectRoot) {
+        return needsConditionReview(projectRoot)
+                ? new String[]{"Setup", "Conditions", "Export"}
+                : new String[]{"Setup", "Export"};
     }
 
     private Map<String, String> autoDetectConditions(String directory, Set<String> animals) {
@@ -624,6 +647,8 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             ConditionReviewSupport.Options options = new ConditionReviewSupport.Options();
             options.title = "Excel Summary Export — Condition Assignment";
             options.primaryButtonText = "Save conditions";
+            options.workflowSteps = new String[]{"Setup", "Conditions", "Export"};
+            options.workflowActiveIndex = 1;
             LinkedHashMap<String, String> reviewed =
                     ConditionReviewSupport.reviewAndSave(null, directory, animals, options);
             if (reviewed != null) {

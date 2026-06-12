@@ -24,6 +24,7 @@ import flash.pipeline.image.NamedFilterLoader;
 import flash.pipeline.image.OrientationOps;
 import flash.pipeline.image.ParallelContext;
 import flash.pipeline.image.ThreadSafeMeasure;
+import flash.pipeline.image.ThresholdOps;
 import flash.pipeline.io.BoundedImageLoader;
 import flash.pipeline.intensity.spatial.IntensitySpatialContext;
 import flash.pipeline.intensity.spatial.IntensitySpatialOutputKey;
@@ -210,6 +211,16 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                       String[] channelNames,
                                       boolean[] binarization,
                                       Integer likelyStackDepth);
+
+        default IntensitySpatialConfig launch(String directory,
+                                              IntensitySpatialConfig currentConfig,
+                                              String[] channelNames,
+                                              boolean[] binarization,
+                                              Integer likelyStackDepth,
+                                              String[] workflowSteps,
+                                              int workflowActiveIndex) {
+            return launch(directory, currentConfig, channelNames, binarization, likelyStackDepth);
+        }
     }
 
     private static final IntensitySpatialConfig.AnalysisKey[] GUI_SAME_CHANNEL_2D_ANALYSES = {
@@ -257,8 +268,21 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                                      String[] channelNames,
                                                      boolean[] binarization,
                                                      Integer likelyStackDepth) {
+                    return launch(directory, currentConfig, channelNames, binarization, likelyStackDepth,
+                            new String[]{"Setup", "Intensity-Spatial", "Run"}, 1);
+                }
+
+                @Override
+                public IntensitySpatialConfig launch(String directory,
+                                                     IntensitySpatialConfig currentConfig,
+                                                     String[] channelNames,
+                                                     boolean[] binarization,
+                                                     Integer likelyStackDepth,
+                                                     String[] workflowSteps,
+                                                     int workflowActiveIndex) {
                     return showIntensitySpatialOptionsDialog(
-                            directory, currentConfig, channelNames, binarization, likelyStackDepth);
+                            directory, currentConfig, channelNames, binarization, likelyStackDepth,
+                            workflowSteps, workflowActiveIndex);
                 }
             };
 
@@ -568,10 +592,15 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
                 final Runnable updatePrimaryLabel = new Runnable() {
                     @Override public void run() {
+                        boolean needsRoiThresholds = anyToggleSelected(binarizeToggles)
+                                || (anyRois && isSelected(roiAnalysisToggle));
+                        boolean spatialSelected = isSelected(intensitySpatialToggle);
                         gd.setPrimaryButtonText(NextStepLabels.afterIntensityMain(
                                 anyToggleSelected(binarizeToggles),
                                 anyRois && isSelected(roiAnalysisToggle),
-                                isSelected(intensitySpatialToggle)));
+                                spatialSelected));
+                        gd.setWorkflowTracker(
+                                intensityWorkflow(needsRoiThresholds, spatialSelected), 0);
                     }
                 };
                 pb.primaryLabelUpdater = updatePrimaryLabel;
@@ -630,6 +659,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             } else if (intensityStep == 1) {
                 // --- Secondary dialog ---
                 PipelineDialog gd2 = new PipelineDialog("ROI and Threshold Settings", PipelineDialog.Phase.ANALYSE);
+                gd2.setWorkflowTracker(intensityWorkflow(true, runIntensitySpatial), 1);
                 gd2.enableBackButton();
                 gd2.setPrimaryButtonText(NextStepLabels.afterIntensityRoiThreshold(runIntensitySpatial));
                 gd2.addAnalysisHelpHeader("Fluorescence Intensity Analysis", FLASH_Pipeline.IDX_INTENSITY);
@@ -799,7 +829,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             anyBinarize = anyTrue(binarization);
         }
         if (!prepareIntensitySpatialOptionsBeforeAnalysis(
-                directory, cfg, channelNames, binarization, runIntensitySpatial)) {
+                directory, cfg, channelNames, binarization, runIntensitySpatial,
+                anyBinarize || roiAnalysis)) {
             recordWarn("Intensity Analysis cancelled because intensity-spatial options were cancelled.");
             return;
         }
@@ -1644,10 +1675,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             String maskFilterLabel = useBinFilterForMask
                     ? savedFilterChoiceLabel(mc, cfg)
                     : "Basic background and noise removal";
-            double maskThreshold = parseIntensityThreshold(thresholds, mc, channelNames,
-                    null, roiSetName);
             maskStack = createRoiChannelMask(chans[mc],
-                    filterMacroOrPath, isMacroFile, maskThreshold, !compactLog, maskFilterLabel);
+                    filterMacroOrPath, isMacroFile, thresholdToken(thresholds, mc),
+                    !compactLog, maskFilterLabel);
         }
 
         // Parallelize per-channel processing: each channel's filter + threshold + measure
@@ -1896,14 +1926,21 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
         if (binarization[c]) {
             if (!compactLog) IJ.log("    - Binarization: applying threshold=" + thresholds[c]);
-            double thr = parseIntensityThreshold(thresholds, c, channelNames, parts, roiLabel);
+            String thresholdToken = thresholdToken(thresholds, c);
 
             // Thread-safe binarization
-            ij.ImageStack binStack = binary.getStack();
-            for (int s = 1; s <= binStack.getSize(); s++) {
-                ij.process.ImageProcessor ip = binStack.getProcessor(s);
-                for (int p = 0; p < ip.getWidth() * ip.getHeight(); p++) {
-                    ip.set(p, ip.getf(p) >= thr ? 255 : 0);
+            if (isAlgorithmicIntensityThreshold(thresholdToken)) {
+                if (!ThresholdOps.applyStackThresholdInPlace(binary, thresholdToken, false)) {
+                    throw invalidIntensityThreshold(thresholdToken, c, channelNames, parts, roiLabel);
+                }
+            } else {
+                double thr = parseIntensityThreshold(thresholds, c, channelNames, parts, roiLabel);
+                ij.ImageStack binStack = binary.getStack();
+                for (int s = 1; s <= binStack.getSize(); s++) {
+                    ij.process.ImageProcessor ip = binStack.getProcessor(s);
+                    for (int p = 0; p < ip.getWidth() * ip.getHeight(); p++) {
+                        ip.set(p, ip.getf(p) >= thr ? 255 : 0);
+                    }
                 }
             }
 
@@ -2607,7 +2644,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         for (int c = 0; c < channelNames.length && c < binarization.length; c++) {
             if (binarization[c]) {
                 try {
-                    parseIntensityThreshold(thresholds, c, channelNames, null, null);
+                    if (!isAlgorithmicIntensityThreshold(thresholdToken(thresholds, c))) {
+                        parseIntensityThreshold(thresholds, c, channelNames, null, null);
+                    }
                 } catch (NumberFormatException e) {
                     return e.getMessage();
                 }
@@ -2624,7 +2663,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                         + "', but binarisation is not enabled for that channel.";
             }
             try {
-                parseIntensityThreshold(thresholds, index, channelNames, null, null);
+                if (!isAlgorithmicIntensityThreshold(thresholdToken(thresholds, index))) {
+                    parseIntensityThreshold(thresholds, index, channelNames, null, null);
+                }
             } catch (NumberFormatException e) {
                 return e.getMessage();
             }
@@ -2654,13 +2695,39 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             }
             return parsed;
         } catch (NumberFormatException e) {
-            NumberFormatException wrapped = new NumberFormatException(
-                    "Invalid intensity threshold for " + thresholdContext(channelName, parts, roiLabel)
-                            + ": '" + (raw == null ? "" : raw)
-                            + "' (must be a finite number >= 0).");
+            NumberFormatException wrapped = invalidIntensityThreshold(
+                    raw, channelIndex, channelNames, parts, roiLabel);
             wrapped.initCause(e);
             throw wrapped;
         }
+    }
+
+    private static NumberFormatException invalidIntensityThreshold(String raw,
+                                                                   int channelIndex,
+                                                                   String[] channelNames,
+                                                                   NameParts parts,
+                                                                   String roiLabel) {
+        String channelName = channelIndex >= 0
+                && channelNames != null
+                && channelIndex < channelNames.length
+                ? channelNames[channelIndex]
+                : "channel " + (channelIndex + 1);
+        return new NumberFormatException(
+                "Invalid intensity threshold for " + thresholdContext(channelName, parts, roiLabel)
+                        + ": '" + (raw == null ? "" : raw)
+                        + "' (use a finite number >= 0 or auto:Method:dark).");
+    }
+
+    private static String thresholdToken(String[] thresholds, int channelIndex) {
+        return channelIndex >= 0
+                && thresholds != null
+                && channelIndex < thresholds.length
+                ? thresholds[channelIndex]
+                : null;
+    }
+
+    private static boolean isAlgorithmicIntensityThreshold(String token) {
+        return ThresholdOps.autoThresholdSpecForToken(token, false) != null;
     }
 
     private static String thresholdContext(String channelName, NameParts parts, String roiLabel) {
@@ -2698,6 +2765,16 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                           double threshold,
                                           boolean log,
                                           String filterLabel) {
+        return createRoiChannelMask(source, filterMacroOrPath, isMacroFile,
+                String.valueOf(threshold), log, filterLabel);
+    }
+
+    static ImagePlus createRoiChannelMask(ImagePlus source,
+                                          String filterMacroOrPath,
+                                          boolean isMacroFile,
+                                          String thresholdToken,
+                                          boolean log,
+                                          String filterLabel) {
         if (source == null) return null;
         ImagePlus roiCh = ImageOps.duplicateThreadSafe(source);
         roiCh.setTitle("Mask");
@@ -2717,26 +2794,67 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             if (log) IJ.log("    - ROI mask: basic background and noise removal applied");
         }
 
-        if (Double.isNaN(threshold) || Double.isInfinite(threshold) || threshold < 0.0) {
-            throw new NumberFormatException("ROI channel mask threshold must be a finite number >= 0: "
-                    + threshold);
-        }
-
         int foregroundPixels = 0;
-        ij.ImageStack roiStack = roiCh.getStack();
-        for (int s = 1; s <= roiStack.getSize(); s++) {
-            ij.process.ImageProcessor ip = roiStack.getProcessor(s);
-            for (int p = 0; p < ip.getWidth() * ip.getHeight(); p++) {
-                boolean foreground = ip.getf(p) >= threshold;
-                if (foreground) foregroundPixels++;
-                ip.set(p, foreground ? 255 : 0);
+        if (isAlgorithmicIntensityThreshold(thresholdToken)) {
+            if (!ThresholdOps.applyStackThresholdInPlace(roiCh, thresholdToken, false)) {
+                throw new NumberFormatException("ROI channel mask threshold could not be resolved: "
+                        + (thresholdToken == null ? "" : thresholdToken));
+            }
+            foregroundPixels = countForegroundPixels(roiCh);
+        } else {
+            double threshold = parseFiniteNonNegativeThreshold(thresholdToken,
+                    "ROI channel mask threshold");
+            ij.ImageStack roiStack = roiCh.getStack();
+            for (int s = 1; s <= roiStack.getSize(); s++) {
+                ij.process.ImageProcessor ip = roiStack.getProcessor(s);
+                for (int p = 0; p < ip.getWidth() * ip.getHeight(); p++) {
+                    boolean foreground = ip.getf(p) >= threshold;
+                    if (foreground) foregroundPixels++;
+                    ip.set(p, foreground ? 255 : 0);
+                }
             }
         }
-        if (log) IJ.log("    - ROI mask: filter applied + threshold " + (int) threshold);
+        if (log) IJ.log("    - ROI mask: filter applied + threshold "
+                + thresholdLogText(thresholdToken));
         if (log && foregroundPixels == 0) {
             IJ.log("    - ROI mask: WARNING threshold produced an all-zero mask.");
         }
         return roiCh;
+    }
+
+    private static double parseFiniteNonNegativeThreshold(String token, String label) {
+        try {
+            double threshold = Double.parseDouble(token == null ? "" : token.trim());
+            if (Double.isNaN(threshold) || Double.isInfinite(threshold) || threshold < 0.0) {
+                throw new NumberFormatException("not finite and non-negative");
+            }
+            return threshold;
+        } catch (NumberFormatException e) {
+            NumberFormatException wrapped = new NumberFormatException(
+                    label + " must be a finite number >= 0 or auto:Method:dark: "
+                            + (token == null ? "" : token));
+            wrapped.initCause(e);
+            throw wrapped;
+        }
+    }
+
+    private static int countForegroundPixels(ImagePlus image) {
+        if (image == null || image.getStack() == null) return 0;
+        int count = 0;
+        ij.ImageStack stack = image.getStack();
+        for (int s = 1; s <= stack.getSize(); s++) {
+            ij.process.ImageProcessor ip = stack.getProcessor(s);
+            for (int p = 0; p < ip.getPixelCount(); p++) {
+                if (ip.getf(p) > 0) count++;
+            }
+        }
+        return count;
+    }
+
+    private static String thresholdLogText(String token) {
+        return isAlgorithmicIntensityThreshold(token)
+                ? ThresholdOps.describeToken(token)
+                : String.valueOf((int) parseFiniteNonNegativeThreshold(token, "threshold"));
     }
 
     static ImagePlus applyRoiChannelMask(ImagePlus maskStack, ImagePlus measurement) {
@@ -3488,6 +3606,16 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                                          String[] channelNames,
                                                          boolean[] binarization,
                                                          boolean runIntensitySpatial) {
+        return prepareIntensitySpatialOptionsBeforeAnalysis(
+                directory, cfg, channelNames, binarization, runIntensitySpatial, false);
+    }
+
+    boolean prepareIntensitySpatialOptionsBeforeAnalysis(String directory,
+                                                         BinConfig cfg,
+                                                         String[] channelNames,
+                                                         boolean[] binarization,
+                                                         boolean runIntensitySpatial,
+                                                         boolean roiThresholdStepVisited) {
         int likelyStackDepth = likelyStackDepthForSpatialWizard(directory, cfg);
         Integer stackDepth = likelyStackDepth > 0 ? Integer.valueOf(likelyStackDepth) : null;
         if (!runIntensitySpatial) {
@@ -3511,8 +3639,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             return true;
         }
 
+        String[] workflow = intensityWorkflow(roiThresholdStepVisited, true);
         IntensitySpatialConfig selected = intensitySpatialOptionsDialogLauncher.launch(
-                directory, current, safeChannelNames, safeBinarization, stackDepth);
+                directory, current, safeChannelNames, safeBinarization, stackDepth,
+                workflow, workflowStepIndex(workflow, "Intensity-Spatial"));
         if (selected == null) {
             IJ.log("[FLASH] Intensity Analysis cancelled because intensity-spatial options were cancelled.");
             return false;
@@ -3552,6 +3682,19 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             String[] channelNames,
             boolean[] binarization,
             Integer likelyStackDepth) {
+        return showIntensitySpatialOptionsDialog(
+                directory, currentConfig, channelNames, binarization, likelyStackDepth,
+                new String[]{"Setup", "Intensity-Spatial", "Run"}, 1);
+    }
+
+    private static IntensitySpatialConfig showIntensitySpatialOptionsDialog(
+            String directory,
+            IntensitySpatialConfig currentConfig,
+            String[] channelNames,
+            boolean[] binarization,
+            Integer likelyStackDepth,
+            String[] workflowSteps,
+            int workflowActiveIndex) {
         IntensitySpatialConfig base = currentConfig == null
                 ? IntensitySpatialConfig.disabled()
                 : currentConfig;
@@ -3571,6 +3714,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         while (true) {
             PipelineDialog dialog = new PipelineDialog("Intensity-Spatial Analysis",
                     PipelineDialog.Phase.ANALYSE);
+            dialog.setWorkflowTracker(workflowSteps, workflowActiveIndex);
             dialog.setPrimaryButtonText(NextStepLabels.RUN_INTENSITY_ANALYSIS);
             dialog.addAnalysisHelpHeader("Intensity-Spatial Analysis", FLASH_Pipeline.IDX_INTENSITY);
             dialog.addMessage("Pick spatial metrics per mode. Each tab runs independently.");
@@ -4602,6 +4746,31 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         return toggle != null && toggle.isSelected();
     }
 
+    private static String[] intensityWorkflow(boolean roiThresholds, boolean spatial) {
+        List<String> steps = new ArrayList<String>();
+        steps.add("Setup");
+        if (roiThresholds) {
+            steps.add("ROI & Thresholds");
+        }
+        if (spatial) {
+            steps.add("Intensity-Spatial");
+        }
+        steps.add("Run");
+        return steps.toArray(new String[steps.size()]);
+    }
+
+    private static int workflowStepIndex(String[] workflow, String stepName) {
+        if (workflow == null || stepName == null) {
+            return 0;
+        }
+        for (int i = 0; i < workflow.length; i++) {
+            if (stepName.equals(workflow[i])) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
     private void applyCliIntensityConfiguration(String directory,
                                                 BinConfig cfg,
                                                 ChannelIdentities identities,
@@ -4730,20 +4899,21 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
 
     private static String describeConfiguredThreshold(int c, BinConfig cfg, boolean useBin,
                                                       boolean needsBinarizationThreshold) {
-        String configuredThreshold = configuredNumericThreshold(c, cfg);
+        String configuredThreshold = configuredThresholdToken(c, cfg);
         if (needsBinarizationThreshold) {
             if (useBin && configuredThreshold != null) {
-                return configuredThreshold + " (from configuration)";
+                return thresholdDisplayText(configuredThreshold) + " (from configuration)";
             }
             return "Enter on next dialogue";
         }
         if (configuredThreshold != null) {
-            return configuredThreshold + " (from configuration; used if Binarise is enabled)";
+            return thresholdDisplayText(configuredThreshold)
+                    + " (from configuration; used if Binarise is enabled)";
         }
         return "not needed unless Binarise is enabled";
     }
 
-    private static String configuredNumericThreshold(int c, BinConfig cfg) {
+    private static String configuredThresholdToken(int c, BinConfig cfg) {
         if (cfg == null || c < 0 || c >= cfg.channelIntensityThresholds.size()) {
             return null;
         }
@@ -4755,12 +4925,21 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         if (trimmed.isEmpty() || "default".equalsIgnoreCase(trimmed)) {
             return null;
         }
+        if (isAlgorithmicIntensityThreshold(trimmed)) {
+            return trimmed;
+        }
         try {
             double parsed = Double.parseDouble(trimmed);
             return !Double.isNaN(parsed) && !Double.isInfinite(parsed) ? trimmed : null;
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private static String thresholdDisplayText(String token) {
+        return isAlgorithmicIntensityThreshold(token)
+                ? ThresholdOps.describeToken(token)
+                : token;
     }
 
     private static String savedFilterChoiceLabel(int c, BinConfig cfg) {

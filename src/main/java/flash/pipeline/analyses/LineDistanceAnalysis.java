@@ -28,6 +28,7 @@ import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
@@ -56,8 +57,10 @@ import javax.swing.WindowConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.Dialog;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsEnvironment;
@@ -244,6 +247,7 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
         final String defaultCustom = "Ventricle";
 
         PipelineDialog pd = new PipelineDialog("Line Distance Analysis", PipelineDialog.Phase.ANALYSE);
+        pd.setWorkflowTracker(new String[]{"Setup", "Draw Line", "Measure"}, 0);
         pd.addHeader("Line Set Selection");
 
         final List<ToggleSwitch> existingToggles = new ArrayList<ToggleSwitch>();
@@ -312,6 +316,9 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
                 boolean drawingNewSet = !hasExisting
                         || (drawNewToggle != null && drawNewToggle.isSelected());
                 pd.setPrimaryButtonText(NextStepLabels.afterLineSetSelection(drawingNewSet));
+                pd.setWorkflowTracker(drawingNewSet
+                        ? new String[]{"Setup", "Draw Line", "Measure"}
+                        : new String[]{"Setup", "Measure"}, 0);
             }
         };
         if (drawNewToggle != null) {
@@ -809,6 +816,11 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
             body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
             body.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
 
+            JPanel workflow = workflowRow();
+            workflow.setAlignmentX(JPanel.LEFT_ALIGNMENT);
+            body.add(workflow);
+            body.add(Box.createVerticalStrut(8));
+
             JLabel instructions = new JLabel(instructionHtml(
                     imageIndexZeroBased, totalImages, lineName, imageTitle, safePrimary));
             instructions.setAlignmentX(JLabel.LEFT_ALIGNMENT);
@@ -826,6 +838,35 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
 
             this.dialog.getContentPane().add(body);
             this.dialog.getRootPane().setDefaultButton(primaryButton);
+        }
+
+        private static JPanel workflowRow() {
+            JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            row.setOpaque(false);
+            row.add(workflowChip("Setup", false));
+            row.add(workflowSeparator());
+            row.add(workflowChip("Draw Line", true));
+            row.add(workflowSeparator());
+            row.add(workflowChip("Measure", false));
+            return row;
+        }
+
+        private static JLabel workflowChip(String text, boolean active) {
+            Color header = FlashTheme.TEXT_HEADER;
+            JLabel chip = new JLabel(" " + text + " ");
+            chip.setOpaque(true);
+            chip.setFont(chip.getFont().deriveFont(active ? Font.BOLD : Font.PLAIN, 11f));
+            chip.setBorder(BorderFactory.createLineBorder(header, 1, true));
+            chip.setBackground(active ? header : FlashTheme.SURFACE);
+            chip.setForeground(active ? FlashTheme.TEXT_ON_DARK : header);
+            return chip;
+        }
+
+        private static JLabel workflowSeparator() {
+            JLabel separator = new JLabel("\u25B8");
+            separator.setForeground(FlashTheme.TEXT_MUTED);
+            separator.setFont(separator.getFont().deriveFont(Font.PLAIN, 11f));
+            return separator;
         }
 
         boolean showNearAndWait(ImagePlus image) {

@@ -95,6 +95,26 @@ public class DrawAndSaveROIsAnalysisTest {
     }
 
     @Test
+    public void importPreviewDialogLocationOpensBesideImageLikeDrawOrientateDialog() {
+        Point location = DrawAndSaveROIsAnalysis.importPreviewDialogLocationNearImage(
+                new Rectangle(100, 80, 700, 500),
+                new Dimension(360, 220),
+                new Rectangle(0, 0, 1400, 900));
+
+        assertEquals(new Point(812, 80), location);
+    }
+
+    @Test
+    public void importPreviewDialogLocationFallsBackLeftWhenRightSideIsTight() {
+        Point location = DrawAndSaveROIsAnalysis.importPreviewDialogLocationNearImage(
+                new Rectangle(1000, 80, 350, 500),
+                new Dimension(360, 220),
+                new Rectangle(0, 0, 1400, 900));
+
+        assertEquals(new Point(628, 80), location);
+    }
+
+    @Test
     public void executeReturnsGracefullyWhenDispatcherCancelsMissingBin() throws Exception {
         File dir = temp.newFolder("cancelled");
         installDispatcherChoice(BinSetupChooser.Choice.CANCELLED, new AtomicInteger(0));

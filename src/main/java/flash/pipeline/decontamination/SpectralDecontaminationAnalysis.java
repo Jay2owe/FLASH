@@ -444,6 +444,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         while (true) {
             final CorrectionPipeline remembered = defaults.copy();
             final PipelineDialog dialog = new PipelineDialog(TITLE, PipelineDialog.Phase.ANALYSE);
+            dialog.setWorkflowTracker(spectralWorkflow(pipelineNeedsExpertSettings(remembered)), 2);
             dialog.enableBackButton();
             dialog.addHeader("Correction Stack");
             dialog.addMessage("Choose a preset or build a custom ordered stack. "
@@ -479,6 +480,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                     updating[0] = true;
                     try {
                         refreshFeatureDialog(
+                                dialog,
                                 registry,
                                 config,
                                 existingObjectMapsAvailable,
@@ -562,7 +564,8 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         }
     }
 
-    private void refreshFeatureDialog(CorrectionFeatureRegistry registry,
+    private void refreshFeatureDialog(PipelineDialog dialog,
+                                      CorrectionFeatureRegistry registry,
                                       SpectralDecontaminationConfig config,
                                       boolean existingObjectMapsAvailable,
                                       ToggleSwitch expertToggle,
@@ -655,6 +658,9 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                 expertMode,
                 (String) presetChoice.getSelectedItem(),
                 featureChoices);
+        if (dialog != null) {
+            dialog.setWorkflowTracker(spectralWorkflow(pipelineNeedsExpertSettings(previewPipeline)), 2);
+        }
         if (previewPipeline.isEmpty()) {
             summaryLabel.setText(messageText("Pick a preset or start with Feature 1."));
             return;
@@ -680,6 +686,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                 config.getFeatureSettings(RocThresholdSearchFeature.ID));
         while (true) {
             PipelineDialog dialog = new PipelineDialog(TITLE);
+            dialog.setWorkflowTracker(spectralWorkflow(true), 3);
             dialog.enableBackButton();
             dialog.addHeader("ROC Threshold Search");
             dialog.addMessage("Choose the metric and control false-positive limit for the threshold grid. "
@@ -758,6 +765,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                 config.getFeatureSettings(FullForwardModelFeature.ID));
         while (true) {
             PipelineDialog dialog = new PipelineDialog(TITLE);
+            dialog.setWorkflowTracker(spectralWorkflow(true), 3);
             dialog.enableBackButton();
             dialog.addHeader("Full Forward Model");
             dialog.addMessage("These expert settings control the local autofluorescence fit, bleed-through source purification, and per-image bleed-through coefficient pool.");
@@ -834,6 +842,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                 config.getFeatureSettings(EnvelopeCorrectionFeature.ID));
         while (true) {
             PipelineDialog dialog = new PipelineDialog(TITLE);
+            dialog.setWorkflowTracker(spectralWorkflow(true), 3);
             dialog.enableBackButton();
             dialog.addHeader("Envelope Correction");
             dialog.addMessage("Use these expert settings when linear subtraction still leaves a bright contaminant-driven tail in the corrected target.");
@@ -1754,6 +1763,18 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         return pipeline.getFeatureIds().contains(featureId);
     }
 
+    private String[] spectralWorkflow(boolean expertSettings) {
+        return expertSettings
+                ? new String[]{"Setup", "Conditions", "Correction Stack", "Expert Settings", "Preview", "Run"}
+                : new String[]{"Setup", "Conditions", "Correction Stack", "Preview", "Run"};
+    }
+
+    private boolean pipelineNeedsExpertSettings(CorrectionPipeline pipeline) {
+        return containsFeature(pipeline, FullForwardModelFeature.ID)
+                || containsFeature(pipeline, EnvelopeCorrectionFeature.ID)
+                || containsFeature(pipeline, RocThresholdSearchFeature.ID);
+    }
+
     private CorrectionPipeline prefixBeforeRocThresholdSearch(CorrectionPipeline pipeline) {
         if (pipeline == null) {
             return CorrectionPipeline.empty();
@@ -2322,6 +2343,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
             String directory,
             SpectralDecontaminationConfig config) {
         PipelineDialog dialog = new PipelineDialog("Spectral Decontamination");
+        dialog.setWorkflowTracker(spectralWorkflow(false), 1);
         dialog.addHeader("Conditions");
         dialog.addMessage("Choose how Spectral Decontamination should assign images to experimental conditions.");
         String defaultLabel = config.getConditionSource().getLabel();
@@ -2373,6 +2395,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
 
     private LinkedHashMap<String, String> showManualAssignmentDialog(LinkedHashMap<String, String> defaults) {
         PipelineDialog dialog = new PipelineDialog("Spectral Decontamination");
+        dialog.setWorkflowTracker(spectralWorkflow(false), 1);
         dialog.addHeader("Manual Condition Assignment");
         dialog.addMessage("Assign each animal or image group to a condition.");
         List<String> animals = new ArrayList<String>(defaults.keySet());
@@ -2410,6 +2433,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
 
         while (true) {
             PipelineDialog dialog = new PipelineDialog("Spectral Decontamination");
+            dialog.setWorkflowTracker(spectralWorkflow(false), 1);
             dialog.addHeader("Control Conditions");
             dialog.addMessage("Controls are expected to have little or no true target signal.");
             for (String condition : conditions) {

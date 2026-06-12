@@ -1,5 +1,6 @@
 package flash.pipeline.deconv.qc;
 
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.preview.PreviewPairPanel;
 import ij.IJ;
 import ij.ImagePlus;
@@ -16,6 +17,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -64,7 +66,10 @@ public final class DeconvPreviewDialog {
         final JDialog dialog = new JDialog((Frame) null, "3D Deconvolution Preview", true);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setLayout(new BorderLayout(0, 8));
-        dialog.add(buildPreviewRoot(content), BorderLayout.CENTER);
+        JPanel body = new JPanel(new BorderLayout(0, 8));
+        body.add(workflowRow(), BorderLayout.NORTH);
+        body.add(buildPreviewRoot(content), BorderLayout.CENTER);
+        dialog.add(body, BorderLayout.CENTER);
         dialog.add(buildButtonRow(dialog, decision), BorderLayout.SOUTH);
         dialog.setMinimumSize(new Dimension(760, 600));
         dialog.pack();
@@ -72,6 +77,36 @@ public final class DeconvPreviewDialog {
         dialog.setLocationRelativeTo(null);
         dialog.setVisible(true);
         return decision[0];
+    }
+
+    private static JPanel workflowRow() {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        row.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
+        row.setOpaque(false);
+        row.add(workflowChip("Setup", false));
+        row.add(workflowSeparator());
+        row.add(workflowChip("Preview", true));
+        row.add(workflowSeparator());
+        row.add(workflowChip("Run", false));
+        return row;
+    }
+
+    private static JLabel workflowChip(String text, boolean active) {
+        Color header = FlashTheme.TEXT_HEADER;
+        JLabel chip = new JLabel(" " + text + " ");
+        chip.setOpaque(true);
+        chip.setFont(chip.getFont().deriveFont(active ? Font.BOLD : Font.PLAIN, 11f));
+        chip.setBorder(BorderFactory.createLineBorder(header, 1, true));
+        chip.setBackground(active ? header : FlashTheme.SURFACE);
+        chip.setForeground(active ? FlashTheme.TEXT_ON_DARK : header);
+        return chip;
+    }
+
+    private static JLabel workflowSeparator() {
+        JLabel separator = new JLabel("\u25B8");
+        separator.setForeground(FlashTheme.TEXT_MUTED);
+        separator.setFont(separator.getFont().deriveFont(Font.PLAIN, 11f));
+        return separator;
     }
 
     private static JPanel buildPreviewRoot(PreviewContent content) {

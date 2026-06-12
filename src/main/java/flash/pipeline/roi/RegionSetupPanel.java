@@ -1,5 +1,7 @@
 package flash.pipeline.roi;
 
+import flash.pipeline.ui.wizard.RegionTableCellEditor;
+
 import javax.swing.DefaultCellEditor;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -51,6 +53,7 @@ public final class RegionSetupPanel extends JPanel {
         table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
         table.setRowHeight(22);
         table.getColumnModel().getColumn(0).setPreferredWidth(220);
+        table.getColumnModel().getColumn(0).setCellEditor(new RegionTableCellEditor());
         if (choices.length > 0) {
             TableColumn channelColumn = table.getColumnModel().getColumn(1);
             channelColumn.setCellEditor(

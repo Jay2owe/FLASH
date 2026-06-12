@@ -18,6 +18,7 @@ import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.DependencyService;
 import flash.pipeline.runtime.DependencyStatus;
 import flash.pipeline.runtime.FeatureDependencyGate;
+import ij.measure.ResultsTable;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -459,6 +460,40 @@ public class ThreeDObjectAnalysisTest {
         assertTrue(validateRoiSets(analysis, fullImageRoiSets(), 3));
     }
 
+    @Test
+    public void appendStatsToChannelTableSkipsZeroObjectAndZeroVolumeRows() throws Exception {
+        ThreeDObjectAnalysis analysis = new ThreeDObjectAnalysis();
+        ResultsTable channelTable = new ResultsTable();
+
+        appendStatsToChannelTable(analysis, null, channelTable,
+                1, "Mouse1", "LH", "SCN", "SCN1");
+        appendStatsToChannelTable(analysis, new ResultsTable(), channelTable,
+                1, "Mouse1", "LH", "SCN", "SCN1");
+
+        assertEquals(0, channelTable.size());
+
+        ResultsTable stats = new ResultsTable();
+        stats.incrementCounter();
+        stats.setValue("Label", 0, 1);
+        stats.setValue("Volume (micron^3)", 0, 0);
+        stats.setValue("Surface (micron^2)", 0, 50);
+        stats.setValue("IntDen", 0, 100);
+        stats.incrementCounter();
+        stats.setValue("Label", 1, 2);
+        stats.setValue("Volume (micron^3)", 1, 42);
+        stats.setValue("Surface (micron^2)", 1, 11);
+        stats.setValue("IntDen", 1, 200);
+
+        appendStatsToChannelTable(analysis, stats, channelTable,
+                7, "Mouse1", "LH", "SCN", "SCN1");
+
+        assertEquals(1, channelTable.size());
+        assertEquals(2.0, channelTable.getValue("Label", 0), 0.0);
+        assertEquals(42.0, channelTable.getValue("Volume (micron^3)", 0), 0.0);
+        assertEquals(7.0, channelTable.getValue("SCN", 0), 0.0);
+        assertEquals("Mouse1", channelTable.getStringValue("Animal Name", 0));
+    }
+
     private static void installDispatcherChoice(final BinSetupChooser.Choice choice,
                                                 final AtomicInteger chooserCalls) throws Exception {
         setDispatcherHook("setHeadlessProbeForTest",
@@ -636,6 +671,27 @@ public class ThreeDObjectAnalysisTest {
                 "validateRoiSets", roiSets.getClass(), int.class);
         method.setAccessible(true);
         return ((Boolean) method.invoke(analysis, roiSets, totalImages)).booleanValue();
+    }
+
+    private static void appendStatsToChannelTable(ThreeDObjectAnalysis analysis,
+                                                  ResultsTable source,
+                                                  ResultsTable target,
+                                                  int scnIndex,
+                                                  String animal,
+                                                  String hemisphere,
+                                                  String region,
+                                                  String roi) throws Exception {
+        Method method = ThreeDObjectAnalysis.class.getDeclaredMethod(
+                "appendStatsToChannelTable",
+                ResultsTable.class,
+                ResultsTable.class,
+                int.class,
+                String.class,
+                String.class,
+                String.class,
+                String.class);
+        method.setAccessible(true);
+        method.invoke(analysis, source, target, Integer.valueOf(scnIndex), animal, hemisphere, region, roi);
     }
 
     private static BinConfig dapiIba1AbetaConfig() {

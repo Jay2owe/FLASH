@@ -10,6 +10,7 @@ import flash.pipeline.bin.ChannelIdentities;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.deconv.DeconvolvedInputResolver;
 import flash.pipeline.image.AdaptiveParallelism;
+import flash.pipeline.image.DisplayRangeSetting;
 import flash.pipeline.image.ImageCalcOps;
 import flash.pipeline.image.ImageOps;
 import flash.pipeline.image.OrientationOps;
@@ -48,7 +49,6 @@ import flash.pipeline.zslice.ZSliceOps;
 
 import ij.IJ;
 import ij.ImagePlus;
-import ij.plugin.ContrastEnhancer;
 import ij.process.ColorProcessor;
 import ij.process.LUT;
 import ij.plugin.ChannelSplitter;
@@ -484,13 +484,14 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         saveSaturations(directory, channelNames, mdr.processMethodPerCh, mdr.saturationsPerCh);
         IJ.log("  - Saturations saved to FLASH/Config/.settings/Saturations.txt");
 
-        // Sync min-max values back to channel_config.json.
-        updateBinMinMax(directory, mdr.processMethodPerCh, mdr.customMinMaxPerCh, nCh);
-        IJ.log("  - Min-max display ranges synced to channel_config.json");
+        // Sync display settings back to channel_config.json.
+        updateBinMinMax(directory, mdr.processMethodPerCh, mdr.customMinMaxPerCh,
+                mdr.saturationsPerCh, nCh);
+        IJ.log("  - Display settings synced to channel_config.json");
 
         // Capture the confirmed configuration into the run record so a later
         // "Load settings from previous run" can restore it. We re-read after the
-        // min-max sync above so display_min_max reflects the dialog's chosen
+        // display-setting sync above so display_min_max reflects the dialog's chosen
         // presentation display ranges, matching what the load applier reads back.
         recordSplitMergeRunParameters(loadBinConfig(directory), mdr);
 
@@ -984,6 +985,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         }
 
         final PipelineDialog pd = new PipelineDialog("Make Presentation Images", PipelineDialog.Phase.SETUP);
+        pd.setWorkflowTracker(new String[]{"Setup", "Run"}, 0);
 
         // ── Section: Input ──
         pd.addAnalysisHelpHeader("Make Presentation Images", FLASH_Pipeline.IDX_SPLIT_MERGE);
@@ -1102,11 +1104,16 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
             int count = grid.methodBoxes == null ? 0 : grid.methodBoxes.length;
             for (int i = 0; i < count; i++) {
                 String range = valueAt(cfg.channelMinMax, i, NONE_OPTION);
+                DisplayRangeSetting setting = DisplayRangeSetting.parse(range);
                 if (grid.displayRangeFields != null && i < grid.displayRangeFields.length) {
-                    grid.displayRangeFields[i].setText(hasCustomDisplayRange(range) ? range : "");
+                    grid.displayRangeFields[i].setText(setting.isManual() ? range : "");
+                }
+                if (grid.saturationFields != null && i < grid.saturationFields.length
+                        && setting.isAutoEnhance()) {
+                    grid.saturationFields[i].setText(formatSaturation(setting.saturationPercent()));
                 }
                 if (grid.methodBoxes != null && i < grid.methodBoxes.length) {
-                    grid.methodBoxes[i].setSelectedItem(hasCustomDisplayRange(range)
+                    grid.methodBoxes[i].setSelectedItem(setting.isManual()
                             ? METHOD_CUSTOM : METHOD_AUTOMATIC);
                     updateChannelGridEnabledState(grid.methodBoxes[i],
                             grid.displayRangeFields[i], grid.saturationFields[i]);
@@ -1749,7 +1756,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         for (int ch = 0; ch < nCh; ch++) {
             String defaultRange = defaultMinMax != null && ch < defaultMinMax.length
                     ? defaultMinMax[ch] : NONE_OPTION;
-            boolean hasCustomValue = hasCustomDisplayRange(defaultRange);
+            DisplayRangeSetting defaultSetting = DisplayRangeSetting.parse(defaultRange);
+            boolean hasCustomValue = defaultSetting.isManual();
+            boolean hasAutoValue = defaultSetting.isAutoEnhance();
             String defaultMethod = hasCustomValue ? METHOD_CUSTOM : METHOD_AUTOMATIC;
 
             methodBoxes[ch] = new JComboBox<String>(PROCESS_METHODS);
@@ -1763,7 +1772,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
             displayRangeFields[ch].setMaximumSize(new Dimension(CHANNEL_GRID_TEXT_WIDTH, 24));
             displayRangeFields[ch].setPreferredSize(new Dimension(CHANNEL_GRID_TEXT_WIDTH, 24));
 
-            saturationFields[ch] = new JTextField(formatSaturation(DEFAULT_SATURATION), 8);
+            double defaultSaturation = hasAutoValue
+                    ? defaultSetting.saturationPercent() : DEFAULT_SATURATION;
+            saturationFields[ch] = new JTextField(formatSaturation(defaultSaturation), 8);
             saturationFields[ch].setName("splitMerge.channel." + ch + ".saturation");
             saturationFields[ch].setMaximumSize(new Dimension(CHANNEL_GRID_SATURATION_WIDTH, 24));
             saturationFields[ch].setPreferredSize(new Dimension(CHANNEL_GRID_SATURATION_WIDTH, 24));
@@ -1879,7 +1890,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
     }
 
     private static boolean hasCustomDisplayRange(String value) {
-        return !NONE_OPTION.equalsIgnoreCase(value) && value != null && !value.trim().isEmpty();
+        return DisplayRangeSetting.parse(value).isManual();
     }
 
     private static String normalizeDisplayRange(String value) {
@@ -1897,10 +1908,12 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         for (int i = 0; i < nCh; i++) {
             String defaultRange = defaultMinMax != null && i < defaultMinMax.length
                     ? defaultMinMax[i] : NONE_OPTION;
-            boolean hasCustomValue = hasCustomDisplayRange(defaultRange);
+            DisplayRangeSetting setting = DisplayRangeSetting.parse(defaultRange);
+            boolean hasCustomValue = setting.isManual();
             result.processMethodPerCh[i] = hasCustomValue ? METHOD_CUSTOM : METHOD_AUTOMATIC;
             result.customMinMaxPerCh[i] = hasCustomValue ? defaultRange : NONE_OPTION;
-            result.saturationsPerCh[i] = DEFAULT_SATURATION;
+            result.saturationsPerCh[i] = setting.isAutoEnhance()
+                    ? setting.saturationPercent() : DEFAULT_SATURATION;
         }
         result.createMerge = true;
         result.saveOmeTiff = false;
@@ -1948,7 +1961,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         String trimmed = text.trim();
         if (trimmed.isEmpty()) return fallback;
         try {
-            return Double.parseDouble(trimmed);
+            return DisplayRangeSetting.normalizeSaturation(Double.parseDouble(trimmed), fallback);
         } catch (NumberFormatException e) {
             return fallback;
         }
@@ -2408,8 +2421,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
             case METHOD_NONE:
                 break;
             case METHOD_AUTOMATIC:
-                // Thread-safe: ContrastEnhancer operates on the ImagePlus directly
-                new ContrastEnhancer().stretchHistogram(imp, saturation);
+                DisplayRangeSetting.autoEnhance(saturation).applyTo(imp);
                 if (!compactLog) IJ.log("    - Saturation: " + saturation);
                 break;
             case METHOD_MANUAL:
@@ -2423,16 +2435,9 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
                 }
                 break;
             case METHOD_CUSTOM:
-                if (customMinMax != null && !customMinMax.equalsIgnoreCase(NONE_OPTION)) {
-                    String[] mm = customMinMax.split("-");
-                    if (mm.length == 2) {
-                        try {
-                            double min = Double.parseDouble(mm[0]);
-                            double max = Double.parseDouble(mm[1]);
-                            imp.setDisplayRange(min, max);
-                        } catch (NumberFormatException ignored) {
-                        }
-                    }
+                DisplayRangeSetting custom = DisplayRangeSetting.parse(customMinMax);
+                if (custom.isManual()) {
+                    custom.applyTo(imp);
                 }
                 break;
             default:
@@ -2714,13 +2719,18 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
     }
 
     private void updateBinMinMax(String directory, String[] processMethodPerCh,
-                                 String[] customMinMaxPerCh, int nCh) {
+                                 String[] customMinMaxPerCh,
+                                 double[] saturationsPerCh,
+                                 int nCh) {
         String[] minMaxValues = new String[nCh];
         for (int i = 0; i < nCh; i++) {
             if (METHOD_CUSTOM.equals(processMethodPerCh[i])
                     && customMinMaxPerCh[i] != null
                     && !NONE_OPTION.equalsIgnoreCase(customMinMaxPerCh[i])) {
                 minMaxValues[i] = customMinMaxPerCh[i];
+            } else if (METHOD_AUTOMATIC.equals(processMethodPerCh[i])) {
+                minMaxValues[i] = DisplayRangeSetting.formatAutoToken(
+                        doubleAt(saturationsPerCh, i, DEFAULT_SATURATION));
             } else {
                 minMaxValues[i] = NONE_OPTION;
             }

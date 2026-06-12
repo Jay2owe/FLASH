@@ -1173,6 +1173,7 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
         final ConditionManifestPanel manifest = new ConditionManifestPanel(animals, prefill);
 
         PipelineDialog pd = new PipelineDialog("Statistical Analysis \u2014 Condition Assignment", PipelineDialog.Phase.EXPORT);
+        pd.setWorkflowTracker(new String[]{"Conditions", "Run"}, 0);
         pd.addComponent(buildStatisticsPresetRow(directory));
         final JComboBox<StatsAxisChoice> axisCombo = buildConditionAxisCombo(directory);
         if (axisCombo != null) {

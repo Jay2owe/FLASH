@@ -304,6 +304,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
 
     private RunSettings showConfigurationDialog(String directory, String[] channelNames, SeriesJob representative) {
         PipelineDialog dialog = new PipelineDialog(TITLE, PipelineDialog.Phase.SETUP);
+        dialog.setWorkflowTracker(new String[]{"Setup", "Preview", "Run"}, 0);
         final DialogBindings bindings = new DialogBindings();
         final DeconvPresetIO presetIO = new DeconvPresetIO(new File(directory));
         final PreviewState previewState = new PreviewState();
@@ -1249,6 +1250,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         }
 
         PipelineDialog picker = new PipelineDialog("Preview Channels", PipelineDialog.Phase.SETUP);
+        picker.setWorkflowTracker(new String[]{"Setup", "Preview", "Run"}, 1);
         picker.addHeader("Channels to preview");
         JPanel column = new JPanel();
         column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
