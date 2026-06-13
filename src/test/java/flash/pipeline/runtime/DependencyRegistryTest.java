@@ -180,8 +180,15 @@ public class DependencyRegistryTest {
         assertTrue(plugins.mkdirs());
         writeJar(plugins, "FLASH-4.0.0.jar",
                 "flash/pipeline/FLASH_Pipeline.class",
+                "flash/pipeline/analyses/DeconvolutionAnalysis.class",
+                "flash/pipeline/analyses/DeconvolutionAnalysis$SeriesJob.class",
+                "flash/pipeline/bin/ChannelIdentities.class",
+                "flash/pipeline/intelligence/AnalysisStatusScanner.class",
                 "flash/pipeline/intelligence/PreFlightChecks.class",
                 "flash/pipeline/recipes/PipelineRecipeIO.class",
+                "icons/status_done.png",
+                "icons/status_pending.png",
+                "icons/status_stale.png",
                 "pipeline_recipes/standard-3d-intensity.json",
                 "pipeline_recipes/quick-cell-count.json",
                 "pipeline_recipes/presentation.json",
@@ -196,6 +203,66 @@ public class DependencyRegistryTest {
                 .contains("PreFlightChecks$DirectoryFileScan.class"));
         assertTrue(status.getDetailMessage(), status.getDetailMessage()
                 .contains("replace it with a freshly built FLASH JAR"));
+    }
+
+    @Test
+    public void pluginJarIntegrityReportsLiveJarMissingDeconvolutionSeriesJobClass() throws Exception {
+        File fijiDir = temp.newFolder("missing-deconv-series-job");
+        File plugins = new File(fijiDir, "plugins");
+        assertTrue(plugins.mkdirs());
+        writeJar(plugins, "FLASH-4.0.0.jar",
+                "flash/pipeline/FLASH_Pipeline.class",
+                "flash/pipeline/analyses/DeconvolutionAnalysis.class",
+                "flash/pipeline/bin/ChannelIdentities.class",
+                "flash/pipeline/intelligence/AnalysisStatusScanner.class",
+                "flash/pipeline/intelligence/PreFlightChecks.class",
+                "flash/pipeline/intelligence/PreFlightChecks$DirectoryFileScan.class",
+                "flash/pipeline/recipes/PipelineRecipeIO.class",
+                "icons/status_done.png",
+                "icons/status_pending.png",
+                "icons/status_stale.png",
+                "pipeline_recipes/standard-3d-intensity.json",
+                "pipeline_recipes/quick-cell-count.json",
+                "pipeline_recipes/presentation.json",
+                "pipeline_recipes/fast-presentable-results.json",
+                "pipeline_recipes/full-pipeline.json");
+
+        DependencyStatus status = DependencyRegistry.get(DependencyId.PLUGIN_JAR_INTEGRITY)
+                .probe(newProbeContext(getClass().getClassLoader(), fijiDir));
+
+        assertTrue(status.getDetailMessage(), status.isError());
+        assertTrue(status.getDetailMessage(), status.getDetailMessage()
+                .contains("DeconvolutionAnalysis$SeriesJob.class"));
+    }
+
+    @Test
+    public void pluginJarIntegrityReportsLiveJarMissingChannelIdentitiesClass() throws Exception {
+        File fijiDir = temp.newFolder("missing-channel-identities");
+        File plugins = new File(fijiDir, "plugins");
+        assertTrue(plugins.mkdirs());
+        writeJar(plugins, "FLASH-4.0.0.jar",
+                "flash/pipeline/FLASH_Pipeline.class",
+                "flash/pipeline/analyses/DeconvolutionAnalysis.class",
+                "flash/pipeline/analyses/DeconvolutionAnalysis$SeriesJob.class",
+                "flash/pipeline/intelligence/AnalysisStatusScanner.class",
+                "flash/pipeline/intelligence/PreFlightChecks.class",
+                "flash/pipeline/intelligence/PreFlightChecks$DirectoryFileScan.class",
+                "flash/pipeline/recipes/PipelineRecipeIO.class",
+                "icons/status_done.png",
+                "icons/status_pending.png",
+                "icons/status_stale.png",
+                "pipeline_recipes/standard-3d-intensity.json",
+                "pipeline_recipes/quick-cell-count.json",
+                "pipeline_recipes/presentation.json",
+                "pipeline_recipes/fast-presentable-results.json",
+                "pipeline_recipes/full-pipeline.json");
+
+        DependencyStatus status = DependencyRegistry.get(DependencyId.PLUGIN_JAR_INTEGRITY)
+                .probe(newProbeContext(getClass().getClassLoader(), fijiDir));
+
+        assertTrue(status.getDetailMessage(), status.isError());
+        assertTrue(status.getDetailMessage(), status.getDetailMessage()
+                .contains("ChannelIdentities.class"));
     }
 
     @Test
@@ -452,9 +519,16 @@ public class DependencyRegistryTest {
     private static String[] requiredFlashPluginEntries() {
         return new String[] {
                 "flash/pipeline/FLASH_Pipeline.class",
+                "flash/pipeline/analyses/DeconvolutionAnalysis.class",
+                "flash/pipeline/analyses/DeconvolutionAnalysis$SeriesJob.class",
+                "flash/pipeline/bin/ChannelIdentities.class",
+                "flash/pipeline/intelligence/AnalysisStatusScanner.class",
                 "flash/pipeline/intelligence/PreFlightChecks.class",
                 "flash/pipeline/intelligence/PreFlightChecks$DirectoryFileScan.class",
                 "flash/pipeline/recipes/PipelineRecipeIO.class",
+                "icons/status_done.png",
+                "icons/status_pending.png",
+                "icons/status_stale.png",
                 "pipeline_recipes/standard-3d-intensity.json",
                 "pipeline_recipes/quick-cell-count.json",
                 "pipeline_recipes/presentation.json",

@@ -1339,9 +1339,16 @@ public final class DependencyRegistry {
 
         String[] requiredEntries = {
                 "flash/pipeline/FLASH_Pipeline.class",
+                "flash/pipeline/analyses/DeconvolutionAnalysis.class",
+                "flash/pipeline/analyses/DeconvolutionAnalysis$SeriesJob.class",
+                "flash/pipeline/bin/ChannelIdentities.class",
+                "flash/pipeline/intelligence/AnalysisStatusScanner.class",
                 "flash/pipeline/intelligence/PreFlightChecks.class",
                 "flash/pipeline/intelligence/PreFlightChecks$DirectoryFileScan.class",
                 "flash/pipeline/recipes/PipelineRecipeIO.class",
+                "icons/status_done.png",
+                "icons/status_pending.png",
+                "icons/status_stale.png",
                 "pipeline_recipes/standard-3d-intensity.json",
                 "pipeline_recipes/quick-cell-count.json",
                 "pipeline_recipes/presentation.json",
