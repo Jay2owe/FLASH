@@ -79,7 +79,7 @@ public class ImageCache {
         return copies;
     }
 
-    /** Returns the time taken to load the .lif file (ms). */
+    /** Returns the time taken to load the image source (ms). */
     public long getLoadTimeMs() {
         return loadTimeMs;
     }

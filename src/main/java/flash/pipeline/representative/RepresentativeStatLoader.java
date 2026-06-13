@@ -7,7 +7,6 @@ import flash.pipeline.io.CsvSupport;
 import flash.pipeline.io.DeferredImageSupplier;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.io.ImageSourceDispatcher;
-import flash.pipeline.io.LifIO;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ConditionNameParser;
 import flash.pipeline.naming.ImageNameParser;
@@ -382,15 +381,17 @@ public final class RepresentativeStatLoader {
         }
         List<File> projectTiffs = ImageSourceDispatcher.projectTiffFiles(directory);
         if (!projectTiffs.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Project contains TIFF sources. Quick representative scoring currently "
-                            + "uses the existing QC container scorer.");
+            return null;
         }
         if (hasProjectManifest) {
             throw new IllegalArgumentException(
                     "Project does not contain an included container source for quick scoring.");
         }
-        return LifIO.requireSingleLifFile(directory);
+        ImageSourceDispatcher.SourceMode mode = ImageSourceDispatcher.detectMode(directory);
+        if (mode == ImageSourceDispatcher.SourceMode.CONTAINER) {
+            return ImageSourceDispatcher.selectContainer(new File(directory));
+        }
+        return null;
     }
 
     private static List<String> discoverNumericColumns(CsvSnapshot csv) {

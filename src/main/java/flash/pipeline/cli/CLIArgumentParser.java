@@ -529,6 +529,13 @@ public final class CLIArgumentParser {
             object.presetName = presetName.trim();
         }
 
+        object.includeRegions = parseStringList(firstValue(options,
+                "object.regions", "object.region", "object.include_regions", "object.includeRegions",
+                "threeD.regions", "threeD.region", "threeD.include_regions", "threeD.includeRegions"));
+        object.excludeRegions = parseStringList(firstValue(options,
+                "object.exclude_regions", "object.excludeRegions",
+                "threeD.exclude_regions", "threeD.excludeRegions"));
+
         String doVolumetric = getValue(options, "object.doVolumetric");
         if (doVolumetric == null) {
             doVolumetric = getValue(options, "object.do_volumetric");
@@ -723,6 +730,11 @@ public final class CLIArgumentParser {
         if (presetName != null && !presetName.trim().isEmpty()) {
             intensity.presetName = presetName.trim();
         }
+
+        intensity.includeRegions = parseStringList(firstValue(options,
+                "intensity.regions", "intensity.region", "intensity.include_regions", "intensity.includeRegions"));
+        intensity.excludeRegions = parseStringList(firstValue(options,
+                "intensity.exclude_regions", "intensity.excludeRegions"));
 
         for (int channel = 1; channel <= 32; channel++) {
             putIfPresent(intensity.thresholds, channel,

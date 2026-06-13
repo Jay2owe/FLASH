@@ -54,9 +54,11 @@ import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.orientation.OrientationImageIdentity;
+import flash.pipeline.roi.RegionSelectionFilter;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.roi.RoiSetImageBinding;
 import flash.pipeline.roi.RoiSetValidator;
+import flash.pipeline.ui.FlashIcons;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.HelpButton;
@@ -725,12 +727,14 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 }
 
                 if (roiAnalysis) {
-                    gd2.addHeader("Select ROIs to Analyse");
+                    gd2.addHeader("Regions");
+                    gd2.addHelpText("Select the region ROI sets to include in this analysis run.");
                     final List<ToggleSwitch> roiToggles = new ArrayList<ToggleSwitch>();
                     if (!roiZips.isEmpty()) {
                         for (int r = 0; r < roiZipNames.length; r++) {
                             roiToggles.add(gd2.addToggle(roiZipNames[r], roiZipSelected[r]));
                         }
+                        addRegionSelectionButtons(gd2, roiToggles);
                     }
                     gd2.beginAdvancedSection("intensity.channelRoiMask");
                     gd2.addHeader("Channel ROI Mask");
@@ -1008,10 +1012,10 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             preloadedRoiSets = new Roi[0][];
         }
 
-        // Open images via Bio-Formats (.lif)
+        // Open images via Bio-Formats.
         IJ.log("__________________________________________________________");
         IJ.log("Opening images...");
-        IJ.showStatus("Opening .lif file...");
+        IJ.showStatus("Opening image source...");
         IJ.showProgress(0);
 
         // Both paths use DeferredImageSupplier; parallel path wraps it in BoundedImageLoader
@@ -1208,7 +1212,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         IJ.log("__________________________________________________________");
         if (lifOpenTimeMs > 0) {
             IJ.log("Intensity Analysis complete. Total time: " + formatDuration(totalTime) + " (processing) + "
-                    + formatDuration(lifOpenTimeMs) + " (lif open)");
+                    + formatDuration(lifOpenTimeMs) + " (source open)");
         } else {
             IJ.log("Intensity Analysis complete. Total time: " + formatDuration(totalTime));
         }
@@ -4962,6 +4966,15 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         intensitySpatialConfig = derived.spatialConfig;
         applyIntensityDerivedConfig(derived, binarization,
                 thresholds, filterSources, roiZipSelected, channelNames);
+        String[] roiSetArray = roiSetNames == null
+                ? new String[0]
+                : roiSetNames.toArray(new String[roiSetNames.size()]);
+        if (RegionSelectionFilter.hasFilter(intensity.getIncludeRegions(), intensity.getExcludeRegions())) {
+            RegionSelectionFilter.apply(intensity.getIncludeRegions(), intensity.getExcludeRegions(),
+                    roiSetArray, roiZipSelected);
+            IJ.log("[CLI] Intensity region filter selected "
+                    + countSelected(roiZipSelected) + " of " + roiZipSelected.length + " region(s).");
+        }
         cliConfiguredMaskIndex1Based = derived.maskChannelIndex + 1;
         IJ.log("[CLI] Intensity Analysis configured using "
                 + (intensity.getPresetName() == null ? "explicit intensity.* flags" : "intensity.preset=" + intensity.getPresetName()));
@@ -5017,6 +5030,34 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         }
     }
 
+    private static void addRegionSelectionButtons(PipelineDialog dialog,
+                                                  final List<ToggleSwitch> regionToggles) {
+        if (dialog == null || regionToggles == null || regionToggles.isEmpty()) {
+            return;
+        }
+        JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        JButton selectAll = new JButton("Select all");
+        FlashIcons.apply(selectAll, FlashIcons.check());
+        selectAll.setToolTipText("Select every region for this run.");
+        selectAll.addActionListener(e -> {
+            for (ToggleSwitch toggle : regionToggles) {
+                setToggle(toggle, true);
+            }
+        });
+        JButton clear = new JButton("Clear");
+        FlashIcons.apply(clear, FlashIcons.closeX());
+        clear.setToolTipText("Clear every region selection.");
+        clear.addActionListener(e -> {
+            for (ToggleSwitch toggle : regionToggles) {
+                setToggle(toggle, false);
+            }
+        });
+        row.add(selectAll);
+        row.add(clear);
+        dialog.addComponent(row);
+    }
+
     private static boolean anyToggleSelected(List<ToggleSwitch> toggles) {
         if (toggles == null) return false;
         for (ToggleSwitch toggle : toggles) {
@@ -5031,6 +5072,15 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             if (value) return true;
         }
         return false;
+    }
+
+    private static int countSelected(boolean[] values) {
+        int count = 0;
+        if (values == null) return count;
+        for (boolean value : values) {
+            if (value) count++;
+        }
+        return count;
     }
 
     /**
@@ -5189,10 +5239,6 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             }
 
             private ImagePlus openResolved(int seriesIndex, boolean materialized) throws Exception {
-                // TIFF-folder mode has no sibling deconvolution layout — pass through to parent.
-                if (rawSupplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER) {
-                    return openRawSeriesRecorded(rawSupplier, seriesIndex, materialized);
-                }
                 File container = rawSupplier.getContainerFileForSeries(seriesIndex);
                 String seriesName = rawSupplier.getSeriesName(seriesIndex);
                 String baseName = baseNameForSeries(seriesName, seriesIndex);
@@ -5203,7 +5249,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     try {
                         ImagePlus imp = new Opener().openImage(inputFile.getAbsolutePath());
                         if (imp != null) {
-                            imp.setTitle(expectedSeriesTitle(container, seriesName, seriesIndex));
+                            imp.setTitle(expectedSeriesTitle(rawSupplier, container, seriesName, seriesIndex));
                         }
                         recordInputEnd(input, imp == null ? "skipped" : "processed", started);
                         return imp;
@@ -5358,6 +5404,17 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
             }
         }
         return null;
+    }
+
+    private static String expectedSeriesTitle(DeferredImageSupplier supplier,
+                                              File lifFile,
+                                              String seriesName,
+                                              int seriesIndex) {
+        if (supplier != null && supplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER
+                && seriesName != null && !seriesName.trim().isEmpty()) {
+            return seriesName.trim();
+        }
+        return expectedSeriesTitle(lifFile, seriesName, seriesIndex);
     }
 
     private static String expectedSeriesTitle(File lifFile, String seriesName, int seriesIndex) {

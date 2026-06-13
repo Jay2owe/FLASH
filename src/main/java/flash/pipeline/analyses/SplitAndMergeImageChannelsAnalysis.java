@@ -552,7 +552,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
         IJ.log("Split and Merge Image Channels Analysis complete.");
         if (lifOpenTimeMs > 0) {
             IJ.log("Total time: " + formatDuration(totalElapsed) + " (processing) + "
-                    + formatDuration(lifOpenTimeMs) + " (lif open)");
+                    + formatDuration(lifOpenTimeMs) + " (source open)");
         } else {
             IJ.log("Total time: " + formatDuration(totalElapsed));
         }
@@ -2934,10 +2934,6 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
             }
 
             private ImagePlus openResolved(int seriesIndex, boolean materialized) throws Exception {
-                // TIFF-folder mode has no sibling deconvolution layout — pass through to parent.
-                if (rawSupplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER) {
-                    return materialized ? rawSupplier.openSeriesMaterialized(seriesIndex) : rawSupplier.openSeries(seriesIndex);
-                }
                 File container = sourceFileForSeries(rawSupplier, seriesIndex);
                 String seriesName = rawSupplier.getSeriesName(seriesIndex);
                 String baseName = baseNameForSeries(seriesName, seriesIndex);
@@ -2945,7 +2941,7 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
                 if (inputFile != null && !inputFile.equals(container)) {
                     ImagePlus imp = new Opener().openImage(inputFile.getAbsolutePath());
                     if (imp != null) {
-                        imp.setTitle(expectedSeriesTitle(container, seriesName, seriesIndex));
+                        imp.setTitle(expectedSeriesTitle(rawSupplier, container, seriesName, seriesIndex));
                     }
                     return imp;
                 }
@@ -2960,6 +2956,17 @@ public class SplitAndMergeImageChannelsAnalysis implements Analysis, RunRecordAw
             return "Series_" + (seriesIndex + 1);
         }
         return baseName.trim();
+    }
+
+    private static String expectedSeriesTitle(DeferredImageSupplier supplier,
+                                              File lifFile,
+                                              String seriesName,
+                                              int seriesIndex) {
+        if (supplier != null && supplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER
+                && seriesName != null && !seriesName.trim().isEmpty()) {
+            return seriesName.trim();
+        }
+        return expectedSeriesTitle(lifFile, seriesName, seriesIndex);
     }
 
     private static String expectedSeriesTitle(File lifFile, String seriesName, int seriesIndex) {

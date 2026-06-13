@@ -63,6 +63,7 @@ import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.runtime.PluginInstallGuard;
 import flash.pipeline.orientation.OrientationImageIdentity;
 import flash.pipeline.roi.RegionMask;
+import flash.pipeline.roi.RegionSelectionFilter;
 import flash.pipeline.roi.RoiIO;
 import flash.pipeline.roi.RoiSetImageBinding;
 import flash.pipeline.roi.RoiSetValidator;
@@ -73,6 +74,7 @@ import flash.pipeline.zslice.ZSliceOps;
 
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.FlashIcons;
 
 import flash.pipeline.objects.BoundingBoxColoc;
 import flash.pipeline.objects.CpcUtils;
@@ -909,6 +911,14 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         boolean[] processChannels = wizardProcessChannels == null ? null : Arrays.copyOf(wizardProcessChannels, wizardProcessChannels.length);
         boolean[] selectedRoiSets = new boolean[roiSetNames.length];
         Arrays.fill(selectedRoiSets, true);
+        if (cliConfig != null && cliConfig.getObject() != null
+                && RegionSelectionFilter.hasFilter(
+                cliConfig.getObject().getIncludeRegions(), cliConfig.getObject().getExcludeRegions())) {
+            RegionSelectionFilter.apply(cliConfig.getObject().getIncludeRegions(),
+                    cliConfig.getObject().getExcludeRegions(), roiSetNames, selectedRoiSets);
+            IJ.log("[CLI] 3D Object region filter selected "
+                    + countSelected(selectedRoiSets) + " of " + selectedRoiSets.length + " region(s).");
+        }
 
         int dialogStep = 0;
         if (suppressDialogs) {
@@ -1014,11 +1024,13 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                     gdOpts.addHeader("Analysis Region");
                     gdOpts.addHelpText("No saved ROI sets were found. This run will analyse the full image stack for each image.");
                 } else {
-                    gdOpts.addHeader("ROI Sets");
-                    gdOpts.addHelpText("Select which ROI sets will be used for this analysis run.");
+                    gdOpts.addHeader("Regions");
+                    gdOpts.addHelpText("Select the region ROI sets to include in this analysis run.");
+                    final List<ToggleSwitch> regionToggles = new ArrayList<ToggleSwitch>();
                     for (int r = 0; r < roiSetNames.length; r++) {
-                        gdOpts.addToggle(roiSetNames[r], selectedRoiSets[r]);
+                        regionToggles.add(gdOpts.addToggle(roiSetNames[r], selectedRoiSets[r]));
                     }
+                    addRegionSelectionButtons(gdOpts, regionToggles);
                 }
 
                 gdOpts.beginAdvancedSection("threeDObject");
@@ -1099,7 +1111,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 processChannels = wizardProcessChannels == null ? null : Arrays.copyOf(wizardProcessChannels, wizardProcessChannels.length);
 
                 if (!analyseFullImagesWithoutRois && !hasSelectedRoiSets(selectedRoiSets)) {
-                    IJ.error("3D Object Analysis", "Select at least one ROI set to analyse.");
+                    IJ.error("3D Object Analysis", "Select at least one region to analyse.");
                     continue;
                 }
 
@@ -1511,7 +1523,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         IJ.log("__________________________________________________________");
         if (lifOpenTimeMs > 0) {
             IJ.log("3D Object Analysis complete. Total time: " + formatDuration(totalTime)
-                    + " (processing) + " + formatDuration(lifOpenTimeMs) + " (lif open)");
+                    + " (processing) + " + formatDuration(lifOpenTimeMs) + " (source open)");
         } else {
             IJ.log("3D Object Analysis complete. Total time: " + formatDuration(totalTime));
         }
@@ -2160,8 +2172,45 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         }
     }
 
+    private static void addRegionSelectionButtons(PipelineDialog dialog,
+                                                  final List<ToggleSwitch> regionToggles) {
+        if (dialog == null || regionToggles == null || regionToggles.isEmpty()) {
+            return;
+        }
+        JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        JButton selectAll = new JButton("Select all");
+        FlashIcons.apply(selectAll, FlashIcons.check());
+        selectAll.setToolTipText("Select every region for this run.");
+        selectAll.addActionListener(e -> {
+            for (ToggleSwitch toggle : regionToggles) {
+                setToggle(toggle, true);
+            }
+        });
+        JButton clear = new JButton("Clear");
+        FlashIcons.apply(clear, FlashIcons.closeX());
+        clear.setToolTipText("Clear every region selection.");
+        clear.addActionListener(e -> {
+            for (ToggleSwitch toggle : regionToggles) {
+                setToggle(toggle, false);
+            }
+        });
+        row.add(selectAll);
+        row.add(clear);
+        dialog.addComponent(row);
+    }
+
     private static boolean isSelected(ToggleSwitch toggle) {
         return toggle != null && toggle.isSelected();
+    }
+
+    private static int countSelected(boolean[] values) {
+        int count = 0;
+        if (values == null) return count;
+        for (boolean value : values) {
+            if (value) count++;
+        }
+        return count;
     }
 
     private static String[] threeDObjectWorkflow(boolean processLength, boolean spatial) {
@@ -6771,12 +6820,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 AnalysisRunContext.InputHandle input = recordInputStart(source, seriesIndex + 1);
                 long started = System.currentTimeMillis();
                 try {
-                // TIFF-folder mode has no sibling deconvolution layout — pass through to parent.
-                if (rawSupplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER) {
-                    ImagePlus imp = materialized ? rawSupplier.openSeriesMaterialized(seriesIndex) : rawSupplier.openSeries(seriesIndex);
-                    recordInputEnd(input, imp == null ? "skipped" : "processed", started);
-                    return imp;
-                }
                 File container = rawSupplier.getContainerFileForSeries(seriesIndex);
                 String seriesName = rawSupplier.getSeriesName(seriesIndex);
                 String baseName = baseNameForSeries(seriesName, seriesIndex);
@@ -6784,7 +6827,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 if (inputFile != null && !inputFile.equals(container)) {
                     ImagePlus imp = new Opener().openImage(inputFile.getAbsolutePath());
                     if (imp != null) {
-                        imp.setTitle(expectedSeriesTitle(container, seriesName, seriesIndex));
+                        imp.setTitle(expectedSeriesTitle(rawSupplier, container, seriesName, seriesIndex));
                     }
                     recordInputEnd(input, imp == null ? "skipped" : "processed", started);
                     return imp;
@@ -6807,6 +6850,17 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             return "Series_" + (seriesIndex + 1);
         }
         return baseName.trim();
+    }
+
+    private static String expectedSeriesTitle(DeferredImageSupplier supplier,
+                                              File lifFile,
+                                              String seriesName,
+                                              int seriesIndex) {
+        if (supplier != null && supplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER
+                && seriesName != null && !seriesName.trim().isEmpty()) {
+            return seriesName.trim();
+        }
+        return expectedSeriesTitle(lifFile, seriesName, seriesIndex);
     }
 
     private static String expectedSeriesTitle(File lifFile, String seriesName, int seriesIndex) {

@@ -194,6 +194,8 @@ public class CLIConfig {
         if (object.presetName != null && !object.presetName.trim().isEmpty()) {
             parts.add("object.preset=" + object.presetName.trim());
         }
+        appendStringList(parts, "object.regions", object.includeRegions);
+        appendStringList(parts, "object.exclude_regions", object.excludeRegions);
         if (object.doVolumetric != null) {
             parts.add("object.doVolumetric=" + object.doVolumetric);
         }
@@ -273,6 +275,8 @@ public class CLIConfig {
         if (intensity.presetName != null && !intensity.presetName.trim().isEmpty()) {
             parts.add("intensity.preset=" + intensity.presetName.trim());
         }
+        appendStringList(parts, "intensity.regions", intensity.includeRegions);
+        appendStringList(parts, "intensity.exclude_regions", intensity.excludeRegions);
         appendChannelOverrides(parts, "intensity.threshold_channel", "", intensity.thresholds);
         appendBoolean(parts, "intensity.spatial", intensity.spatialEnabled);
         if (intensity.spatialAnalyses != null) {
@@ -526,6 +530,21 @@ public class CLIConfig {
         }
     }
 
+    private static void appendStringList(List<String> parts, String key, List<String> values) {
+        if (parts == null || key == null || values == null || values.isEmpty()) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String value : values) {
+            if (value == null || value.trim().isEmpty()) continue;
+            if (sb.length() > 0) sb.append(',');
+            sb.append(value.trim());
+        }
+        if (sb.length() > 0) {
+            parts.add(key + "=[" + sb.toString() + "]");
+        }
+    }
+
     private static String joinSelectedAnalyses(boolean[] selections) {
         if (selections == null || selections.length == 0) return "";
         StringBuilder sb = new StringBuilder();
@@ -654,6 +673,8 @@ public class CLIConfig {
 
     public static final class ThreeDObjectConfig {
         String presetName = null;
+        List<String> includeRegions = null;
+        List<String> excludeRegions = null;
         Boolean doVolumetric = null;
         Boolean doCpc = null;
         Boolean doIntensityColoc = null;
@@ -668,6 +689,12 @@ public class CLIConfig {
         Integer nuclearMarkerIndex = null;
 
         public String getPresetName() { return presetName; }
+        public List<String> getIncludeRegions() {
+            return includeRegions == null ? Collections.<String>emptyList() : Collections.unmodifiableList(includeRegions);
+        }
+        public List<String> getExcludeRegions() {
+            return excludeRegions == null ? Collections.<String>emptyList() : Collections.unmodifiableList(excludeRegions);
+        }
         public Boolean getDoVolumetric() { return doVolumetric; }
         public Boolean getDoCpc() { return doCpc; }
         public Boolean getDoIntensityColoc() { return doIntensityColoc; }
@@ -683,6 +710,8 @@ public class CLIConfig {
 
         public boolean hasConfiguration() {
             return (presetName != null && !presetName.trim().isEmpty())
+                    || (includeRegions != null && !includeRegions.isEmpty())
+                    || (excludeRegions != null && !excludeRegions.isEmpty())
                     || doVolumetric != null
                     || doCpc != null
                     || doIntensityColoc != null
@@ -789,6 +818,8 @@ public class CLIConfig {
 
     public static final class IntensityConfig {
         String presetName = null;
+        List<String> includeRegions = null;
+        List<String> excludeRegions = null;
         final Map<Integer, String> thresholds = new LinkedHashMap<Integer, String>();
         Boolean spatialEnabled = null;
         Set<IntensitySpatialConfig.AnalysisKey> spatialAnalyses = null;
@@ -812,6 +843,12 @@ public class CLIConfig {
         IntensitySpatialConfig.FailurePolicy spatialFailurePolicy = null;
 
         public String getPresetName() { return presetName; }
+        public List<String> getIncludeRegions() {
+            return includeRegions == null ? Collections.<String>emptyList() : Collections.unmodifiableList(includeRegions);
+        }
+        public List<String> getExcludeRegions() {
+            return excludeRegions == null ? Collections.<String>emptyList() : Collections.unmodifiableList(excludeRegions);
+        }
         public Map<Integer, String> getThresholds() { return thresholds; }
         public Boolean getSpatialEnabled() { return spatialEnabled; }
         public Set<IntensitySpatialConfig.AnalysisKey> getSpatialAnalyses() {
@@ -856,6 +893,8 @@ public class CLIConfig {
 
         public boolean hasConfiguration() {
             return (presetName != null && !presetName.trim().isEmpty())
+                    || (includeRegions != null && !includeRegions.isEmpty())
+                    || (excludeRegions != null && !excludeRegions.isEmpty())
                     || !thresholds.isEmpty()
                     || hasSpatialConfiguration();
         }
