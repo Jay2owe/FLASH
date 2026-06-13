@@ -12,10 +12,13 @@ import flash.pipeline.deconv.engine.DeconvolutionEngine;
 import flash.pipeline.deconv.engine.DeconvolutionException;
 import flash.pipeline.deconv.psf.PsfModel;
 import flash.pipeline.deconv.psf.PsfSpec;
+import flash.pipeline.execution.AnalysisRunCoordinator;
 import flash.pipeline.intelligence.MetadataDiagnostics;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
+import flash.pipeline.runrecord.RunRecord;
+import flash.pipeline.runrecord.RunRecordIO;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.io.Opener;
@@ -32,6 +35,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Callable;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -65,7 +70,7 @@ public class DeconvolutionAnalysisTest {
         TestDeconvolutionAnalysis analysis = new TestDeconvolutionAnalysis(source, blurred, psf, info, engine);
         analysis.setHeadless(true);
         analysis.setSuppressDialogs(true);
-        analysis.setCliConfig(CLIArgumentParser.parse(
+        final CLIConfig cliConfig = CLIArgumentParser.parse(
                 "dir=[" + cliDir + "] "
                         + "analysisIndex=2 "
                         + "deconv.enabled=true "
@@ -77,10 +82,17 @@ public class DeconvolutionAnalysisTest {
                         + "deconv.scopeModality=widefield "
                         + "deconv.sampleRI=1.33 "
                         + "deconv.channels=0 "
-                        + "deconv.useCache=true"));
+                        + "deconv.useCache=true");
+        analysis.setCliConfig(cliConfig);
 
         double inputPeak = peak(blurred);
-        analysis.execute(root.getAbsolutePath());
+        new AnalysisRunCoordinator().run(analysis, 2, "3D Deconvolution",
+                root.getAbsolutePath(), cliConfig, null, "", new Callable<Void>() {
+                    @Override public Void call() {
+                        analysis.execute(root.getAbsolutePath());
+                        return null;
+                    }
+                });
 
         File output = DeconvolutionIO.deconvFile(root, "synthetic", 0);
         assertTrue(output.isFile());
@@ -118,6 +130,14 @@ public class DeconvolutionAnalysisTest {
                 summaryLines.get(0));
         assertTrue(summaryLines.get(1).contains("synthetic"));
         assertTrue(summaryLines.get(2).startsWith("# Batch totals:"));
+
+        RunRecord record = latestRecord(root);
+        assertTrue(record.extras.containsKey("progressLatest"));
+        Object progressObject = record.extras.get("progressLatest");
+        assertTrue(progressObject instanceof Map);
+        Map<?, ?> progress = (Map<?, ?>) progressObject;
+        assertEquals(Boolean.TRUE, progress.get("finished"));
+        assertTrue(String.valueOf(progress.get("status")).contains("finished"));
     }
 
     @Test
@@ -418,6 +438,20 @@ public class DeconvolutionAnalysisTest {
         ProjectFileIO.write(
                 FlashProjectLayout.forDirectory(outputRoot.getAbsolutePath()).configurationWriteDir(),
                 project);
+    }
+
+    private static RunRecord latestRecord(File project) {
+        File runsDir = FlashProjectLayout.forDirectory(project.getAbsolutePath()).runJsonlWriteDir();
+        File[] files = runsDir.listFiles();
+        assertNotNull("runs dir should exist", files);
+        File latest = null;
+        for (File f : files) {
+            if (f.getName().endsWith(RunRecordIO.EXTENSION)) {
+                latest = f;
+            }
+        }
+        assertNotNull("run record should exist", latest);
+        return RunRecordIO.readLatest(latest);
     }
 
     private static final class TestDeconvolutionAnalysis extends DeconvolutionAnalysis {

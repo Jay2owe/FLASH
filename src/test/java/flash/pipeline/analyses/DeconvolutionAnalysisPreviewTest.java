@@ -9,11 +9,13 @@ import flash.pipeline.deconv.psf.PsfSpec;
 import flash.pipeline.deconv.psf.ScopeModality;
 import flash.pipeline.deconv.qc.DeconvPreviewDialog;
 import flash.pipeline.intelligence.MetadataDiagnostics;
+import flash.pipeline.ui.variations.CropSpec;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.FloatProcessor;
 import org.junit.Test;
 
+import java.awt.Rectangle;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
@@ -96,6 +98,57 @@ public class DeconvolutionAnalysisPreviewTest {
             assertEquals(48, content.rawStack.getWidth());
             assertEquals(40, content.rawStack.getHeight());
             assertEquals(6, content.rawStack.getStackSize());
+        } finally {
+            close(content == null ? null : content.rawStack);
+            close(content == null ? null : content.deconvolvedStack);
+            close(blurred);
+            close(psf);
+        }
+    }
+
+    @Test
+    public void renderPreviewContentCanUseFullImageCropSpec() throws Exception {
+        ImagePlus blurred = gaussianPointSource("blurred", 52, 44, 5, 2.0, 1.4, 80.0);
+        ImagePlus psf = gaussianPointSource("psf", 9, 9, 5, 1.2, 1.0, 1.0);
+        PreviewAnalysis analysis = new PreviewAnalysis(blurred, psf, mockEngine());
+        DeconvolutionAnalysis.RunSettings settings = previewSettings(5, 0.01);
+        DeconvolutionAnalysis.SeriesJob job =
+                new DeconvolutionAnalysis.SeriesJob(new File("synthetic.lif"), 0, "synthetic", syntheticSeriesInfo());
+
+        DeconvPreviewDialog.PreviewContent content =
+                analysis.renderPreviewContent("ignored", job, settings.channelNames, settings, 0, CropSpec.full());
+
+        try {
+            assertNotNull(content);
+            assertEquals(52, content.rawStack.getWidth());
+            assertEquals(44, content.rawStack.getHeight());
+            assertEquals(5, content.rawStack.getStackSize());
+        } finally {
+            close(content == null ? null : content.rawStack);
+            close(content == null ? null : content.deconvolvedStack);
+            close(blurred);
+            close(psf);
+        }
+    }
+
+    @Test
+    public void renderPreviewContentCanUseCustomRoiCropSpec() throws Exception {
+        ImagePlus blurred = gaussianPointSource("blurred", 80, 72, 4, 2.0, 1.4, 80.0);
+        ImagePlus psf = gaussianPointSource("psf", 9, 9, 5, 1.2, 1.0, 1.0);
+        PreviewAnalysis analysis = new PreviewAnalysis(blurred, psf, mockEngine());
+        DeconvolutionAnalysis.RunSettings settings = previewSettings(5, 0.01);
+        DeconvolutionAnalysis.SeriesJob job =
+                new DeconvolutionAnalysis.SeriesJob(new File("synthetic.lif"), 0, "synthetic", syntheticSeriesInfo());
+
+        DeconvPreviewDialog.PreviewContent content =
+                analysis.renderPreviewContent("ignored", job, settings.channelNames, settings,
+                        0, CropSpec.custom(new Rectangle(7, 9, 31, 29)));
+
+        try {
+            assertNotNull(content);
+            assertEquals(31, content.rawStack.getWidth());
+            assertEquals(29, content.rawStack.getHeight());
+            assertEquals(4, content.rawStack.getStackSize());
         } finally {
             close(content == null ? null : content.rawStack);
             close(content == null ? null : content.deconvolvedStack);

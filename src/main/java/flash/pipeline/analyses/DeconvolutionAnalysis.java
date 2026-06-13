@@ -29,6 +29,7 @@ import flash.pipeline.io.ImageSourceDispatcher;
 import flash.pipeline.io.IoUtils;
 import flash.pipeline.io.SeriesMeta;
 import flash.pipeline.naming.ImageNameParser;
+import flash.pipeline.progress.AnalysisProgressReporter;
 import flash.pipeline.report.QualityReport;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameterApplier;
@@ -41,6 +42,8 @@ import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.variations.CropSpec;
+import flash.pipeline.ui.variations.CustomCropPicker;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -54,6 +57,7 @@ import ij.process.ImageProcessor;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -61,6 +65,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JRadioButton;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
 import javax.swing.SpinnerNumberModel;
@@ -77,6 +82,7 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -128,6 +134,13 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
     private QualityReport qualityReport = null;
     private CLIConfig cliConfig = null;
     private AnalysisRunContext runRecordContext = null;
+    private AnalysisProgressReporter deconvProgressReporter = AnalysisProgressReporter.disabled();
+
+    private enum MergeOutcome {
+        WRITTEN,
+        SKIPPED_EXISTING,
+        SKIPPED
+    }
 
     @Override
     public void setHeadless(boolean headless) {
@@ -204,7 +217,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         while (true) {
             RunSettings settings = headless
                     ? buildHeadlessSettings(channelNames, representative)
-                    : showConfigurationDialog(directory, channelNames, representative);
+                    : showConfigurationDialog(directory, channelNames, jobs, representative);
             if (settings == null) {
                 return;
             }
@@ -302,7 +315,10 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         return settings;
     }
 
-    private RunSettings showConfigurationDialog(String directory, String[] channelNames, SeriesJob representative) {
+    private RunSettings showConfigurationDialog(String directory,
+                                                String[] channelNames,
+                                                List<SeriesJob> jobs,
+                                                SeriesJob representative) {
         PipelineDialog dialog = new PipelineDialog(TITLE, PipelineDialog.Phase.SETUP);
         dialog.setWorkflowTracker(new String[]{"Setup", "Preview", "Run"}, 0);
         final DialogBindings bindings = new DialogBindings();
@@ -643,13 +659,19 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 // skipPreview flag (meant for unattended runs) is set. `current` is a throwaway copy
                 // and is never returned to execute(), so clearing it here is safe.
                 current.skipPreview = false;
-                int[] previewChannels = choosePreviewChannels(channelNames, current.selectedChannels);
-                if (previewChannels == null) {
-                    return; // The user cancelled the channel picker: leave the setup dialog open.
+                PreviewSelection previewSelection = choosePreviewSelection(directory, jobs, representative,
+                        channelNames, current.selectedChannels);
+                if (previewSelection == null) {
+                    return; // The user cancelled preview options: leave the setup dialog open.
+                }
+                List<String> previewErrors = validateRequiredFields(previewSelection.job.seriesInfo, current);
+                if (!previewErrors.isEmpty()) {
+                    showValidationErrors(previewErrors);
+                    return;
                 }
                 DeconvPreviewDialog.Decision decision =
-                        showPreviewBeforeBatch(directory, representative, channelNames, current,
-                                previewChannels);
+                        showPreviewBeforeBatch(directory, previewSelection.job, channelNames, current,
+                                previewSelection.channels, previewSelection.cropSpec);
                 if (decision == DeconvPreviewDialog.Decision.RUN_FULL_BATCH) {
                     previewState.accept(fingerprint);
                     refreshPrimaryLabel.run();
@@ -1160,7 +1182,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                                                                 SeriesJob job,
                                                                 String[] channelNames,
                                                                 RunSettings settings) {
-        return showPreviewBeforeBatch(directory, job, channelNames, settings, null);
+        return showPreviewBeforeBatch(directory, job, channelNames, settings, null, CropSpec.centre256());
     }
 
     /**
@@ -1173,6 +1195,16 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                                                                 String[] channelNames,
                                                                 RunSettings settings,
                                                                 int[] channelsToPreview) {
+        return showPreviewBeforeBatch(directory, job, channelNames, settings,
+                channelsToPreview, CropSpec.centre256());
+    }
+
+    private DeconvPreviewDialog.Decision showPreviewBeforeBatch(String directory,
+                                                                SeriesJob job,
+                                                                String[] channelNames,
+                                                                RunSettings settings,
+                                                                int[] channelsToPreview,
+                                                                CropSpec cropSpec) {
         if (settings == null || settings.skipPreview || isInteractiveHeadless()) {
             return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
         }
@@ -1185,6 +1217,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             return DeconvPreviewDialog.Decision.RUN_FULL_BATCH;
         }
 
+        CropSpec previewCrop = cropSpec == null ? CropSpec.centre256() : cropSpec;
         String[] channelLuts = resolveChannelLuts(directory, channelNames.length);
         List<DeconvPreviewDialog.ChannelPreview> entries =
                 new ArrayList<DeconvPreviewDialog.ChannelPreview>();
@@ -1202,7 +1235,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                     DeconvPreviewDialog.PreviewContent single;
                     try {
                         single = renderPreviewContent(directory, job, channelNames, settings,
-                                channelIndex, PREVIEW_CROP_SIZE, PREVIEW_CROP_SIZE);
+                                channelIndex, previewCrop);
                     } catch (Exception e) {
                         String message = "Deconvolution preview failed for " + channelNames[channelIndex]
                                 + ": " + e.getMessage() + ". Skipping this channel in the preview.";
@@ -1238,30 +1271,98 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
     }
 
     /**
-     * Asks the user which deconvolution channels to render in the preview. Returns the chosen
-     * channel indices, or {@code null} if the user cancelled. When only one channel is selected for
-     * deconvolution there is nothing to choose, so that channel is returned directly without a
-     * dialog; in headless mode every selected channel is returned.
+     * Asks the user which image, channels, and ROI/crop to render in the setup preview. The crop row
+     * intentionally mirrors the Parameter Variations dialog so segmentation and deconvolution setup
+     * previews use the same visual language.
      */
-    private int[] choosePreviewChannels(String[] channelNames, boolean[] selectedChannels) {
+    private PreviewSelection choosePreviewSelection(String directory,
+                                                    List<SeriesJob> jobs,
+                                                    SeriesJob defaultJob,
+                                                    String[] channelNames,
+                                                    boolean[] selectedChannels) {
         int[] selectable = selectedChannelIndices(selectedChannels);
-        if (selectable.length <= 1 || isInteractiveHeadless()) {
-            return selectable;
+        if (selectable.length == 0) {
+            return null;
+        }
+        if (isInteractiveHeadless()) {
+            return new PreviewSelection(defaultJob, selectable, CropSpec.centre256());
         }
 
-        PipelineDialog picker = new PipelineDialog("Preview Channels", PipelineDialog.Phase.SETUP);
+        final PipelineDialog picker = new PipelineDialog("Preview Settings", PipelineDialog.Phase.SETUP);
         picker.setWorkflowTracker(new String[]{"Setup", "Preview", "Run"}, 1);
+        List<PreviewImageChoice> imageChoices = previewImageChoices(jobs, defaultJob);
+        final JComboBox<PreviewImageChoice> imageChoice =
+                new JComboBox<PreviewImageChoice>(imageChoices.toArray(new PreviewImageChoice[0]));
+        imageChoice.setMaximumSize(new Dimension(420, 24));
+        selectPreviewImageChoice(imageChoice, defaultJob);
+
+        picker.addHeader("Image to preview");
+        picker.addComponent(labeledRow("Image", imageChoice));
+        picker.addHelpText("This choice is only for the setup preview; the full batch still runs on every selected image.");
+
         picker.addHeader("Channels to preview");
         JPanel column = new JPanel();
         column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
         column.setOpaque(false);
-        List<ToggleSwitch> toggles = new ArrayList<ToggleSwitch>();
+        final List<ToggleSwitch> toggles = new ArrayList<ToggleSwitch>();
         for (int channelIndex : selectable) {
             ToggleSwitch toggle = new ToggleSwitch(true);
             toggles.add(toggle);
             column.add(labeledRow(channelNames[channelIndex], toggle));
         }
         picker.addComponent(column);
+
+        picker.addHeader("Preview ROI");
+        final CropSpec[] cropSpec = new CropSpec[]{CropSpec.centre256()};
+        final JRadioButton fullCrop = new JRadioButton("full image");
+        final JRadioButton centreCrop = new JRadioButton("centered 256 x 256");
+        final JRadioButton customCrop = new JRadioButton("custom...");
+        JPanel cropRow = previewCropRow(fullCrop, centreCrop, customCrop);
+        picker.addComponent(cropRow);
+        picker.addHelpText("Use a ROI for fast checks, or the full image when edge behavior and global blur matter.");
+        selectPreviewCropButton(cropSpec[0], fullCrop, centreCrop, customCrop);
+
+        fullCrop.addActionListener(e -> cropSpec[0] = CropSpec.full());
+        centreCrop.addActionListener(e -> cropSpec[0] = CropSpec.centre256());
+        customCrop.addActionListener(e -> {
+            CropSpec previous = cropSpec[0];
+            Rectangle initial = previous != null && previous.mode() == CropSpec.Mode.CUSTOM
+                    ? previous.bounds()
+                    : null;
+            ImagePlus source = null;
+            try {
+                PreviewImageChoice selectedImage = (PreviewImageChoice) imageChoice.getSelectedItem();
+                int channelIndex = firstCheckedPreviewChannel(selectable, toggles);
+                if (selectedImage == null || selectedImage.job == null) {
+                    throw new IOException("No preview image is selected.");
+                }
+                source = openSeriesChannel(directory, selectedImage.job.seriesIndex, channelIndex);
+                if (source == null) {
+                    throw new IOException("The selected image channel could not be opened.");
+                }
+                Rectangle chosen = CustomCropPicker.choose(picker.getWindow(), source, initial);
+                if (chosen == null) {
+                    cropSpec[0] = previous;
+                    selectPreviewCropButton(previous, fullCrop, centreCrop, customCrop);
+                    return;
+                }
+                cropSpec[0] = CropSpec.custom(chosen);
+            } catch (Exception ex) {
+                cropSpec[0] = previous;
+                selectPreviewCropButton(previous, fullCrop, centreCrop, customCrop);
+                IJ.showMessage("Preview ROI", "Could not choose a custom ROI:\n" + ex.getMessage());
+            } finally {
+                closeQuietly(source);
+            }
+        });
+        imageChoice.addActionListener(e -> {
+            if (customCrop.isSelected()) {
+                cropSpec[0] = CropSpec.centre256();
+                selectPreviewCropButton(cropSpec[0], fullCrop, centreCrop, customCrop);
+                picker.setTransientStatus("Custom ROI reset for the newly selected image.");
+            }
+        });
+
         picker.setPrimaryButtonText(NextStepLabels.PREVIEW_DECONVOLUTION);
         if (!picker.showDialog()) {
             return null;
@@ -1276,7 +1377,98 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         if (chosen.isEmpty()) {
             chosen.add(selectable[0]); // Always preview at least one channel.
         }
-        return toIntArray(chosen);
+        PreviewImageChoice selectedImage = (PreviewImageChoice) imageChoice.getSelectedItem();
+        SeriesJob selectedJob = selectedImage == null || selectedImage.job == null
+                ? defaultJob
+                : selectedImage.job;
+        return new PreviewSelection(selectedJob, toIntArray(chosen),
+                cropSpec[0] == null ? CropSpec.centre256() : cropSpec[0]);
+    }
+
+    private static List<PreviewImageChoice> previewImageChoices(List<SeriesJob> jobs,
+                                                                SeriesJob defaultJob) {
+        List<PreviewImageChoice> choices = new ArrayList<PreviewImageChoice>();
+        if (jobs != null) {
+            for (SeriesJob job : jobs) {
+                if (job != null) {
+                    choices.add(new PreviewImageChoice(job));
+                }
+            }
+        }
+        if (choices.isEmpty() && defaultJob != null) {
+            choices.add(new PreviewImageChoice(defaultJob));
+        }
+        return choices;
+    }
+
+    private static void selectPreviewImageChoice(JComboBox<PreviewImageChoice> imageChoice,
+                                                 SeriesJob defaultJob) {
+        if (imageChoice == null || defaultJob == null) return;
+        for (int i = 0; i < imageChoice.getItemCount(); i++) {
+            PreviewImageChoice choice = imageChoice.getItemAt(i);
+            if (choice != null && sameSeriesJob(choice.job, defaultJob)) {
+                imageChoice.setSelectedIndex(i);
+                return;
+            }
+        }
+    }
+
+    private static boolean sameSeriesJob(SeriesJob a, SeriesJob b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        String aSource = a.sourceFile == null ? "" : a.sourceFile.getAbsolutePath();
+        String bSource = b.sourceFile == null ? "" : b.sourceFile.getAbsolutePath();
+        return a.seriesIndex == b.seriesIndex
+                && aSource.equals(bSource)
+                && nullToEmpty(a.baseName).equals(nullToEmpty(b.baseName));
+    }
+
+    private static JPanel previewCropRow(JRadioButton fullCrop,
+                                         JRadioButton centreCrop,
+                                         JRadioButton customCrop) {
+        JPanel row = new JPanel();
+        row.setOpaque(false);
+        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
+        row.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
+        ButtonGroup group = new ButtonGroup();
+        group.add(fullCrop);
+        group.add(centreCrop);
+        group.add(customCrop);
+        fullCrop.setOpaque(false);
+        centreCrop.setOpaque(false);
+        customCrop.setOpaque(false);
+        row.add(new JLabel("ROI: "));
+        row.add(fullCrop);
+        row.add(Box.createHorizontalStrut(10));
+        row.add(centreCrop);
+        row.add(Box.createHorizontalStrut(10));
+        row.add(customCrop);
+        row.add(Box.createHorizontalGlue());
+        return row;
+    }
+
+    private static void selectPreviewCropButton(CropSpec spec,
+                                                JRadioButton fullCrop,
+                                                JRadioButton centreCrop,
+                                                JRadioButton customCrop) {
+        CropSpec.Mode mode = spec == null ? CropSpec.Mode.CENTRE_256 : spec.mode();
+        fullCrop.setSelected(mode == CropSpec.Mode.FULL);
+        centreCrop.setSelected(mode == CropSpec.Mode.CENTRE_256);
+        customCrop.setSelected(mode == CropSpec.Mode.CUSTOM);
+    }
+
+    private static int firstCheckedPreviewChannel(int[] selectable,
+                                                  List<ToggleSwitch> toggles) {
+        if (selectable == null || selectable.length == 0) return -1;
+        if (toggles != null) {
+            for (int i = 0; i < selectable.length && i < toggles.size(); i++) {
+                ToggleSwitch toggle = toggles.get(i);
+                if (toggle != null && toggle.isSelected()) {
+                    return selectable[i];
+                }
+            }
+        }
+        return selectable[0];
     }
 
     /** Reads the per-channel LUT colour names from the project config; missing entries stay null. */
@@ -1372,6 +1564,29 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                                                             int channelIndex,
                                                             int cropWidth,
                                                             int cropHeight) throws Exception {
+        return renderPreviewContent(directory, job, channelNames, settings,
+                channelIndex, cropWidth, cropHeight, null);
+    }
+
+    DeconvPreviewDialog.PreviewContent renderPreviewContent(String directory,
+                                                            SeriesJob job,
+                                                            String[] channelNames,
+                                                            RunSettings settings,
+                                                            int channelIndex,
+                                                            CropSpec cropSpec) throws Exception {
+        return renderPreviewContent(directory, job, channelNames, settings,
+                channelIndex, PREVIEW_CROP_SIZE, PREVIEW_CROP_SIZE,
+                cropSpec == null ? CropSpec.centre256() : cropSpec);
+    }
+
+    private DeconvPreviewDialog.PreviewContent renderPreviewContent(String directory,
+                                                                    SeriesJob job,
+                                                                    String[] channelNames,
+                                                                    RunSettings settings,
+                                                                    int channelIndex,
+                                                                    int cropWidth,
+                                                                    int cropHeight,
+                                                                    CropSpec cropSpec) throws Exception {
         ImagePlus rawChannel = null;
         ImagePlus rawCrop = null;
         ImagePlus psf = null;
@@ -1382,7 +1597,9 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 return null;
             }
 
-            rawCrop = cropCenterStack(rawChannel, cropWidth, cropHeight, "Raw Preview");
+            rawCrop = cropSpec == null
+                    ? cropCenterStack(rawChannel, cropWidth, cropHeight, "Raw Preview")
+                    : cropStack(rawChannel, cropSpec, "Raw Preview");
             if (rawCrop == null) {
                 return null;
             }
@@ -1464,6 +1681,18 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         return result;
     }
 
+    private static ImagePlus cropStack(ImagePlus image, CropSpec cropSpec, String title) {
+        if (image == null || image.getStack() == null) return null;
+        CropSpec spec = cropSpec == null ? CropSpec.centre256() : cropSpec;
+        ImagePlus result = spec.mode() == CropSpec.Mode.FULL
+                ? image.duplicate()
+                : spec.apply(image);
+        if (result != null) {
+            result.setTitle(title);
+        }
+        return result;
+    }
+
     private static double[] stackDisplayRange(ImagePlus image) {
         double min = Double.POSITIVE_INFINITY;
         double max = Double.NEGATIVE_INFINITY;
@@ -1538,25 +1767,27 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             IJ.log("Could not initialize deconvolution summary report: " + e.getMessage());
         }
 
-        IJ.log("==========================================================");
-        IJ.log("3D Deconvolution");
-        IJ.log("==========================================================");
-        IJ.log("Directory: " + directory);
-        IJ.log("Engine: " + engine.displayName());
-        IJ.log("Algorithm: " + settings.algorithm.displayName());
-        IJ.log("PSF model: " + settings.psfModel.displayName());
-        if (verboseLogging) {
-            IJ.log("Strict Nyquist: " + settings.strictNyquist);
-            IJ.log("Use cache: " + settings.useCache);
-        }
+        BatchStats batchStats = new BatchStats();
+        deconvProgressReporter = createProgressReporter(TITLE, jobs.size());
+        boolean batchFinished = false;
+        try {
+            deconvProgressReporter.setPhase("preparing batch");
+            logDeconvBatchHeader(directory, outputDir, jobs, channelNames, settings, engine);
+            deconvProgressReporter.setPhase("deconvolving stacks");
 
-        for (SeriesJob job : jobs) {
+        for (int jobIndex = 0; jobIndex < jobs.size(); jobIndex++) {
+            SeriesJob job = jobs.get(jobIndex);
+            int scnIndex = jobIndex + 1;
             long started = now();
             List<String> warnings = new ArrayList<String>();
             List<String> channelOutcomes = new ArrayList<String>();
             boolean[] deconvolvedChannelsForMerge = new boolean[channelNames.length];
             boolean selectedChannelFailed = false;
+            ImageStats imageStats = new ImageStats();
+            AnalysisProgressReporter.WorkHandle imageProgress =
+                    beginDeconvImageProgress(scnIndex, jobs.size(), job, "resolving metadata");
 
+            updateDeconvProgress(imageProgress, "validating metadata");
             ResolvedSeriesSettings resolved = resolveSeriesSettings(job.seriesInfo, settings, channelNames.length);
             long peakUsedBytes = usedHeapBytes();
             List<String> missingFields = missingFieldsForSeries(job.seriesInfo, settings, resolved);
@@ -1564,14 +1795,21 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 warnings.add("Skipped: missing required metadata/overrides: " + joinList(missingFields));
                 writeDetailsFile(rootDir, job, settings, resolved, channelNames,
                         channelOutcomes, warnings, started, now() - started, peakUsedBytes);
-                IJ.log("Deconvolution skip [" + job.baseName + "]: " + warnings.get(0));
+                String reason = "missing required metadata/overrides: " + joinList(missingFields);
+                logDeconvImageSkipped(scnIndex, jobs.size(), job, reason);
+                batchStats.imagesSkipped++;
+                skipDeconvProgress(imageProgress, deconvImageSummary(
+                        scnIndex, jobs.size(), job, imageStats, now() - started, "skipped"));
                 continue;
             }
             if (!hasAnySelectedChannel(settings.selectedChannels)) {
                 warnings.add("Skipped: no channels selected.");
                 writeDetailsFile(rootDir, job, settings, resolved, channelNames,
                         channelOutcomes, warnings, started, now() - started, peakUsedBytes);
-                IJ.log("Deconvolution skip [" + job.baseName + "]: no channels selected.");
+                logDeconvImageSkipped(scnIndex, jobs.size(), job, "no channels selected");
+                batchStats.imagesSkipped++;
+                skipDeconvProgress(imageProgress, deconvImageSummary(
+                        scnIndex, jobs.size(), job, imageStats, now() - started, "skipped"));
                 continue;
             }
 
@@ -1589,18 +1827,24 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                     warnings.add("Skipped: " + nyquist.getMessage());
                     writeDetailsFile(rootDir, job, settings, resolved, channelNames,
                             channelOutcomes, warnings, started, now() - started, peakUsedBytes);
-                    IJ.log("Deconvolution skip [" + job.baseName + "]: " + nyquist.getMessage());
+                    logDeconvImageSkipped(scnIndex, jobs.size(), job, nyquist.getMessage());
+                    batchStats.imagesSkipped++;
+                    skipDeconvProgress(imageProgress, deconvImageSummary(
+                            scnIndex, jobs.size(), job, imageStats, now() - started, "skipped"));
                     continue;
                 }
                 warnings.add(nyquist.getMessage());
-                IJ.log("Deconvolution warning [" + job.baseName + "]: " + nyquist.getMessage());
+                IJ.log("[" + scnIndex + "/" + jobs.size() + "] WARNING "
+                        + jobLogLabel(job) + ": " + nyquist.getMessage());
             }
 
+            logDeconvImageStart(scnIndex, jobs.size(), job, channelNames, settings);
             for (int channelIndex = 0; channelIndex < channelNames.length; channelIndex++) {
                 if (channelIndex >= settings.selectedChannels.length || !settings.selectedChannels[channelIndex]) {
                     continue;
                 }
 
+                String channelName = channelNameAt(channelNames, channelIndex);
                 long channelStarted = now();
                 long channelPeakUsedBytes = usedHeapBytes();
                 List<String> summaryWarnings = new ArrayList<String>();
@@ -1614,12 +1858,18 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 File outFile = DeconvolutionIO.deconvFile(rootDir, job.baseName, channelIndex);
                 File existingOutFile = DeconvolutionIO.firstExistingFile(
                         DeconvolutionIO.deconvFileReadCandidates(rootDir, job.baseName, channelIndex));
+                updateDeconvProgress(imageProgress, channelProgressLabel(channelIndex, channelNames.length,
+                        channelName, "checking output and cache"));
                 if (skipExisting && existingOutFile != null) {
                     deconvolvedChannelsForMerge[channelIndex] = true;
-                    channelOutcomes.add(channelNames[channelIndex] + ": skipped existing output");
+                    imageStats.skippedExistingChannels++;
+                    batchStats.skippedExistingChannels++;
+                    channelOutcomes.add(channelName + ": skipped existing output");
+                    logDeconvChannelOutcome(scnIndex, jobs.size(), job, channelIndex, channelNames.length,
+                            channelName, "skipped existing output", channelStarted, existingOutFile.getName());
                     appendSummaryRow(summaryReport,
                             job.baseName,
-                            channelNames[channelIndex],
+                            channelName,
                             engine,
                             settings,
                             sizeXYZ(job.seriesInfo),
@@ -1640,15 +1890,19 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                     deleteFileIfExists(outFile);
                 } catch (IOException e) {
                     String message = "failed to remove stale output before recompute: " + e.getMessage();
-                    warnings.add(channelNames[channelIndex] + " " + message);
-                    channelOutcomes.add(channelNames[channelIndex] + ": failed");
+                    warnings.add(channelName + " " + message);
+                    channelOutcomes.add(channelName + ": failed");
                     summaryWarnings.add("staleOutputDeleteFailed");
                     recordError("Deconvolution stale output delete failed for "
-                            + job.baseName + " " + channelNames[channelIndex], e);
+                            + job.baseName + " " + channelName, e);
                     selectedChannelFailed = true;
+                    imageStats.failedChannels++;
+                    batchStats.failedChannels++;
+                    logDeconvChannelOutcome(scnIndex, jobs.size(), job, channelIndex, channelNames.length,
+                            channelName, "failed", channelStarted, message);
                     appendSummaryRow(summaryReport,
                             job.baseName,
-                            channelNames[channelIndex],
+                            channelName,
                             engine,
                             settings,
                             sizeXYZ(job.seriesInfo),
@@ -1662,21 +1916,27 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 if (settings.useCache && cacheHitFile != null) {
                     boolean cacheHit = false;
                     try {
+                        updateDeconvProgress(imageProgress, channelProgressLabel(channelIndex, channelNames.length,
+                                channelName, "copying cached output"));
                         copyFile(cacheHitFile, outFile);
                         recordOutput(outFile, "tif");
-                        channelOutcomes.add(channelNames[channelIndex] + ": cache hit");
+                        channelOutcomes.add(channelName + ": cache hit");
                         deconvolvedChannelsForMerge[channelIndex] = true;
+                        imageStats.cacheHitChannels++;
+                        batchStats.cacheHitChannels++;
+                        logDeconvChannelOutcome(scnIndex, jobs.size(), job, channelIndex, channelNames.length,
+                                channelName, "cache hit", channelStarted, cacheHitFile.getName());
                         cacheHit = true;
                     } catch (IOException e) {
-                        warnings.add("Cache copy failed for " + channelNames[channelIndex] + ": " + e.getMessage());
+                        warnings.add("Cache copy failed for " + channelName + ": " + e.getMessage());
                         summaryWarnings.add("cacheCopyFailed");
-                        recordWarn("Cache copy failed for " + channelNames[channelIndex]
+                        recordWarn("Cache copy failed for " + channelName
                                 + ": " + e.getMessage());
                     }
                     if (cacheHit) {
                         appendSummaryRow(summaryReport,
                                 job.baseName,
-                                channelNames[channelIndex],
+                                channelName,
                                 engine,
                                 settings,
                                 sizeXYZ(job.seriesInfo),
@@ -1693,12 +1953,28 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 ImagePlus deconvolved = null;
                 String sizeXYZ = sizeXYZ(job.seriesInfo);
                 try {
+                    updateDeconvProgress(imageProgress, channelProgressLabel(channelIndex, channelNames.length,
+                            channelName, "opening source stack"));
                     channelStack = openSeriesChannel(directory, job.seriesIndex, channelIndex);
                     channelPeakUsedBytes = Math.max(channelPeakUsedBytes, usedHeapBytes());
                     if (channelStack == null) {
-                        channelOutcomes.add(channelNames[channelIndex] + ": skipped (channel could not be opened)");
+                        channelOutcomes.add(channelName + ": failed (channel could not be opened)");
                         summaryWarnings.add("openFailed");
                         selectedChannelFailed = true;
+                        imageStats.failedChannels++;
+                        batchStats.failedChannels++;
+                        logDeconvChannelOutcome(scnIndex, jobs.size(), job, channelIndex, channelNames.length,
+                                channelName, "failed", channelStarted, "channel could not be opened");
+                        appendSummaryRow(summaryReport,
+                                job.baseName,
+                                channelName,
+                                engine,
+                                settings,
+                                sizeXYZ,
+                                now() - channelStarted,
+                                channelPeakUsedBytes,
+                                false,
+                                summaryWarnings);
                         continue;
                     }
                     sizeXYZ = sizeXYZ(channelStack);
@@ -1708,34 +1984,71 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                     if (requiredBytes > availableBytes) {
                         String message = "memory skip (" + humanMiB(requiredBytes) + " MiB required, "
                                 + humanMiB(availableBytes) + " MiB available)";
-                        channelOutcomes.add(channelNames[channelIndex] + ": " + message);
-                        warnings.add(channelNames[channelIndex] + " " + message);
+                        channelOutcomes.add(channelName + ": " + message);
+                        warnings.add(channelName + " " + message);
                         summaryWarnings.add("memorySkip");
                         selectedChannelFailed = true;
+                        imageStats.skippedChannels++;
+                        batchStats.skippedChannels++;
+                        logDeconvChannelOutcome(scnIndex, jobs.size(), job, channelIndex, channelNames.length,
+                                channelName, "skipped", channelStarted, message);
+                        appendSummaryRow(summaryReport,
+                                job.baseName,
+                                channelName,
+                                engine,
+                                settings,
+                                sizeXYZ,
+                                now() - channelStarted,
+                                channelPeakUsedBytes,
+                                false,
+                                summaryWarnings);
                         continue;
                     }
 
                     if (sanitizeInputForDeconvolution(channelStack)) {
                         String message = "input contained negative or non-finite pixels; sanitized before deconvolution";
-                        warnings.add(channelNames[channelIndex] + " " + message);
+                        warnings.add(channelName + " " + message);
                         summaryWarnings.add("inputSanitized");
+                        if (verboseLogging) {
+                            IJ.log("    - " + channelName + ": " + message);
+                        }
                     }
 
+                    updateDeconvProgress(imageProgress, channelProgressLabel(channelIndex, channelNames.length,
+                            channelName, "building PSF"));
                     PsfSpec spec = createPsfSpec(resolved, channelIndex, channelStack, settings.scopeModality);
 
                     psf = getOrCreatePsf(spec, settings.psfModel);
                     channelPeakUsedBytes = Math.max(channelPeakUsedBytes, usedHeapBytes());
                     if (psf == null) {
                         String message = "PSF synthesis failed";
-                        channelOutcomes.add(channelNames[channelIndex] + ": " + message);
-                        warnings.add(channelNames[channelIndex] + " " + message);
+                        channelOutcomes.add(channelName + ": " + message);
+                        warnings.add(channelName + " " + message);
                         summaryWarnings.add("psfFailed");
                         selectedChannelFailed = true;
+                        imageStats.failedChannels++;
+                        batchStats.failedChannels++;
+                        logDeconvChannelOutcome(scnIndex, jobs.size(), job, channelIndex, channelNames.length,
+                                channelName, "failed", channelStarted, message);
+                        appendSummaryRow(summaryReport,
+                                job.baseName,
+                                channelName,
+                                engine,
+                                settings,
+                                sizeXYZ,
+                                now() - channelStarted,
+                                channelPeakUsedBytes,
+                                false,
+                                summaryWarnings);
                         continue;
                     }
 
                     if (writtenPsfHashes.add(paramsHash)) {
                         writePsfPreview(psf, spec, settings.psfModel, outputDir);
+                        if (verboseLogging) {
+                            IJ.log("    - PSF preview written for " + channelName
+                                    + " (" + settings.psfModel.displayName() + ")");
+                        }
                     }
 
                     DeconvParams params = DeconvParams.builder(settings.algorithm)
@@ -1743,38 +2056,53 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                             .regularization(settings.regularization)
                             .edgeHandling(EdgeHandling.REFLECT)
                             .build();
+                    updateDeconvProgress(imageProgress, channelProgressLabel(channelIndex, channelNames.length,
+                            channelName, "running " + engine.displayName()));
                     deconvolved = engine.deconvolve(channelStack, psf, params);
                     channelPeakUsedBytes = Math.max(channelPeakUsedBytes, usedHeapBytes());
+                    updateDeconvProgress(imageProgress, channelProgressLabel(channelIndex, channelNames.length,
+                            channelName, "saving TIFF"));
                     saveTiff(deconvolved, outFile);
                     deconvolvedChannelsForMerge[channelIndex] = true;
-                    channelOutcomes.add(channelNames[channelIndex] + ": written (" + paramsHash + ")");
+                    channelOutcomes.add(channelName + ": written (" + paramsHash + ")");
+                    imageStats.writtenChannels++;
+                    batchStats.writtenChannels++;
+                    logDeconvChannelOutcome(scnIndex, jobs.size(), job, channelIndex, channelNames.length,
+                            channelName, "written", channelStarted,
+                            sizeXYZ + ", hash " + paramsHash + ", peak " + humanMiB(channelPeakUsedBytes) + " MiB");
                     if (settings.useCache) {
                         try {
                             copyFile(outFile, cacheFile);
                         } catch (IOException e) {
-                            warnings.add("Cache write failed for " + channelNames[channelIndex] + ": " + e.getMessage());
-                            recordWarn("Cache write failed for " + channelNames[channelIndex]
+                            warnings.add("Cache write failed for " + channelName + ": " + e.getMessage());
+                            recordWarn("Cache write failed for " + channelName
                                     + ": " + e.getMessage());
                             summaryWarnings.add("cacheWriteFailed");
                         }
                     }
                 } catch (DeconvolutionException e) {
                     selectedChannelFailed = true;
-                    warnings.add(channelNames[channelIndex] + " failed: " + e.getMessage());
-                    channelOutcomes.add(channelNames[channelIndex] + ": failed");
+                    warnings.add(channelName + " failed: " + e.getMessage());
+                    channelOutcomes.add(channelName + ": failed");
                     summaryWarnings.add("failed");
                     String message = "Deconvolution failed [" + job.baseName + ", "
-                            + channelNames[channelIndex] + "]: " + e.getMessage();
-                    IJ.log(message);
+                            + channelName + "]: " + e.getMessage();
+                    imageStats.failedChannels++;
+                    batchStats.failedChannels++;
+                    logDeconvChannelOutcome(scnIndex, jobs.size(), job, channelIndex, channelNames.length,
+                            channelName, "failed", channelStarted, e.getMessage());
                     recordError(message, e);
                 } catch (Exception e) {
                     selectedChannelFailed = true;
-                    warnings.add(channelNames[channelIndex] + " failed: " + e.getMessage());
-                    channelOutcomes.add(channelNames[channelIndex] + ": failed");
+                    warnings.add(channelName + " failed: " + e.getMessage());
+                    channelOutcomes.add(channelName + ": failed");
                     summaryWarnings.add("failed");
                     String message = "Deconvolution failed [" + job.baseName + ", "
-                            + channelNames[channelIndex] + "]: " + e.getMessage();
-                    IJ.log(message);
+                            + channelName + "]: " + e.getMessage();
+                    imageStats.failedChannels++;
+                    batchStats.failedChannels++;
+                    logDeconvChannelOutcome(scnIndex, jobs.size(), job, channelIndex, channelNames.length,
+                            channelName, "failed", channelStarted, e.getMessage());
                     recordError(message, e);
                 } finally {
                     closeQuietly(deconvolved);
@@ -1784,7 +2112,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 peakUsedBytes = Math.max(peakUsedBytes, channelPeakUsedBytes);
                 appendSummaryRow(summaryReport,
                         job.baseName,
-                        channelNames[channelIndex],
+                        channelName,
                         engine,
                         settings,
                         sizeXYZ,
@@ -1796,6 +2124,12 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
 
             if (selectedChannelFailed) {
                 warnings.add("Merged deconvolved output skipped because at least one selected channel failed.");
+                channelOutcomes.add("Merged: skipped (selected channel failed)");
+                imageStats.mergeSkipped = true;
+                batchStats.mergeSkipped++;
+                updateDeconvProgress(imageProgress, "merged output skipped");
+                IJ.log("[" + scnIndex + "/" + jobs.size() + "] Merge skipped for "
+                        + jobLogLabel(job) + ": at least one selected channel failed.");
                 try {
                     deleteFileIfExists(DeconvolutionIO.mergedDeconvFile(rootDir, job.baseName));
                 } catch (IOException e) {
@@ -1807,12 +2141,35 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
                 }
             } else {
                 try {
-                    writeMergedOutput(directory, rootDir, job, channelNames.length, deconvolvedChannelsForMerge);
+                    updateDeconvProgress(imageProgress, "writing merged output");
+                    MergeOutcome mergeOutcome = writeMergedOutput(directory, rootDir, job,
+                            channelNames.length, deconvolvedChannelsForMerge);
+                    if (mergeOutcome == MergeOutcome.WRITTEN) {
+                        imageStats.mergeWritten = true;
+                        batchStats.mergeWritten++;
+                        channelOutcomes.add("Merged: written");
+                        IJ.log("[" + scnIndex + "/" + jobs.size() + "] Merge written for "
+                                + jobLogLabel(job) + " (" + formatDurationCompact(now() - started) + " elapsed).");
+                    } else if (mergeOutcome == MergeOutcome.SKIPPED_EXISTING) {
+                        imageStats.mergeSkippedExisting = true;
+                        batchStats.mergeSkippedExisting++;
+                        channelOutcomes.add("Merged: skipped existing output");
+                        IJ.log("[" + scnIndex + "/" + jobs.size() + "] Merge skipped for "
+                                + jobLogLabel(job) + ": existing output.");
+                    } else {
+                        imageStats.mergeSkipped = true;
+                        batchStats.mergeSkipped++;
+                        channelOutcomes.add("Merged: skipped");
+                    }
                 } catch (Exception e) {
                     warnings.add("Merged deconvolved output failed: " + e.getMessage());
+                    channelOutcomes.add("Merged: failed");
+                    imageStats.mergeFailed = true;
+                    batchStats.mergeFailed++;
                     String message = "Could not write merged deconvolved output for "
                             + job.baseName + ": " + e.getMessage();
-                    IJ.log(message);
+                    IJ.log("[" + scnIndex + "/" + jobs.size() + "] Merge failed for "
+                            + jobLogLabel(job) + ": " + e.getMessage());
                     recordError(message, e);
                 }
             }
@@ -1820,6 +2177,17 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             long elapsed = now() - started;
             writeDetailsFile(rootDir, job, settings, resolved, channelNames,
                     channelOutcomes, warnings, started, elapsed, peakUsedBytes);
+            boolean imageFailed = selectedChannelFailed || imageStats.mergeFailed;
+            logDeconvImageFinished(scnIndex, jobs.size(), job, imageStats, elapsed, imageFailed);
+            if (imageFailed) {
+                batchStats.imagesFailed++;
+                failDeconvProgress(imageProgress, deconvImageSummary(
+                        scnIndex, jobs.size(), job, imageStats, elapsed, "finished with failures"));
+            } else {
+                batchStats.imagesCompleted++;
+                completeDeconvProgress(imageProgress, deconvImageSummary(
+                        scnIndex, jobs.size(), job, imageStats, elapsed, "complete"));
+            }
         }
 
         if (summaryReport != null) {
@@ -1836,8 +2204,200 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
 
         // Non-blocking completion signal. A modal dialog here would stall
         // unattended batch runs until a human clicked OK.
-        IJ.log("3D deconvolution finished.");
+            String batchSummary = batchStats.summary(jobs.size(), now() - batchStarted);
+            deconvProgressReporter.finish("3D deconvolution finished: " + batchSummary);
+            IJ.log("3D deconvolution finished: " + batchSummary);
         IJ.showStatus("3D deconvolution finished.");
+            batchFinished = true;
+        } finally {
+            if (!batchFinished) {
+                deconvProgressReporter.finish("3D deconvolution stopped before completion.");
+            }
+            deconvProgressReporter = AnalysisProgressReporter.disabled();
+        }
+    }
+
+    private AnalysisProgressReporter createProgressReporter(String analysisName, int totalUnits) {
+        return AnalysisProgressReporter.create(analysisName, totalUnits,
+                AnalysisProgressReporter.imageJSink(),
+                new AnalysisProgressReporter.Recorder() {
+                    @Override public void recordProgressSnapshot(Map<String, Object> snapshot) {
+                        if (runRecordContext != null) {
+                            runRecordContext.recordProgressSnapshot(snapshot);
+                        }
+                    }
+                });
+    }
+
+    private void logDeconvBatchHeader(String directory,
+                                      File outputDir,
+                                      List<SeriesJob> jobs,
+                                      String[] channelNames,
+                                      RunSettings settings,
+                                      DeconvolutionEngine engine) {
+        int imageCount = jobs == null ? 0 : jobs.size();
+        int selectedChannels = countSelectedChannels(channelNames, settings.selectedChannels);
+        IJ.log("==========================================================");
+        IJ.log("3D DECONVOLUTION");
+        IJ.log("==========================================================");
+        IJ.log("Directory: " + directory);
+        IJ.log("Output folder: " + (outputDir == null ? "" : outputDir.getAbsolutePath()));
+        IJ.log("Images: " + imageCount);
+        IJ.log("Selected channels: " + selectedChannelList(channelNames, settings.selectedChannels)
+                + " (" + selectedChannels + "/" + safeLength(channelNames) + ")");
+        IJ.log("Engine: " + (engine == null ? settings.engineKey : engine.displayName()));
+        IJ.log("Algorithm: " + (settings.algorithm == null ? "" : settings.algorithm.displayName())
+                + ", iterations " + settings.iterations
+                + ", regularization " + DeconvolutionIO.formatDouble(settings.regularization));
+        IJ.log("PSF model: " + (settings.psfModel == null ? "" : settings.psfModel.displayName()));
+        IJ.log("Scope modality: " + (settings.scopeModality == null ? "" : settings.scopeModality.displayName()));
+        IJ.log("Cache: " + (settings.useCache ? "enabled" : "disabled")
+                + "; skip existing: " + skipExisting
+                + "; strict Nyquist: " + settings.strictNyquist);
+    }
+
+    private AnalysisProgressReporter.WorkHandle beginDeconvImageProgress(int scnIndex,
+                                                                         int totalImages,
+                                                                         SeriesJob job,
+                                                                         String detail) {
+        return deconvProgressReporter.begin(
+                "image " + scnIndex + "/" + totalImages + ": " + jobLogLabel(job),
+                detail);
+    }
+
+    private void updateDeconvProgress(AnalysisProgressReporter.WorkHandle handle, String detail) {
+        deconvProgressReporter.update(handle, detail);
+    }
+
+    private void completeDeconvProgress(AnalysisProgressReporter.WorkHandle handle, String summary) {
+        deconvProgressReporter.complete(handle, summary);
+    }
+
+    private void skipDeconvProgress(AnalysisProgressReporter.WorkHandle handle, String summary) {
+        deconvProgressReporter.skip(handle, summary);
+    }
+
+    private void failDeconvProgress(AnalysisProgressReporter.WorkHandle handle, String summary) {
+        deconvProgressReporter.fail(handle, summary);
+    }
+
+    private void logDeconvImageStart(int scnIndex,
+                                     int totalImages,
+                                     SeriesJob job,
+                                     String[] channelNames,
+                                     RunSettings settings) {
+        String size = sizeXYZ(job == null ? null : job.seriesInfo);
+        IJ.log("[" + scnIndex + "/" + totalImages + "] Deconvolving "
+                + jobLogLabel(job) + (size.isEmpty() ? "" : " (" + size + ")"));
+        IJ.log("  Channels: " + selectedChannelList(channelNames, settings.selectedChannels));
+        if (verboseLogging && job != null) {
+            IJ.log("  Source: " + (job.sourceFile == null ? "" : job.sourceFile.getAbsolutePath())
+                    + " | series " + job.sourceSeriesIndex);
+        }
+    }
+
+    private static void logDeconvImageSkipped(int scnIndex,
+                                              int totalImages,
+                                              SeriesJob job,
+                                              String reason) {
+        IJ.log("[" + scnIndex + "/" + totalImages + "] Skipped "
+                + jobLogLabel(job) + ": " + safeText(reason));
+    }
+
+    private void logDeconvImageFinished(int scnIndex,
+                                        int totalImages,
+                                        SeriesJob job,
+                                        ImageStats stats,
+                                        long elapsedMs,
+                                        boolean failed) {
+        IJ.log("[" + scnIndex + "/" + totalImages + "] "
+                + (failed ? "Finished with warnings/failures: " : "Complete: ")
+                + jobLogLabel(job) + " in " + formatDurationCompact(elapsedMs)
+                + " (" + stats.summary() + ")");
+    }
+
+    private void logDeconvChannelOutcome(int scnIndex,
+                                         int totalImages,
+                                         SeriesJob job,
+                                         int channelIndex,
+                                         int channelCount,
+                                         String channelName,
+                                         String outcome,
+                                         long startedMillis,
+                                         String detail) {
+        String elapsed = formatDurationCompact(now() - startedMillis);
+        StringBuilder sb = new StringBuilder();
+        sb.append("[").append(scnIndex).append("/").append(totalImages).append("] ");
+        sb.append("Channel ").append(channelIndex + 1).append("/").append(channelCount)
+                .append(" ").append(channelName).append(" ").append(outcome);
+        sb.append(" in ").append(elapsed);
+        String safeDetail = safeText(detail);
+        if (!safeDetail.isEmpty()) {
+            sb.append(" (").append(safeDetail).append(")");
+        }
+        IJ.log(sb.toString());
+        IJ.showStatus("3D deconvolution " + scnIndex + "/" + totalImages
+                + ": " + channelName + " " + outcome);
+    }
+
+    private static String deconvImageSummary(int scnIndex,
+                                             int totalImages,
+                                             SeriesJob job,
+                                             ImageStats stats,
+                                             long elapsedMs,
+                                             String outcome) {
+        return "image " + scnIndex + "/" + totalImages + " "
+                + safeText(outcome) + ": " + jobLogLabel(job)
+                + " (" + formatDurationCompact(elapsedMs) + "; " + stats.summary() + ")";
+    }
+
+    private static String channelProgressLabel(int channelIndex,
+                                               int channelCount,
+                                               String channelName,
+                                               String detail) {
+        return "channel " + (channelIndex + 1) + "/" + channelCount
+                + " " + channelName + ": " + safeText(detail);
+    }
+
+    private static String jobLogLabel(SeriesJob job) {
+        if (job == null) return "unknown image";
+        if (job.displayName != null && !job.displayName.trim().isEmpty()) {
+            return job.displayName.trim();
+        }
+        if (job.baseName != null && !job.baseName.trim().isEmpty()) {
+            return job.baseName.trim();
+        }
+        return "series " + job.seriesIndex;
+    }
+
+    private static String channelNameAt(String[] channelNames, int channelIndex) {
+        if (channelNames != null
+                && channelIndex >= 0
+                && channelIndex < channelNames.length
+                && channelNames[channelIndex] != null
+                && !channelNames[channelIndex].trim().isEmpty()) {
+            return channelNames[channelIndex].trim();
+        }
+        return "Channel " + (channelIndex + 1);
+    }
+
+    private static int countSelectedChannels(String[] channelNames, boolean[] selected) {
+        int channelCount = safeLength(channelNames);
+        int count = 0;
+        for (int i = 0; i < channelCount; i++) {
+            if (selected != null && i < selected.length && selected[i]) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static int safeLength(Object[] values) {
+        return values == null ? 0 : values.length;
+    }
+
+    private static String safeText(String value) {
+        return value == null ? "" : value.trim();
     }
 
     protected List<SeriesJob> listSeriesJobs(String directory) throws Exception {
@@ -2012,18 +2572,18 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         }
     }
 
-    private void writeMergedOutput(String directory,
-                                   File rootDir,
-                                   SeriesJob job,
-                                   int channelCount,
-                                   boolean[] deconvolvedChannels) throws Exception {
-        if (job == null || channelCount <= 0) return;
+    private MergeOutcome writeMergedOutput(String directory,
+                                           File rootDir,
+                                           SeriesJob job,
+                                           int channelCount,
+                                           boolean[] deconvolvedChannels) throws Exception {
+        if (job == null || channelCount <= 0) return MergeOutcome.SKIPPED;
 
         File mergedFile = DeconvolutionIO.mergedDeconvFile(rootDir, job.baseName);
         File existingMergedFile = DeconvolutionIO.firstFreshFile(job.sourceFile,
                 DeconvolutionIO.mergedDeconvFileReadCandidates(rootDir, job.baseName));
         if (skipExisting && existingMergedFile != null) {
-            return;
+            return MergeOutcome.SKIPPED_EXISTING;
         }
 
         ImagePlus[] channelImages = new ImagePlus[channelCount];
@@ -2059,6 +2619,7 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             try {
                 merged.setTitle(job.baseName + "_deconv");
                 saveTiff(merged, mergedFile);
+                return MergeOutcome.WRITTEN;
             } finally {
                 closeQuietly(merged);
             }
@@ -2941,6 +3502,106 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
         return values.isEmpty() ? "(none)" : joinList(values);
     }
 
+    private static String formatDurationCompact(long ms) {
+        long safeMs = Math.max(0L, ms);
+        if (safeMs < 1000L) {
+            return safeMs + " ms";
+        }
+        long seconds = safeMs / 1000L;
+        if (seconds < 60L) {
+            return seconds + " s";
+        }
+        long minutes = seconds / 60L;
+        long remSeconds = seconds % 60L;
+        if (minutes < 60L) {
+            return minutes + "m " + remSeconds + "s";
+        }
+        long hours = minutes / 60L;
+        long remMinutes = minutes % 60L;
+        return hours + "h " + remMinutes + "m";
+    }
+
+    private static void addCount(List<String> parts, int count, String singular, String plural) {
+        if (parts != null && count > 0) {
+            parts.add(count + " " + (count == 1 ? singular : plural));
+        }
+    }
+
+    private static final class ImageStats {
+        int writtenChannels;
+        int cacheHitChannels;
+        int skippedExistingChannels;
+        int skippedChannels;
+        int failedChannels;
+        boolean mergeWritten;
+        boolean mergeSkippedExisting;
+        boolean mergeSkipped;
+        boolean mergeFailed;
+
+        String summary() {
+            List<String> parts = new ArrayList<String>();
+            addCount(parts, writtenChannels, "channel written", "channels written");
+            addCount(parts, cacheHitChannels, "cache hit", "cache hits");
+            addCount(parts, skippedExistingChannels, "existing channel skipped", "existing channels skipped");
+            addCount(parts, skippedChannels, "channel skipped", "channels skipped");
+            addCount(parts, failedChannels, "channel failed", "channels failed");
+            if (parts.isEmpty()) {
+                parts.add("no channel outputs");
+            }
+            parts.add(mergeSummary());
+            return joinList(parts);
+        }
+
+        private String mergeSummary() {
+            if (mergeWritten) return "merge written";
+            if (mergeSkippedExisting) return "merge skipped existing";
+            if (mergeFailed) return "merge failed";
+            if (mergeSkipped) return "merge skipped";
+            return "merge not attempted";
+        }
+    }
+
+    private static final class BatchStats {
+        int imagesCompleted;
+        int imagesSkipped;
+        int imagesFailed;
+        int writtenChannels;
+        int cacheHitChannels;
+        int skippedExistingChannels;
+        int skippedChannels;
+        int failedChannels;
+        int mergeWritten;
+        int mergeSkippedExisting;
+        int mergeSkipped;
+        int mergeFailed;
+
+        String summary(int totalImages, long elapsedMs) {
+            List<String> imageParts = new ArrayList<String>();
+            imageParts.add(totalImages + " " + (totalImages == 1 ? "image" : "images"));
+            addCount(imageParts, imagesCompleted, "complete", "complete");
+            addCount(imageParts, imagesSkipped, "skipped", "skipped");
+            addCount(imageParts, imagesFailed, "failed", "failed");
+
+            List<String> channelParts = new ArrayList<String>();
+            addCount(channelParts, writtenChannels, "written", "written");
+            addCount(channelParts, cacheHitChannels, "cache hit", "cache hits");
+            addCount(channelParts, skippedExistingChannels, "existing skipped", "existing skipped");
+            addCount(channelParts, skippedChannels, "skipped", "skipped");
+            addCount(channelParts, failedChannels, "failed", "failed");
+
+            List<String> mergeParts = new ArrayList<String>();
+            addCount(mergeParts, mergeWritten, "written", "written");
+            addCount(mergeParts, mergeSkippedExisting, "existing skipped", "existing skipped");
+            addCount(mergeParts, mergeSkipped, "skipped", "skipped");
+            addCount(mergeParts, mergeFailed, "failed", "failed");
+
+            return joinList(imageParts)
+                    + "; channels: " + (channelParts.isEmpty() ? "none" : joinList(channelParts))
+                    + "; merges: " + (mergeParts.isEmpty() ? "none" : joinList(mergeParts))
+                    + "; elapsed " + formatDurationCompact(elapsedMs);
+        }
+    }
+
     private static final class MetadataFieldRow {
         final JPanel panel;
         final JTextField field;
@@ -2964,6 +3625,40 @@ public class DeconvolutionAnalysis implements Analysis, RunRecordAware {
             this.panel = panel;
             this.component = component;
             this.sourceTagLabel = sourceTagLabel;
+        }
+    }
+
+    private static final class PreviewSelection {
+        final SeriesJob job;
+        final int[] channels;
+        final CropSpec cropSpec;
+
+        PreviewSelection(SeriesJob job, int[] channels, CropSpec cropSpec) {
+            this.job = job;
+            this.channels = channels == null ? new int[0] : channels.clone();
+            this.cropSpec = cropSpec == null ? CropSpec.centre256() : cropSpec;
+        }
+    }
+
+    private static final class PreviewImageChoice {
+        final SeriesJob job;
+
+        PreviewImageChoice(SeriesJob job) {
+            this.job = job;
+        }
+
+        @Override
+        public String toString() {
+            if (job == null) return "Image";
+            String label = nullToEmpty(job.displayName);
+            if (label.trim().isEmpty()) {
+                label = nullToEmpty(job.baseName);
+            }
+            if (label.trim().isEmpty()) {
+                label = "Series " + (job.seriesIndex + 1);
+            }
+            String size = sizeXYZ(job.seriesInfo);
+            return size.isEmpty() ? label : label + " (" + size + ")";
         }
     }
 
