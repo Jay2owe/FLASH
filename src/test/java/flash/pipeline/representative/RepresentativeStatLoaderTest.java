@@ -10,6 +10,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.PrintWriter;
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -130,6 +131,18 @@ public class RepresentativeStatLoaderTest {
 
         assertTrue(table.isEmpty());
         assertEquals(0, table.rowCount());
+    }
+
+    @Test
+    public void quickContainerResolverAcceptsLooseTiffProjects() throws Exception {
+        File project = temp.newFolder("loose-tiff-quick");
+        assertTrue(new File(project, "MouseA_LH_SCN.tif").createNewFile());
+
+        Method method = RepresentativeStatLoader.class.getDeclaredMethod(
+                "resolveQuickContainerFile", String.class);
+        method.setAccessible(true);
+
+        assertNull(method.invoke(null, project.getAbsolutePath()));
     }
 
     private static void writeCsv(File file, List<String> header, List<List<String>> rows)
