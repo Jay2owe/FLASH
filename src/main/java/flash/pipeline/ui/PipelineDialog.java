@@ -48,7 +48,13 @@ public class PipelineDialog {
     private static final double MAX_SCREEN_WIDTH_FRACTION = 0.92;
     private static final double MAX_SCREEN_HEIGHT_FRACTION = 0.80;
     private static final int MAX_COMBO_WIDTH = 280;
+    private static final int CHANNEL_NAME_COL_WIDTH = 150;
+    private static final int CHANNEL_FILTER_COL_WIDTH = 230;
+    private static final int CHANNEL_NUM_COL_WIDTH = 96;
     private static final int HELP_WRAP_WIDTH = 460;
+    private static final int DEFAULT_FOOTER_BUTTON_MIN_WIDTH = 80;
+    private static final int UTILITY_FOOTER_BUTTON_MIN_WIDTH = 90;
+    private static final int FOOTER_BUTTON_HEIGHT = 28;
 
     public enum Phase {
         SETUP("Setup"),
@@ -172,11 +178,11 @@ public class PipelineDialog {
         backButton = new JButton("Back");
         okButton = new JButton("OK");
         cancelButton = new JButton("Cancel");
-        backButton.setPreferredSize(new Dimension(80, 28));
-        okButton.setPreferredSize(new Dimension(80, 28));
-        cancelButton.setPreferredSize(new Dimension(80, 28));
         styleActionButton(okButton, PRIMARY_ACTION_BG, PRIMARY_ACTION_FG, PRIMARY_ACTION_BORDER);
         styleActionButton(cancelButton, CANCEL_ACTION_BG, CANCEL_ACTION_FG, CANCEL_ACTION_BORDER);
+        sizeFooterButtonToText(backButton, DEFAULT_FOOTER_BUTTON_MIN_WIDTH);
+        sizeFooterButtonToText(okButton, DEFAULT_FOOTER_BUTTON_MIN_WIDTH);
+        sizeFooterButtonToText(cancelButton, DEFAULT_FOOTER_BUTTON_MIN_WIDTH);
         backButton.addActionListener(e -> { wasBackPressed = true; wasCanceled = true; dialog.dispose(); });
         okButton.addActionListener(e -> { wasCanceled = false; dialog.dispose(); });
         cancelButton.addActionListener(e -> requestCancelClose());
@@ -669,6 +675,24 @@ public class PipelineDialog {
         return help;
     }
 
+    /**
+     * Updates the text of a help label created by {@link #addHelpText}, re-wrapping
+     * it so inline markup (e.g. {@code <br>}) renders. Falls back to a plain
+     * {@code setText} for any other label.
+     */
+    public void setHelpText(JLabel label, String text) {
+        if (label instanceof HelpLabel) {
+            HelpLabel help = (HelpLabel) label;
+            help.rawText = stripHelpHtml(text);
+            int width = dialog.getWidth() > 0
+                    ? Math.min(HELP_WRAP_WIDTH, Math.max(240, dialog.getWidth() - 80))
+                    : 280;
+            help.rerender(width);
+        } else if (label != null) {
+            label.setText(text);
+        }
+    }
+
     /** Adds a labeled text input field. */
     public JTextField addStringField(String label, String defaultValue, int columns) {
         JPanel row = createRow();
@@ -709,6 +733,201 @@ public class PipelineDialog {
         addToBody(row);
         addToBody(Box.createVerticalStrut(4));
         return combo;
+    }
+
+    /** Handles to the widgets of one {@link #addChannelRow} line. */
+    public static final class ChannelRow {
+        public final JLabel nameLabel;
+        public final JComboBox<String> filterChoice;
+        public final ToggleSwitch binariseToggle;
+        public final JPanel rowPanel;
+
+        ChannelRow(JLabel nameLabel, JComboBox<String> filterChoice,
+                   ToggleSwitch binariseToggle, JPanel rowPanel) {
+            this.nameLabel = nameLabel;
+            this.filterChoice = filterChoice;
+            this.binariseToggle = binariseToggle;
+            this.rowPanel = rowPanel;
+        }
+    }
+
+    /** Adds a muted column-header row whose widths line up with {@link #addChannelRow}. */
+    public void addChannelTableHeader(String channelCol, String filterCol, String toggleCol) {
+        JPanel row = createRow();
+        row.add(mutedColumnLabel(channelCol, CHANNEL_NAME_COL_WIDTH));
+        row.add(Box.createHorizontalStrut(8));
+        row.add(mutedColumnLabel(filterCol, CHANNEL_FILTER_COL_WIDTH));
+        row.add(Box.createHorizontalGlue());
+        JLabel toggleHeader = new JLabel(toggleCol);
+        toggleHeader.setFont(FlashTheme.caption());
+        toggleHeader.setForeground(HELP_COLOR);
+        row.add(toggleHeader);
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(2));
+    }
+
+    private JLabel mutedColumnLabel(String text, int width) {
+        JLabel label = new JLabel(text);
+        label.setFont(FlashTheme.caption());
+        label.setForeground(HELP_COLOR);
+        fixWidth(label, width);
+        return label;
+    }
+
+    /**
+     * Adds a single per-channel table row: a fixed-width name label, a filter
+     * dropdown, and a binarise toggle on one line. The dropdown and toggle are
+     * registered for sequential retrieval in call order, exactly like
+     * {@link #addChoice} and {@link #addToggle}, so {@link #getNextChoice()} and
+     * {@link #getNextBoolean()} read them in the order rows are added.
+     */
+    public ChannelRow addChannelRow(String name, String[] items, String defaultItem,
+                                    boolean toggleDefault) {
+        JPanel row = createRow();
+
+        JLabel nameLbl = new JLabel(name);
+        nameLbl.setFont(FlashTheme.body());
+        nameLbl.setForeground(LABEL_COLOR);
+        fixWidth(nameLbl, CHANNEL_NAME_COL_WIDTH);
+        row.add(nameLbl);
+        row.add(Box.createHorizontalStrut(8));
+
+        String[] safeItems = items == null ? new String[0] : items;
+        if (safeItems.length == 0 && defaultItem != null) {
+            safeItems = new String[]{defaultItem};
+        }
+        JComboBox<String> combo = new JComboBox<String>(safeItems);
+        if (defaultItem != null) combo.setSelectedItem(defaultItem);
+        Dimension comboSize = new Dimension(CHANNEL_FILTER_COL_WIDTH, 24);
+        combo.setPreferredSize(comboSize);
+        combo.setMinimumSize(comboSize);
+        combo.setMaximumSize(comboSize);
+        row.add(combo);
+
+        row.add(Box.createHorizontalGlue());
+
+        ToggleSwitch toggle = new ToggleSwitch(toggleDefault);
+        row.add(toggle);
+
+        combos.add(combo);
+        toggles.add(toggle);
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(4));
+        return new ChannelRow(nameLbl, combo, toggle, row);
+    }
+
+    private static void fixWidth(JComponent comp, int width) {
+        Dimension pref = comp.getPreferredSize();
+        int height = pref == null ? 22 : pref.height;
+        comp.setPreferredSize(new Dimension(width, height));
+        comp.setMinimumSize(new Dimension(width, height));
+        comp.setMaximumSize(new Dimension(width, height));
+    }
+
+    /** Handles to the widgets of one {@link #addChannelDualNumericRow} line. */
+    public static final class ChannelNumericRow {
+        public final JLabel nameLabel;
+        public final JTextField primaryField;
+        public final JTextField secondaryField;
+        public final JPanel rowPanel;
+
+        ChannelNumericRow(JLabel nameLabel, JTextField primaryField,
+                          JTextField secondaryField, JPanel rowPanel) {
+            this.nameLabel = nameLabel;
+            this.primaryField = primaryField;
+            this.secondaryField = secondaryField;
+            this.rowPanel = rowPanel;
+        }
+    }
+
+    /** Adds a muted column-header row whose widths line up with {@link #addChannelDualNumericRow}. */
+    public void addChannelNumericTableHeader(String channelCol, String primaryCol, String secondaryCol) {
+        JPanel row = createRow();
+        row.add(mutedColumnLabel(channelCol, CHANNEL_NAME_COL_WIDTH));
+        row.add(Box.createHorizontalStrut(8));
+        row.add(mutedColumnLabel(primaryCol, CHANNEL_NUM_COL_WIDTH));
+        row.add(Box.createHorizontalStrut(8));
+        row.add(mutedColumnLabel(secondaryCol, CHANNEL_NUM_COL_WIDTH));
+        row.add(Box.createHorizontalGlue());
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(2));
+    }
+
+    /**
+     * Adds a per-channel row with a fixed-width name label and two numeric
+     * fields on one line. Both fields are registered for sequential retrieval
+     * in call order (primary then secondary), exactly like
+     * {@link #addNumericField}, so {@link #getNextNumber()} reads them in the
+     * order rows are added.
+     */
+    public ChannelNumericRow addChannelDualNumericRow(String name,
+                                                      double primaryValue, double secondaryValue) {
+        JPanel row = createRow();
+
+        JLabel nameLbl = new JLabel(name);
+        nameLbl.setFont(FlashTheme.body());
+        nameLbl.setForeground(LABEL_COLOR);
+        fixWidth(nameLbl, CHANNEL_NAME_COL_WIDTH);
+        row.add(nameLbl);
+        row.add(Box.createHorizontalStrut(8));
+
+        JTextField primary = channelNumericField(primaryValue);
+        row.add(primary);
+        row.add(Box.createHorizontalStrut(8));
+        JTextField secondary = channelNumericField(secondaryValue);
+        row.add(secondary);
+        row.add(Box.createHorizontalGlue());
+
+        numericFields.add(primary);
+        numericFields.add(secondary);
+        addToBody(row);
+        addToBody(Box.createVerticalStrut(4));
+        return new ChannelNumericRow(nameLbl, primary, secondary, row);
+    }
+
+    private JTextField channelNumericField(double value) {
+        JTextField tf = new JTextField(channelNumericText(value), 6);
+        tf.setFont(tf.getFont().deriveFont(Font.PLAIN, 12f));
+        Dimension size = new Dimension(CHANNEL_NUM_COL_WIDTH, 24);
+        tf.setPreferredSize(size);
+        tf.setMinimumSize(size);
+        tf.setMaximumSize(size);
+        return tf;
+    }
+
+    private static String channelNumericText(double value) {
+        if (!Double.isInfinite(value) && !Double.isNaN(value) && value == Math.rint(value)) {
+            return String.valueOf((long) value);
+        }
+        return String.valueOf(value);
+    }
+
+    /**
+     * Adds a radio-card chooser (visual replacement for {@link #addChoice}).
+     * Registers the card's backing combo in the same choice sequence, so
+     * {@link #getNextChoice()} reads it in order exactly like a dropdown, and
+     * the returned combo supports {@code getSelectedItem}/{@code setSelectedItem}
+     * and listeners just like {@link #addChoice} does. Pass {@code header} null
+     * to suppress the bold label above the cards.
+     */
+    public JComboBox<String> addCardChoice(String header, CardChoice.Option[] options, String defaultValue) {
+        return addCardChoice(header, options, defaultValue, null);
+    }
+
+    /** As {@link #addCardChoice(String, CardChoice.Option[], String)}, returning the panel via the out-array. */
+    public JComboBox<String> addCardChoice(String header, CardChoice.Option[] options, String defaultValue,
+                                           CardChoice[] panelOut) {
+        if (header != null && !header.isEmpty()) {
+            addSubHeader(header);
+        }
+        CardChoice cards = new CardChoice(options, defaultValue);
+        combos.add(cards.comboBox());
+        if (panelOut != null && panelOut.length > 0) {
+            panelOut[0] = cards;
+        }
+        addToBody(cards);
+        addToBody(Box.createVerticalStrut(6));
+        return cards.comboBox();
     }
 
     /** Adds a plain text message. Returns the JLabel for later updates. */
@@ -1111,6 +1330,7 @@ public class PipelineDialog {
         String trimmed = text == null ? "" : text.trim();
         if (!trimmed.isEmpty()) {
             okButton.setText(trimmed);
+            refreshFooterButtonSize(okButton, DEFAULT_FOOTER_BUTTON_MIN_WIDTH);
         }
     }
 
@@ -1174,8 +1394,7 @@ public class PipelineDialog {
     /** Adds a button to the footer utility row above OK/Cancel. */
     public JButton addFooterButton(String label) {
         JButton btn = new JButton(label);
-        Dimension pref = btn.getPreferredSize();
-        btn.setPreferredSize(new Dimension(Math.max(90, pref.width + 12), 28));
+        sizeFooterButtonToText(btn, UTILITY_FOOTER_BUTTON_MIN_WIDTH);
         leftButtonPanel.setVisible(true);
         leftButtonPanel.add(btn);
         buttonBar.revalidate();
@@ -1189,8 +1408,7 @@ public class PipelineDialog {
      */
     public JButton addRightFooterButton(String label) {
         JButton btn = new JButton(label);
-        Dimension pref = btn.getPreferredSize();
-        btn.setPreferredSize(new Dimension(Math.max(90, pref.width + 12), 28));
+        sizeFooterButtonToText(btn, UTILITY_FOOTER_BUTTON_MIN_WIDTH);
         rightButtonPanel.add(btn, 0);
         buttonBar.revalidate();
         return btn;
@@ -1408,6 +1626,28 @@ public class PipelineDialog {
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(border),
                 FlashTheme.pad(3, 10, 3, 10)));
+    }
+
+    private void refreshFooterButtonSize(JButton button, int minWidth) {
+        sizeFooterButtonToText(button, minWidth);
+        button.revalidate();
+        button.repaint();
+        buttonBar.revalidate();
+        buttonBar.repaint();
+        if (dialog.isShowing()) {
+            dialog.pack();
+            fitDialogToScreen();
+        }
+    }
+
+    private static void sizeFooterButtonToText(JButton button, int minWidth) {
+        if (button == null) return;
+        button.setPreferredSize(null);
+        Dimension natural = button.getPreferredSize();
+        int width = Math.max(minWidth, natural == null ? minWidth : natural.width);
+        Dimension size = new Dimension(width, FOOTER_BUTTON_HEIGHT);
+        button.setMinimumSize(size);
+        button.setPreferredSize(size);
     }
 
     private static <T> T next(List<T> values, int index, String type) {

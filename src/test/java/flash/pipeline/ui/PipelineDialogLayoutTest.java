@@ -9,6 +9,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.Insets;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -212,6 +213,29 @@ public class PipelineDialogLayoutTest {
         assertEquals(new Color(137, 44, 44), cancel.getForeground());
         assertTrue(ok.isOpaque());
         assertTrue(cancel.isOpaque());
+        backingDialog(dialog).dispose();
+    }
+
+    @Test
+    public void primaryButtonResizesToFitDynamicNextLabel() throws Exception {
+        PipelineDialog dialog = new PipelineDialog("Dynamic Primary Label");
+        JButton ok = button(dialog, "okButton");
+        int initialWidth = ok.getPreferredSize().width;
+
+        String nextLabel = "Next: Configure ROI drawing options";
+        dialog.setPrimaryButtonText(nextLabel);
+
+        Insets insets = ok.getInsets();
+        int textWidth = ok.getFontMetrics(ok.getFont()).stringWidth(nextLabel);
+        int fittedWidth = ok.getPreferredSize().width;
+        assertTrue("Primary button should grow beyond the default width for long Next labels",
+                fittedWidth > initialWidth);
+        assertTrue("Primary button should fit its full label",
+                fittedWidth >= textWidth + insets.left + insets.right);
+
+        dialog.setPrimaryButtonText("Run");
+        assertTrue("Primary button should shrink again after a shorter label is applied",
+                ok.getPreferredSize().width < fittedWidth);
         backingDialog(dialog).dispose();
     }
 

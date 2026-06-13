@@ -57,6 +57,9 @@ public final class FlashIcons {
     public static Icon dotsPartial(int size, Color color)  { return load("dots-partial",  size, color); }
     public static Icon pencil(int size, Color color)       { return load("pencil",        size, color); }
 
+    /** Generic accessor for any bundled icon by its resource name (no extension). */
+    public static Icon named(String name, int size, Color color) { return load(name, size, color); }
+
     public static Icon save()        { return save(DEFAULT_ACTION_SIZE, DEFAULT_ACTION_COLOR); }
     public static Icon folderOpen()  { return folderOpen(DEFAULT_ACTION_SIZE, DEFAULT_ACTION_COLOR); }
     public static Icon refresh()     { return refresh(DEFAULT_ACTION_SIZE, DEFAULT_ACTION_COLOR); }
