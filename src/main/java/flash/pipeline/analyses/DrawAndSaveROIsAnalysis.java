@@ -40,6 +40,7 @@ import flash.pipeline.io.IoUtils;
 import flash.pipeline.zslice.ZSliceOps;
 import flash.pipeline.zslice.ZSliceMode;
 
+import flash.pipeline.ui.CardChoice;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.NextStepLabels;
@@ -88,7 +89,6 @@ import java.util.concurrent.Future;
 
 import javax.swing.BorderFactory;
 import javax.swing.JComboBox;
-import javax.swing.JButton;
 import javax.swing.JFileChooser;
 import javax.swing.JDialog;
 import javax.swing.JComponent;
@@ -113,6 +113,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
 
     static final String FULL_IMAGE_SOURCE = "Full image";
     static final String CONFIGURED_SUBSET_SOURCE = "Configured analysis subset";
+    private static final String ENTRY_CREATE = "create";
+    private static final String ENTRY_APPEND = "append";
+    private static final String ENTRY_IMPORT = "import";
     private static final String[] BRIGHTNESS_CONTRAST_WINDOW_TITLES =
             new String[]{"B&C", "Brightness/Contrast"};
     private boolean suppressDialogs = false;
@@ -121,8 +124,9 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
     private CLIConfig cliConfig = null;
     private AnalysisRunContext runRecordContext = null;
 
-    private enum ImportPromptChoice {
-        DRAW,
+    private enum RoiEntryChoice {
+        CREATE,
+        APPEND,
         IMPORT,
         CANCEL
     }
@@ -139,6 +143,10 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
     }
 
     private static final class RoiImportOptions {
+        /** Identity sentinel returned when the user presses Back on the import screen. */
+        static final RoiImportOptions BACK =
+                new RoiImportOptions("__back__", false, -1, "", false);
+
         final String roiSetName;
         final boolean previewBeforeSaving;
         final int roiChannel;
@@ -228,28 +236,6 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         }
 
         BinConfig roiBinCfg = loadBinConfig(directory);
-        if (!suppressDialogs) {
-            ImportPromptChoice importChoice = promptForRoiImport();
-            if (importChoice == ImportPromptChoice.CANCEL) {
-                IJ.log("[FLASH] Draw ROIs and Orientate Images cancelled by user.");
-                return;
-            }
-            if (importChoice == ImportPromptChoice.IMPORT) {
-                File importZip = chooseImportedRoiZip(projectRoot);
-                if (importZip == null) {
-                    IJ.log("[FLASH] ROI import cancelled before selecting a zip.");
-                    return;
-                }
-                RoiImportOptions importOptions =
-                        promptForRoiImportOptions(importZip, roiBinCfg);
-                if (importOptions == null) {
-                    IJ.log("[FLASH] ROI import cancelled before saving.");
-                    return;
-                }
-                importRoiSet(directory, projectRoot, importZip, importOptions, roiBinCfg);
-                return;
-            }
-        }
 
         List<File> roiFiles = RoiIO.listRoiZipFiles(projectRoot);
         List<String> roiNames = new ArrayList<>();
@@ -258,86 +244,137 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             base = base.replace(" ROIs.zip", "").replace("ROIs.zip", "").replace(".zip", "").trim();
             roiNames.add(base);
         }
+        boolean hasExisting = !roiNames.isEmpty();
 
-        DeferredImageSupplier supplier;
-        int totalImages;
-        try {
-            supplier = ImageSourceDispatcher.createSupplier(directory);
-            totalImages = supplier.getTotalSeries();
-        } catch (Exception e) {
-            showOrLog("Draw ROIs and Orientate Images", e.getMessage());
-            return;
+        // Navigation loop: the entry fork (three cards) and the settings screen it
+        // routes to. Pressing Back on a downstream screen returns here to the entry
+        // fork, so the values the draw step needs are captured into these variables
+        // and the loop is left with `break` once the user commits with OK.
+        DeferredImageSupplier supplier = null;
+        int totalImages = 0;
+        boolean createNew = true;
+        boolean drawOnSubset = false;
+        boolean drawLineSet = false;
+        String lineSetName = "";
+        List<RegionDrawSpec> regionSpecs = null;
+
+        while (true) {
+        // Entry fork: three navigation cards (Create new / Append existing / Import).
+        // Each routes to a different next step; Append is offered only when saved
+        // ROI sets already exist. Append vs create is decided here, not by a toggle
+        // on the settings screen.
+        boolean appendMode;
+        if (!suppressDialogs) {
+            RoiEntryChoice entryChoice = promptForRoiEntry(hasExisting);
+            if (entryChoice == RoiEntryChoice.CANCEL) {
+                IJ.log("[FLASH] Draw ROIs and Orientate Images cancelled by user.");
+                return;
+            }
+            if (entryChoice == RoiEntryChoice.IMPORT) {
+                File importZip = chooseImportedRoiZip(projectRoot);
+                if (importZip == null) {
+                    // Cancelled the file picker before committing: back to the fork.
+                    continue;
+                }
+                RoiImportOptions importOptions =
+                        promptForRoiImportOptions(importZip, roiBinCfg);
+                if (importOptions == RoiImportOptions.BACK) {
+                    continue;   // Back: return to the entry fork.
+                }
+                if (importOptions == null) {
+                    IJ.log("[FLASH] ROI import cancelled before saving.");
+                    return;
+                }
+                importRoiSet(directory, projectRoot, importZip, importOptions, roiBinCfg);
+                return;
+            }
+            appendMode = (entryChoice == RoiEntryChoice.APPEND);
+        } else {
+            // Quiet mode skips the fork: preserve the prior default of appending
+            // to an existing set when one is present, otherwise create new.
+            appendMode = hasExisting;
         }
 
-        // ── Main dialog ────────────────────────────────────────────────
+        if (supplier == null) {
+            try {
+                supplier = ImageSourceDispatcher.createSupplier(directory);
+                totalImages = supplier.getTotalSeries();
+            } catch (Exception e) {
+                showOrLog("Draw ROIs and Orientate Images", e.getMessage());
+                return;
+            }
+        }
+
+        // ── Settings screen ─────────────────────────────────────────────
         String[] roiChannelChoices = buildRoiChannelChoices(roiBinCfg);
         String defaultRoiChannelChoice = defaultRoiChannelChoice(roiBinCfg, roiChannelChoices);
         boolean showZSliceSourceChoice = shouldShowZSliceSourceChoice(roiBinCfg);
 
-        boolean hasExisting = !roiNames.isEmpty();
-
         PipelineDialog pd = new PipelineDialog("Draw ROIs & Orientate Images", PipelineDialog.Phase.SETUP);
         pd.setWorkflowTracker(new String[]{"Setup", "Choose Images", "Draw ROIs/Orientate", "Save"}, 0);
         pd.addAnalysisHelpHeader("Draw ROIs and Orientate Images", FLASH_Pipeline.IDX_DRAW_ROIS);
-        pd.addSubHeader("ROI Set Selection");
 
-        ToggleSwitch createNewToggle = null;
+        final int totalImagesForLabel = totalImages;
+
+        // Lead section: the regions to draw (new set) or the set to append to. The
+        // append picker, when present, must stay the FIRST registered choice so the
+        // retrieval order below holds. The region table is a plain component and
+        // registers no choice, so leading with it is retrieval-safe.
         JComboBox<String> appendChoice = null;
-        if (hasExisting) {
-            pd.addMessage("Existing ROI sets found.");
-            createNewToggle = pd.addToggle("Create New ROI Set", false);
-            appendChoice = pd.addChoice("Append to existing", roiNames.toArray(new String[0]), roiNames.get(0));
-            pd.addHelpText("Toggle ON to create a new set. When OFF, the selected existing set is used.");
+        RegionSetupPanel regionPanel = null;
+        if (appendMode) {
+            pd.addSubHeader("Append to Existing ROI Set");
+            appendChoice = pd.addChoice("Append to existing",
+                    roiNames.toArray(new String[0]), roiNames.get(0));
+            pd.addHelpText("New ROIs are added to the selected existing set.");
         } else {
-            pd.addMessage("No existing ROI files found. A new set will be created.");
+            pd.addSubHeader("Regions to draw (new set)");
+            regionPanel = new RegionSetupPanel(roiChannelChoices, defaultRoiChannelChoice, "SCN");
+            pd.addComponent(regionPanel);
+            pd.addHelpText("One row per region; each region picks its own channel. Use 'Add region' "
+                    + "to draw several regions in one pass.");
         }
-
-        pd.addHeader("Line Sets");
-        ToggleSwitch drawLineToggle = pd.addToggle("Draw Line Set", false);
-        pd.addHelpText("Also draw a named reference line on each image (e.g., ventricle boundary). "
-                + "Lines are saved to FLASH/Results/Tables/Line Distance/Line Sets/ for distance analysis.");
-        JTextField lineSetNameField = pd.addStringField("Line Set Name", "Ventricle", 15);
 
         pd.addHeader("Settings");
         JComboBox<String> roiChannelCombo =
                 pd.addChoice("ROI Channel", roiChannelChoices, defaultRoiChannelChoice);
-        pd.addChoice("Image Adjustment", new String[]{"None", "Automatic", "Manual"}, "None");
+        pd.addCardChoice("Image Adjustment",
+                new CardChoice.Option[]{
+                        new CardChoice.Option("None", "None", "Show pixels as stored", "close-x"),
+                        new CardChoice.Option("Automatic", "Automatic", "Auto B&C per channel", "wand", "Default"),
+                        new CardChoice.Option("Manual", "Manual", "Set B&C yourself", "sliders"),
+                }, "Automatic");
         if (showZSliceSourceChoice) {
-            pd.addChoice("Draw ROIs on",
-                    new String[]{FULL_IMAGE_SOURCE, CONFIGURED_SUBSET_SOURCE},
-                    FULL_IMAGE_SOURCE);
+            pd.addCardChoice("Draw ROIs on",
+                    new CardChoice.Option[]{
+                            new CardChoice.Option(FULL_IMAGE_SOURCE, "Full image",
+                                    "Every z-slice in the stack", "dots-full", "Default"),
+                            new CardChoice.Option(CONFIGURED_SUBSET_SOURCE, "Configured subset",
+                                    "Match the analysis z-slice range", "dots-partial"),
+                    }, FULL_IMAGE_SOURCE);
             pd.addHelpText("Use the full stack for ROI drawing, or match the z-slice subset configured in the Configuration folder.");
         }
 
-        // Regions to draw (new set): a list, each with its own drawing channel. Image
-        // Adjustment above is session-wide (display-only, never affects saved geometry).
-        // Append mode draws one existing region using the ROI Channel above.
-        pd.addSubHeader("Regions to draw (new set)");
-        final RegionSetupPanel regionPanel =
-                new RegionSetupPanel(roiChannelChoices, defaultRoiChannelChoice, "SCN");
-        pd.addComponent(regionPanel);
-        pd.addHelpText("One row per region; each region picks its own channel. Use 'Add region' "
-                + "to draw several regions in one pass. (Append mode uses the existing set + ROI Channel.)");
-        final int totalImagesForLabel = totalImages;
+        // Advanced (collapsed by default): the optional reference-line set.
+        pd.beginAdvancedSection("drawRois");
+        ToggleSwitch drawLineToggle = pd.addToggle("Draw Line Set", false);
+        pd.addHelpText("Also draw a named reference line on each image (e.g., ventricle boundary). "
+                + "Lines are saved to FLASH/Results/Tables/Line Distance/Line Sets/ for distance analysis.");
+        JTextField lineSetNameField = pd.addStringField("Line Set Name", "Ventricle", 15);
+        pd.endAdvancedSection();
 
-        if (hasExisting && createNewToggle != null && appendChoice != null) {
-            ToggleSwitch finalCreateNewToggle = createNewToggle;
-            JComboBox<String> finalAppendChoice = appendChoice;
-            Runnable syncRoiSetMode = () -> {
-                boolean createNewSelected = finalCreateNewToggle.isSelected();
-                setFieldEnabled(finalAppendChoice, !createNewSelected);
-                setFieldEnabled(roiChannelCombo, !createNewSelected);
-                regionPanel.setRegionEditingEnabled(createNewSelected);
-                pd.setPrimaryButtonText(NextStepLabels.afterRoiSetup(
-                        createNewSelected,
-                        existingRoiCountForSelection(finalAppendChoice, roiNames, roiFiles),
-                        totalImagesForLabel));
-            };
-            createNewToggle.addChangeListener(syncRoiSetMode);
-            appendChoice.addActionListener(e -> syncRoiSetMode.run());
-            syncRoiSetMode.run();
+        if (appendMode) {
+            // Append: the chosen existing set + ROI Channel drive the draw.
+            setFieldEnabled(roiChannelCombo, true);
+            final JComboBox<String> finalAppendChoice = appendChoice;
+            Runnable syncAppendLabel = () -> pd.setPrimaryButtonText(NextStepLabels.afterRoiSetup(
+                    false,
+                    existingRoiCountForSelection(finalAppendChoice, roiNames, roiFiles),
+                    totalImagesForLabel));
+            appendChoice.addActionListener(e -> syncAppendLabel.run());
+            syncAppendLabel.run();
         } else {
-            // No existing sets: always create-new, so the region table drives channels.
+            // Create: the region table drives channels, so ROI Channel is inert.
             setFieldEnabled(roiChannelCombo, false);
             pd.setPrimaryButtonText(NextStepLabels.afterRoiSetup(true, 0, totalImagesForLabel));
         }
@@ -346,26 +383,31 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         drawLineToggle.addChangeListener(syncLineSetMode);
         syncLineSetMode.run();
 
-        if (!pd.showDialog()) return;
-
-        boolean createNew;
-        String existingSelection = null;
-        if (hasExisting) {
-            createNew = pd.getNextBoolean();
-            existingSelection = pd.getNextChoice();
-        } else {
-            createNew = true;
+        // Back returns to the entry fork; it is shown only when the fork preceded
+        // this screen (i.e. not in quiet, no-fork mode).
+        if (!suppressDialogs) {
+            pd.enableBackButton();
         }
-        boolean drawLineSet = pd.getNextBoolean();
-        String lineSetName = pd.getNextString().trim();
+        if (!pd.showDialog()) {
+            if (!suppressDialogs && pd.wasBackPressed()) {
+                continue;   // Back: return to the entry fork.
+            }
+            return;         // Cancel.
+        }
+
+        createNew = !appendMode;
+        // Retrieval order mirrors add order: the append picker (when present) is the
+        // first choice, before ROI Channel and the card choosers.
+        String existingSelection = appendMode ? pd.getNextChoice() : null;
+        drawLineSet = pd.getNextBoolean();
+        lineSetName = pd.getNextString().trim();
         int appendChannel = parseRoiChannelChoice(pd.getNextChoice());   // ROI Channel (append mode)
         String imageProcessing = pd.getNextChoice();                      // Image Adjustment (session-wide)
-        boolean drawOnSubset = showZSliceSourceChoice
+        drawOnSubset = showZSliceSourceChoice
                 && CONFIGURED_SUBSET_SOURCE.equals(pd.getNextChoice());
 
         // Build the region list: from the table for a new set (one row per region, each with
         // its own channel), or the single selected existing set for append.
-        List<RegionDrawSpec> regionSpecs;
         if (createNew) {
             regionSpecs = RegionSetupPanel.toSpecs(regionPanel.rows(),
                     DrawAndSaveROIsAnalysis::parseRoiChannelChoice, imageProcessing);
@@ -381,6 +423,10 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
             regionSpecs = new ArrayList<RegionDrawSpec>();
             regionSpecs.add(new RegionDrawSpec(existingSelection.trim(), appendChannel, imageProcessing));
         }
+
+        // User committed with OK: leave the navigation loop and run the draw.
+        break;
+        }   // end navigation loop
 
         // Image picker (Dialog 2): one matrix with a checkbox column per region. Returns the
         // images each region's ROI set is drawn on (zero-based series indices) plus any edit to
@@ -905,27 +951,39 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         return BinConfigIO.readPartialFromDirectory(directory);
     }
 
-    private ImportPromptChoice promptForRoiImport() {
+    private RoiEntryChoice promptForRoiEntry(boolean hasExisting) {
         PipelineDialog dialog = new PipelineDialog(
                 "Draw ROIs & Orientate Images", PipelineDialog.Phase.SETUP);
         dialog.setWorkflowTracker(new String[]{"Setup", "Choose Images", "Draw ROIs/Orientate", "Save"}, 0);
         dialog.addAnalysisHelpHeader("Draw ROIs and Orientate Images",
                 FLASH_Pipeline.IDX_DRAW_ROIS);
-        dialog.addMessage("Draw a new ROI set as usual, or import an existing ImageJ ROI zip "
-                + "and convert it into FLASH's paired ROI format.");
+        JComboBox<String> entryChoice = dialog.addCardChoice(
+                "How do you want to create ROIs?",
+                new CardChoice.Option[]{
+                        new CardChoice.Option(ENTRY_CREATE, "Create new",
+                                "Draw a fresh ROI set", "pencil", "Default"),
+                        new CardChoice.Option(ENTRY_APPEND, "Append existing",
+                                "Add ROIs to a saved set", "stack-2", null, hasExisting),
+                        new CardChoice.Option(ENTRY_IMPORT, "Import zip",
+                                "Convert an ImageJ ROI zip", "import"),
+                },
+                ENTRY_CREATE);
         dialog.addHelpText("Imported zips must contain one ROI per image, or an existing "
                 + "FLASH-compatible pair set with uncropped and _Cropped ROIs. ROI order "
                 + "must match the image series order.");
         dialog.setPrimaryButtonText(NextStepLabels.ROI_SETUP_OPTIONS);
-        JButton importButton = dialog.addRightFooterButton("Import...");
-        importButton.addActionListener(e -> dialog.closeWithAction("import"));
 
-        if (dialog.showDialog()) {
-            return ImportPromptChoice.DRAW;
+        if (!dialog.showDialog()) {
+            return RoiEntryChoice.CANCEL;
         }
-        return "import".equals(dialog.getActionCommand())
-                ? ImportPromptChoice.IMPORT
-                : ImportPromptChoice.CANCEL;
+        String value = (String) entryChoice.getSelectedItem();
+        if (ENTRY_IMPORT.equals(value)) {
+            return RoiEntryChoice.IMPORT;
+        }
+        if (ENTRY_APPEND.equals(value) && hasExisting) {
+            return RoiEntryChoice.APPEND;
+        }
+        return RoiEntryChoice.CREATE;
     }
 
     private File chooseImportedRoiZip(File projectRoot) {
@@ -960,11 +1018,20 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
                 RegionTextFieldSupport.install(roiSetNameField, null);
         ToggleSwitch previewToggle = dialog.addToggle("Preview ROIs before saving", true);
         dialog.addChoice("ROI Channel", roiChannelChoices, defaultRoiChannelChoice);
-        dialog.addChoice("Image Adjustment", new String[]{"None", "Automatic", "Manual"}, "None");
+        dialog.addCardChoice("Image Adjustment",
+                new CardChoice.Option[]{
+                        new CardChoice.Option("None", "None", "Show pixels as stored", "close-x"),
+                        new CardChoice.Option("Automatic", "Automatic", "Auto B&C per channel", "wand", "Default"),
+                        new CardChoice.Option("Manual", "Manual", "Set B&C yourself", "sliders"),
+                }, "Automatic");
         if (showZSliceSourceChoice) {
-            dialog.addChoice("Import ROIs on",
-                    new String[]{FULL_IMAGE_SOURCE, CONFIGURED_SUBSET_SOURCE},
-                    FULL_IMAGE_SOURCE);
+            dialog.addCardChoice("Import ROIs on",
+                    new CardChoice.Option[]{
+                            new CardChoice.Option(FULL_IMAGE_SOURCE, "Full image",
+                                    "Every z-slice in the stack", "dots-full", "Default"),
+                            new CardChoice.Option(CONFIGURED_SUBSET_SOURCE, "Configured subset",
+                                    "Match the analysis z-slice range", "dots-partial"),
+                    }, FULL_IMAGE_SOURCE);
         }
         dialog.addHelpText("The import checks ROI count and ROI bounds against the prepared image "
                 + "series, then saves a FLASH-compatible ROI zip, cropped previews, and ROI "
@@ -980,10 +1047,11 @@ public class DrawAndSaveROIsAnalysis implements Analysis, RunRecordAware {
         previewToggle.addChangeListener(syncImportTracker);
         syncPrimaryLabel.run();
         syncImportTracker.run();
+        dialog.enableBackButton();
 
         try {
             if (!dialog.showDialog()) {
-                return null;
+                return dialog.wasBackPressed() ? RoiImportOptions.BACK : null;
             }
 
             // Advance the PipelineDialog text-field cursor, but use the atlas-aware

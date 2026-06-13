@@ -30,6 +30,7 @@ import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.NextStepLabels;
+import flash.pipeline.ui.CardChoice;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceMode;
@@ -278,8 +279,13 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
         if (dialogBinConfig != null && dialogBinConfig.zSliceMode != ZSliceMode.FULL && !headless) {
             pd.addHeader("Line Drawing Source");
             pd.addMessage("A z-slice subset is configured in the current Configuration folder.");
-            zSliceSourceChoice = pd.addChoice("Draw lines on",
-                    new String[]{"Full image", "Configured analysis subset"}, "Full image");
+            zSliceSourceChoice = pd.addCardChoice("Draw lines on",
+                    new CardChoice.Option[]{
+                            new CardChoice.Option("Full image", "Full image",
+                                    "Max-project all slices", "dots-full", "Default"),
+                            new CardChoice.Option("Configured analysis subset", "Configured subset",
+                                    "Max-project only the slices downstream uses", "dots-partial"),
+                    }, "Full image");
             pd.addHelpText("Choose whether the max projection used for line drawing should include every slice "
                     + "or only the subset that downstream analyses use.");
         } else {
