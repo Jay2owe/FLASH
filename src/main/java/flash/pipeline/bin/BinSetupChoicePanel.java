@@ -3,6 +3,7 @@ package flash.pipeline.bin;
 import flash.pipeline.ui.FlashIcons;
 import flash.pipeline.ui.FlashTheme;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -10,6 +11,7 @@ import javax.swing.Icon;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.KeyStroke;
 import javax.swing.border.Border;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
@@ -22,6 +24,7 @@ import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
@@ -78,9 +81,18 @@ final class BinSetupChoicePanel extends JPanel {
         MouseListener select = new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {
                 select(card);
+                card.requestFocusInWindow();
             }
         };
         addClickRecursively(card, select);
+        card.setFocusable(true);
+        card.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("SPACE"), "select");
+        card.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke("ENTER"), "select");
+        card.getActionMap().put("select", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) {
+                select(card);
+            }
+        });
         add(card);
         cards.add(card);
     }

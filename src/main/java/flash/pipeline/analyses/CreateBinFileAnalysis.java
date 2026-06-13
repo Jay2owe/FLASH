@@ -64,6 +64,8 @@ import flash.pipeline.ui.CustomFilterContinueDialog;
 import flash.pipeline.ui.CustomFilterEntryDialog;
 import flash.pipeline.ui.CancelConfirmationDialog;
 import flash.pipeline.ui.NextStepLabels;
+import flash.pipeline.ui.CardChoice;
+import flash.pipeline.ui.SetupSettingsPanel;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.config.ConfigQcContext;
@@ -1056,151 +1058,336 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
             return;
         }
 
-        boolean overrideMode = false;
-        boolean overrideAll = false;
-        boolean overrideMinMax = false;
-        boolean overrideThresholds = false;
-        boolean overrideParticleSize = false;
-        boolean overrideSegmentationMethod = false;
-        boolean overrideFilterParameters = false;
-        boolean overrideZSliceSelection = false;
-        BinConfig existingCfg = null;
-
-        if (FlashProjectLayout.forDirectory(directory).existingConfigurationDir() != null) {
-            ChannelConfigIO.ReadState existingState = ChannelConfigIO.readResult(binFolder).state;
-            if (existingState == ChannelConfigIO.ReadState.NEWER_VERSION) {
-                IJ.showMessage("Set Up Configuration",
-                        "This project's setup file was made by a newer version of FLASH.\n"
-                        + "Update FLASH to open this project. Your configuration was left "
-                        + "untouched.");
-                return;
-            }
-            if (existingState == ChannelConfigIO.ReadState.CORRUPT
-                    && ChannelConfigIO.readBackup(binFolder) == null) {
-                // Damaged file and no recoverable backup: keep a copy instead of
-                // silently overwriting it, then start a fresh configuration. (When
-                // a good .bak exists, the recovery-aware read below loads it and
-                // the normal override flow continues with the recovered config.)
-                ChannelConfigIO.backupThenDelete(binFolder);
-                IJ.showMessage("Set Up Configuration",
-                        "This project's setup file looked damaged and could not be read.\n"
-                        + "A copy was kept as channel_config.corrupt-....json.\n"
-                        + "Starting a new configuration.");
-                try {
-                    handleFullCreation(directory, binFolder, null);
-                } catch (Exception e) {
-                    recordError("Set Up Configuration failed", e);
-                    IJ.handleException(e);
-                }
-                return;
-            }
-            try {
-                existingCfg = BinConfigIO.readFromDirectory(directory);
-            } catch (IOException e) {
-                // Configuration exists but is malformed — offer full override
-            }
-
-            PipelineDialog ovr = setupAnalysisDialog("Set Up Configuration");
-            ovr.setPrimaryButtonText(NextStepLabels.SETUP);
-            ovr.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-            ovr.addSubHeader("Existing Configuration Found");
-            ovr.addMessage("A saved configuration was found.");
-            ovr.addHeader("Override Options", flash.pipeline.ui.FlashIcons.section("settings"));
-
-            ovr.addSubHeader("Full Reset");
-            ToggleSwitch allToggle = ovr.addToggle("Override ALL settings (start from scratch)", false);
-
-            ovr.addHeader("Channel Identity & Processing", flash.pipeline.ui.FlashIcons.section("tags"));
-            ovr.addSetupHelpSubHeader("Set Filter and Parameters", SetupHelpCatalog.FILTER_PARAMETERS);
-            ToggleSwitch fhToggle = ovr.addToggle("Set Filter and Parameters", false);
-
-            ovr.addHeader("Image Display", flash.pipeline.ui.FlashIcons.section("sun"));
-            ovr.addSetupHelpSubHeader("Display Ranges", SetupHelpCatalog.DISPLAY_RANGE);
-            ToggleSwitch mmToggle = ovr.addToggle("Override Custom Min-Max Display Ranges", false);
-
-            ovr.addHeader("ROI / Intensity Analysis", flash.pipeline.ui.FlashIcons.section("ruler"));
-            ovr.addSetupHelpSubHeader("Channel Thresholds", SetupHelpCatalog.CHANNEL_THRESHOLD);
-            ToggleSwitch thToggle = ovr.addToggle("Override Channel Thresholds", false);
-
-            ovr.addHeader("Object Analysis", flash.pipeline.ui.FlashIcons.section("microscope"));
-            ovr.addSetupHelpSubHeader("Segmentation Method", SetupHelpCatalog.SEGMENTATION_METHOD);
-            ToggleSwitch segToggle = ovr.addToggle("Override Segmentation Method", false);
-            ovr.addSetupHelpSubHeader("Classical Object Size Filter",
-                    SetupHelpCatalog.CLASSICAL_OBJECT_SEGMENTATION);
-            ToggleSwitch szToggle = ovr.addToggle("Override Particle Sizes (n Voxels)", false);
-
-            ovr.addHeader("Z-Stack Scope", flash.pipeline.ui.FlashIcons.section("stack"));
-            ovr.addSetupHelpSubHeader("Z-Slice Subset", SetupHelpCatalog.Z_SLICE_SUBSET);
-            ToggleSwitch zSliceToggle = ovr.addToggle("Override z-slice subset selection", false);
-
-            allToggle.addChangeListener(new Runnable() {
-                @Override public void run() {
-                    boolean on = allToggle.isSelected();
-                    mmToggle.setEnabled(!on);
-                    thToggle.setEnabled(!on);
-                    szToggle.setEnabled(!on);
-                    segToggle.setEnabled(!on);
-                    fhToggle.setEnabled(!on);
-                    zSliceToggle.setEnabled(!on);
-                    if (on) {
-                        mmToggle.setSelected(false);
-                        thToggle.setSelected(false);
-                        szToggle.setSelected(false);
-                        segToggle.setSelected(false);
-                        fhToggle.setSelected(false);
-                        zSliceToggle.setSelected(false);
-                    }
-                }
-            });
-
-            if (!ovr.showDialog()) {
-                return;
-            }
-
-            overrideAll = ovr.getNextBoolean();
-            overrideFilterParameters = ovr.getNextBoolean();
-            overrideMinMax = ovr.getNextBoolean();
-            overrideThresholds = ovr.getNextBoolean();
-            overrideSegmentationMethod = ovr.getNextBoolean();
-            overrideParticleSize = ovr.getNextBoolean();
-            overrideZSliceSelection = ovr.getNextBoolean();
-
-            if (!overrideAll && !overrideMinMax && !overrideThresholds
-                    && !overrideParticleSize && !overrideSegmentationMethod
-                    && !overrideFilterParameters && !overrideZSliceSelection) {
-                IJ.showMessage("Set Up Configuration", "No override selected. Nothing to do.");
-                return;
-            }
-            overrideMode = true;
-        }
-
-        // ── Fresh creation: confirm ─────────────────────────────────────
-        if (!overrideMode) {
-            PipelineDialog confirm = setupAnalysisDialog("Set Up Configuration");
-            confirm.setPrimaryButtonText(NextStepLabels.CHANNEL_SETUP);
-            confirm.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
-            confirm.addSubHeader("New Configuration");
-            confirm.addMessage("No Configuration folder detected. Click Next: Channel setup to create one.");
-            if (!confirm.showDialog()) return;
+        if (FlashProjectLayout.forDirectory(directory).existingConfigurationDir() == null) {
+            // No saved configuration: skip the entry screen entirely and drop the
+            // user straight into channel setup, removing a choice-only click.
             if (!binFolder.isDirectory() && !binFolder.mkdirs() && !binFolder.isDirectory()) {
                 IJ.error("Set Up Configuration", "Failed to create: " + binFolder.getAbsolutePath());
                 return;
             }
+            try {
+                handleFullCreation(directory, binFolder, null);
+            } catch (Exception e) {
+                recordError("Set Up Configuration failed", e);
+                IJ.handleException(e);
+            }
+            return;
+        }
+
+        // ── Existing configuration found ────────────────────────────────
+        ChannelConfigIO.ReadState existingState = ChannelConfigIO.readResult(binFolder).state;
+        if (existingState == ChannelConfigIO.ReadState.NEWER_VERSION) {
+            IJ.showMessage("Set Up Configuration",
+                    "This project's setup file was made by a newer version of FLASH.\n"
+                    + "Update FLASH to open this project. Your configuration was left "
+                    + "untouched.");
+            return;
+        }
+        if (existingState == ChannelConfigIO.ReadState.CORRUPT
+                && ChannelConfigIO.readBackup(binFolder) == null) {
+            // Damaged file and no recoverable backup: keep a copy instead of
+            // silently overwriting it, then start a fresh configuration. (When
+            // a good .bak exists, the recovery-aware read below loads it and
+            // the entry screen continues with the recovered config.)
+            ChannelConfigIO.backupThenDelete(binFolder);
+            IJ.showMessage("Set Up Configuration",
+                    "This project's setup file looked damaged and could not be read.\n"
+                    + "A copy was kept as channel_config.corrupt-....json.\n"
+                    + "Starting a new configuration.");
+            try {
+                handleFullCreation(directory, binFolder, null);
+            } catch (Exception e) {
+                recordError("Set Up Configuration failed", e);
+                IJ.handleException(e);
+            }
+            return;
+        }
+
+        WizardResumeState resume = readWizardResumeState(directory, binFolder);
+        if (resume != null) {
+            // Unfinished setup. Continue (resume) and selective Redo are mutually
+            // exclusive: you can only resume an unfinished setup, and only redo
+            // settings on a finished one. So here we offer Continue or Start from
+            // scratch — never the per-setting tiles, which assume a complete,
+            // rectangular config and would crash on a partial draft.
+            String choice = showResumeEntryScreen(resume);
+            if (choice == null) {
+                return;
+            }
+            try {
+                if (SETUP_MODE_CONTINUE.equals(choice)) {
+                    handleFullCreation(directory, binFolder, null, ResumeDecision.RESUME);
+                } else {
+                    handleFullCreation(directory, binFolder, null, ResumeDecision.START_OVER);
+                }
+            } catch (Exception e) {
+                recordError("Set Up Configuration failed", e);
+                IJ.handleException(e);
+            }
+            return;
+        }
+
+        // Finished configuration: read it (guaranteed complete here) for selective
+        // editing. An unreadable/malformed file falls back to the full wizard.
+        BinConfig existingCfg = null;
+        try {
+            existingCfg = BinConfigIO.readFromDirectory(directory);
+        } catch (IOException e) {
+            // Saved configuration is present but could not be read.
+        }
+        if (existingCfg == null) {
+            try {
+                handleFullCreation(directory, binFolder, null);
+            } catch (Exception e) {
+                recordError("Set Up Configuration failed", e);
+                IJ.handleException(e);
+            }
+            return;
+        }
+
+        SetupEntryDecision decision = showSetupEntry(existingCfg);
+        if (decision == null) {
+            return;
         }
 
         try {
-            if (overrideMode && !overrideAll) {
-                handleSelectiveOverride(directory, binFolder, existingCfg,
-                        overrideMinMax, overrideThresholds, overrideParticleSize,
-                        overrideSegmentationMethod, overrideFilterParameters,
-                        overrideZSliceSelection);
-            } else {
-                handleFullCreation(directory, binFolder, overrideAll ? existingCfg : null);
-            }
+            // Redo and Start-from-scratch both run a selective override, which
+            // keeps the saved configuration intact until the user confirms new
+            // values at the very end — so a misclick discards nothing.
+            handleSelectiveOverride(directory, binFolder, existingCfg,
+                    decision.doMinMax, decision.doThresholds, decision.doParticleSize,
+                    decision.doSegmentationMethod, decision.doFilterParameters,
+                    decision.doZSliceSelection);
         } catch (Exception e) {
             recordError("Set Up Configuration failed", e);
             IJ.handleException(e);
         }
+    }
+
+    // ── Setup entry screen (card-based) ─────────────────────────────────
+
+    private static final String SETUP_MODE_CONTINUE = "continue";
+    private static final String SETUP_MODE_REDO = "redo";
+    private static final String SETUP_MODE_SCRATCH = "scratch";
+
+    private static final String SETUP_TILE_FILTER = "filter";
+    private static final String SETUP_TILE_MINMAX = "minmax";
+    private static final String SETUP_TILE_THRESHOLD = "threshold";
+    private static final String SETUP_TILE_SEGMENTATION = "segmentation";
+    private static final String SETUP_TILE_PARTICLE = "particle";
+    private static final String SETUP_TILE_ZSLICE = "zslice";
+
+    /** Which settings the user ticked on the finished-config Screen 2. */
+    private static final class SetupEntryDecision {
+        boolean doFilterParameters;
+        boolean doMinMax;
+        boolean doThresholds;
+        boolean doSegmentationMethod;
+        boolean doParticleSize;
+        boolean doZSliceSelection;
+    }
+
+    /**
+     * Entry screen for an UNFINISHED setup: a card row with Continue (left) and
+     * Start from scratch (right). Continue resumes the saved draft; Start from
+     * scratch discards it (keeping a backup) and runs the full wizard. Returns
+     * the chosen mode ({@code continue}/{@code scratch}) or {@code null} on cancel.
+     */
+    private String showResumeEntryScreen(WizardResumeState resume) {
+        final PipelineDialog dialog = setupAnalysisDialog("Set Up Configuration");
+        dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+        dialog.addSubHeader("Unfinished Setup Found");
+        dialog.addMessage("You have an unfinished configuration for this folder. What would you like to do?");
+
+        CardChoice.Option[] options = new CardChoice.Option[]{
+                new CardChoice.Option(SETUP_MODE_CONTINUE, "Continue setup",
+                        "Resume where you left off", "refresh", "Recommended"),
+                new CardChoice.Option(SETUP_MODE_SCRATCH, "Start from scratch",
+                        "Discard the unfinished setup and reconfigure from the beginning",
+                        "build", "Full reset"),
+        };
+        final JComboBox<String> modeChoice = dialog.addCardChoice(null, options, SETUP_MODE_CONTINUE);
+        dialog.addHelpText(buildResumeSummary(resume));
+
+        final Runnable refreshPrimary = new Runnable() {
+            @Override public void run() {
+                dialog.setPrimaryButtonText(SETUP_MODE_CONTINUE.equals(modeChoice.getSelectedItem())
+                        ? "Resume setup" : "Start from scratch");
+            }
+        };
+        modeChoice.addItemListener(new java.awt.event.ItemListener() {
+            @Override public void itemStateChanged(java.awt.event.ItemEvent e) {
+                if (e.getStateChange() == java.awt.event.ItemEvent.SELECTED) {
+                    refreshPrimary.run();
+                }
+            }
+        });
+        refreshPrimary.run();
+        dialog.focusPrimaryButtonOnShow();
+
+        if (!dialog.showDialog()) {
+            return null;
+        }
+        Object selected = modeChoice.getSelectedItem();
+        return selected == null ? null : selected.toString();
+    }
+
+    /**
+     * Entry screens for a FINISHED configuration. Screen 1 is a card row: Redo
+     * some settings (left) and Start from scratch (right). Both advance to the
+     * shared Screen 2 where the user ticks which settings to (re)configure
+     * (Scratch pre-ticks all, Redo none). Returns {@code null} on cancel.
+     */
+    private SetupEntryDecision showSetupEntry(BinConfig existingCfg) {
+        while (true) {
+            String choice = showSetupModeScreen();
+            if (choice == null) {
+                return null;
+            }
+            boolean scratch = SETUP_MODE_SCRATCH.equals(choice);
+            SettingsScreenResult result = showSetupSettingsScreen(existingCfg, scratch);
+            if (result.back) {
+                continue; // return to Screen 1
+            }
+            if (result.cancelled) {
+                return null;
+            }
+            SetupEntryDecision out = new SetupEntryDecision();
+            out.doFilterParameters = result.values.contains(SETUP_TILE_FILTER);
+            out.doMinMax = result.values.contains(SETUP_TILE_MINMAX);
+            out.doThresholds = result.values.contains(SETUP_TILE_THRESHOLD);
+            out.doSegmentationMethod = result.values.contains(SETUP_TILE_SEGMENTATION);
+            out.doParticleSize = result.values.contains(SETUP_TILE_PARTICLE);
+            out.doZSliceSelection = result.values.contains(SETUP_TILE_ZSLICE);
+            return out;
+        }
+    }
+
+    /** Finished-config Screen 1: returns {@code redo}/{@code scratch}, or null on cancel. */
+    private String showSetupModeScreen() {
+        final PipelineDialog dialog = setupAnalysisDialog("Set Up Configuration");
+        dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
+        dialog.addSubHeader("Existing Configuration Found");
+        dialog.addMessage("This folder already has a saved configuration. What would you like to do?");
+
+        CardChoice.Option[] options = new CardChoice.Option[]{
+                new CardChoice.Option(SETUP_MODE_REDO, "Redo some settings",
+                        "Keep your setup, redo a few", "pencil"),
+                new CardChoice.Option(SETUP_MODE_SCRATCH, "Start from scratch",
+                        "Reconfigure every setting", "build", "Full reset"),
+        };
+        final JComboBox<String> modeChoice = dialog.addCardChoice(null, options, SETUP_MODE_REDO);
+        dialog.setPrimaryButtonText("Next");
+        dialog.focusPrimaryButtonOnShow();
+
+        if (!dialog.showDialog()) {
+            return null;
+        }
+        Object selected = modeChoice.getSelectedItem();
+        return selected == null ? null : selected.toString();
+    }
+
+    /** Outcome of the shared "which settings" screen (Screen 2). */
+    private static final class SettingsScreenResult {
+        boolean back;
+        boolean cancelled;
+        java.util.Set<String> values = java.util.Collections.<String>emptySet();
+    }
+
+    /**
+     * Screen 2: the multi-select tile grid, shared by Redo and Start from
+     * scratch. Scratch pre-ticks every tile; Redo starts empty. Nothing is
+     * written here — the saved configuration is only replaced once the user
+     * confirms new values further into the selective-override flow.
+     */
+    private SettingsScreenResult showSetupSettingsScreen(BinConfig existingCfg, boolean scratch) {
+        SetupSettingsPanel.SettingTile[] tiles = buildSettingTiles(existingCfg);
+        final SetupSettingsPanel panel = new SetupSettingsPanel(tiles, scratch);
+
+        final PipelineDialog dialog = setupAnalysisDialog("Set Up Configuration");
+        dialog.enableBackButton();
+        dialog.addSubHeader(scratch ? "Start From Scratch" : "Redo Settings");
+        dialog.addMessage(scratch
+                ? "Every setting is ticked to be redone. Untick anything you would rather keep."
+                : "Tick the settings you want to redo. Everything else stays exactly as saved.");
+        dialog.addComponent(panel);
+
+        final Runnable refreshPrimary = new Runnable() {
+            @Override public void run() {
+                dialog.setPrimaryButtonEnabled(panel.hasSelection());
+            }
+        };
+        panel.addSelectionListener(refreshPrimary);
+        dialog.setPrimaryButtonText(NextStepLabels.SETUP);
+        refreshPrimary.run();
+        dialog.focusPrimaryButtonOnShow();
+
+        SettingsScreenResult result = new SettingsScreenResult();
+        if (!dialog.showDialog()) {
+            result.back = dialog.wasBackPressed();
+            result.cancelled = !result.back;
+            return result;
+        }
+        result.values = panel.getSelectedSettings();
+        if (result.values.isEmpty()) {
+            // The disabled primary button blocks this, but guard a stray Enter.
+            result.cancelled = true;
+        }
+        return result;
+    }
+
+    private SetupSettingsPanel.SettingTile[] buildSettingTiles(BinConfig cfg) {
+        int n = cfg == null ? 0 : cfg.numChannels();
+        boolean[] isStarDist = new boolean[n];
+        boolean[] isCellpose = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            String method = cfg != null && i < cfg.segmentationMethods.size()
+                    ? safe(cfg.segmentationMethods.get(i)) : "classical";
+            isStarDist[i] = method.startsWith("stardist");
+            isCellpose[i] = method.startsWith("cellpose");
+        }
+        int[] all = channelIndexes(n);
+        int[] classical = matchingChannelIndexes(isStarDist, isCellpose, false, false);
+        return new SetupSettingsPanel.SettingTile[]{
+                new SetupSettingsPanel.SettingTile(SETUP_TILE_FILTER, "Filters & Parameters", "tags",
+                        toPanelStatus(settingsDataStatusForFields(cfg, all, BinField.FILTER_PRESETS))),
+                new SetupSettingsPanel.SettingTile(SETUP_TILE_MINMAX, "Display Ranges", "sun",
+                        toPanelStatus(settingsDataStatusForFields(cfg, all, BinField.DISPLAY_MIN_MAX))),
+                new SetupSettingsPanel.SettingTile(SETUP_TILE_THRESHOLD, "Channel Thresholds", "ruler-2",
+                        toPanelStatus(settingsDataStatusForFields(cfg, all,
+                                BinField.OBJECT_THRESHOLDS, BinField.INTENSITY_THRESHOLDS))),
+                new SetupSettingsPanel.SettingTile(SETUP_TILE_SEGMENTATION, "Segmentation Method", "microscope",
+                        toPanelStatus(settingsDataStatusForFields(cfg, all, BinField.SEGMENTATION_METHODS))),
+                new SetupSettingsPanel.SettingTile(SETUP_TILE_PARTICLE, "Particle Sizes", "sliders",
+                        toPanelStatus(settingsDataStatusForFields(cfg, classical, BinField.PARTICLE_SIZES))),
+                new SetupSettingsPanel.SettingTile(SETUP_TILE_ZSLICE, "Z-Slice Subset", "stack-2",
+                        toPanelStatus(settingsDataStatusForFields(cfg, all, BinField.Z_SLICE))),
+        };
+    }
+
+    private static SetupSettingsPanel.Status toPanelStatus(SettingsDataStatus status) {
+        if (status == SettingsDataStatus.FULL) return SetupSettingsPanel.Status.FULL;
+        if (status == SettingsDataStatus.PARTIAL) return SetupSettingsPanel.Status.PARTIAL;
+        return SetupSettingsPanel.Status.NONE;
+    }
+
+    private static String buildResumeSummary(WizardResumeState resume) {
+        if (resume == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        if (hasText(resume.stepLabel)) {
+            sb.append("You stopped at: ").append(resume.stepLabel).append('.');
+        } else {
+            sb.append("Pick up where you left off.");
+        }
+        if (resume.lastUpdatedMillis > 0L) {
+            sb.append(" Last saved ")
+                    .append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm")
+                            .format(new java.util.Date(resume.lastUpdatedMillis)))
+                    .append('.');
+        }
+        return sb.toString();
     }
 
     private static PipelineDialog setupAnalysisDialog(String title) {
@@ -1281,7 +1468,15 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
 
     // ── Full creation flow (with Back navigation) ───────────────────────
 
+    /** How the resume prompt inside {@link #handleFullCreation} should be resolved. */
+    enum ResumeDecision { PROMPT, RESUME, START_OVER }
+
     void handleFullCreation(String directory, File binFolder, BinConfig existing) throws IOException {
+        handleFullCreation(directory, binFolder, existing, ResumeDecision.PROMPT);
+    }
+
+    void handleFullCreation(String directory, File binFolder, BinConfig existing,
+                            ResumeDecision resumeDecision) throws IOException {
         writeDefaultFilter(binFolder);
 
         BinUserConfig cfg = null;
@@ -1294,7 +1489,16 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         boolean resumeQcFromSavedProgress = false;
         WizardResumeState resume = readWizardResumeState(directory, binFolder);
         if (resume != null) {
-            int choice = showResumePrompt(resume);
+            // The entry screen may have already decided to resume or restart, in
+            // which case we honour that instead of prompting a second time.
+            int choice;
+            if (resumeDecision == ResumeDecision.RESUME) {
+                choice = 0;
+            } else if (resumeDecision == ResumeDecision.START_OVER) {
+                choice = 1;
+            } else {
+                choice = showResumePrompt(resume);
+            }
             if (choice == 2) return;
             if (choice == 1) {
                 File settingsDir = channelConfigSettingsDir(binFolder);
@@ -4845,9 +5049,17 @@ public class CreateBinFileAnalysis implements Analysis, RunRecordAware {
         installWizardCancelHook(pd);
         pd.addSetupHelpHeader("Select Images for Quality Check", SetupHelpCatalog.QC_IMAGE_SELECTION);
         pd.addMessage("Source: " + sourceLabel + "  (" + totalSeries + " image series found)");
-        JComboBox<String> modeChoice = pd.addChoice("Selection mode",
-                new String[]{QC_SELECTION_MODE_MANUAL, QC_SELECTION_MODE_RANDOM,
-                        QC_SELECTION_MODE_MIN_MAX_OVERALL, QC_SELECTION_MODE_MIN_MAX_CONDITION},
+        JComboBox<String> modeChoice = pd.addCardChoice("Which images get the quality check?",
+                new CardChoice.Option[]{
+                        new CardChoice.Option(QC_SELECTION_MODE_RANDOM, "Random",
+                                "Pick a random sample", "refresh", "Default"),
+                        new CardChoice.Option(QC_SELECTION_MODE_MANUAL, "Manual",
+                                "Tick images from the list", "check"),
+                        new CardChoice.Option(QC_SELECTION_MODE_MIN_MAX_OVERALL, "Min/max overall",
+                                "Dimmest + brightest scan", "chart-bar"),
+                        new CardChoice.Option(QC_SELECTION_MODE_MIN_MAX_CONDITION, "Min/max / cond.",
+                                "Extremes within each condition", "tags"),
+                },
                 QC_SELECTION_MODE_RANDOM);
         javax.swing.JTextField randomCountField =
                 pd.addNumericField("Number of random images", Math.min(3, totalSeries), 0);
