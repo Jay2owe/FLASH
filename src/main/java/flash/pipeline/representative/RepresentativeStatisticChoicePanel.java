@@ -1,5 +1,7 @@
 package flash.pipeline.representative;
 
+import flash.pipeline.ui.ChoiceRadioIndicator;
+import flash.pipeline.ui.CardText;
 import flash.pipeline.ui.FlashIcons;
 import flash.pipeline.ui.FlashTheme;
 
@@ -40,6 +42,8 @@ import java.util.List;
  */
 public final class RepresentativeStatisticChoicePanel extends JPanel {
     private static final int WIDTH = 520;
+    private static final int CARD_WIDTH = 166;
+    private static final int TEXT_WIDTH = 130;
     private static final int TILE_HEIGHT = 104;
     private static final int DETAIL_HEIGHT = 64;
 
@@ -64,8 +68,6 @@ public final class RepresentativeStatisticChoicePanel extends JPanel {
         JPanel tileRow = new JPanel(new GridLayout(1, 3, 10, 0));
         tileRow.setOpaque(false);
         tileRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        tileRow.setMaximumSize(new Dimension(WIDTH, TILE_HEIGHT));
-        tileRow.setPreferredSize(new Dimension(WIDTH, TILE_HEIGHT));
 
         Card quick = new Card(RepresentativeStatistic.QUICK,
                 "Quick", "Auto score from images", true, true);
@@ -79,6 +81,9 @@ public final class RepresentativeStatisticChoicePanel extends JPanel {
         addCard(tileRow, quick);
         addCard(tileRow, existingCard);
         addCard(tileRow, none);
+        Dimension tileRowSize = CardText.rowSizeForCards(cards, WIDTH, TILE_HEIGHT);
+        tileRow.setMaximumSize(tileRowSize);
+        tileRow.setPreferredSize(tileRowSize);
         add(tileRow);
         add(Box.createVerticalStrut(12));
 
@@ -274,20 +279,10 @@ public final class RepresentativeStatisticChoicePanel extends JPanel {
         return FlashIcons.closeX(24, color);
     }
 
-    private static String htmlEscape(String text) {
-        if (text == null) {
-            return "";
-        }
-        return text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;");
-    }
-
     private static final class Card extends JPanel {
         final RepresentativeStatistic statistic;
         private final boolean recommended;
         private final boolean cardEnabled;
-        private final RadioDot radio = new RadioDot();
         private final JLabel iconLabel = new JLabel();
         private final JLabel titleLabel;
         private final JLabel descriptionLabel;
@@ -306,16 +301,14 @@ public final class RepresentativeStatisticChoicePanel extends JPanel {
                     ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                     : Cursor.getDefaultCursor());
             setBorder(borderFor(false, cardEnabled));
-            setPreferredSize(new Dimension(166, TILE_HEIGHT));
-            setMinimumSize(new Dimension(130, TILE_HEIGHT));
 
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.gridx = 0;
             gbc.gridy = 0;
             gbc.weightx = 1.0;
-            gbc.anchor = GridBagConstraints.NORTHWEST;
-            gbc.insets = new Insets(8, 10, 0, 0);
-            add(radio, gbc);
+            gbc.anchor = GridBagConstraints.CENTER;
+            gbc.insets = new Insets(8, 0, 0, 0);
+            add(Box.createRigidArea(ChoiceRadioIndicator.reservedSize()), gbc);
 
             iconLabel.setHorizontalAlignment(JLabel.CENTER);
             gbc = new GridBagConstraints();
@@ -326,9 +319,7 @@ public final class RepresentativeStatisticChoicePanel extends JPanel {
             gbc.insets = new Insets(2, 0, 0, 0);
             add(iconLabel, gbc);
 
-            titleLabel = new JLabel(title);
-            titleLabel.setFont(FlashTheme.h2());
-            titleLabel.setHorizontalAlignment(JLabel.CENTER);
+            titleLabel = CardText.centered(title, FlashTheme.h2(), TEXT_WIDTH);
             gbc = new GridBagConstraints();
             gbc.gridx = 0;
             gbc.gridy = 2;
@@ -337,10 +328,7 @@ public final class RepresentativeStatisticChoicePanel extends JPanel {
             gbc.insets = new Insets(11, 4, 0, 4);
             add(titleLabel, gbc);
 
-            descriptionLabel = new JLabel("<html><body width='130' style='text-align:center'>"
-                    + htmlEscape(description) + "</body></html>");
-            descriptionLabel.setFont(FlashTheme.caption());
-            descriptionLabel.setHorizontalAlignment(JLabel.CENTER);
+            descriptionLabel = CardText.centered(description, FlashTheme.caption(), TEXT_WIDTH);
             gbc = new GridBagConstraints();
             gbc.gridx = 0;
             gbc.gridy = 3;
@@ -368,6 +356,7 @@ public final class RepresentativeStatisticChoicePanel extends JPanel {
             getAccessibleContext().setAccessibleName(title);
             getAccessibleContext().setAccessibleDescription(description);
             updateVisuals();
+            CardText.fitCardToContent(this, CARD_WIDTH, 130, TILE_HEIGHT);
         }
 
         boolean isCardEnabled() {
@@ -399,10 +388,13 @@ public final class RepresentativeStatisticChoicePanel extends JPanel {
             setBorder(borderFor(selected, cardEnabled));
             titleLabel.setForeground(foreground);
             descriptionLabel.setForeground(description);
-            radio.setSelected(selected);
-            radio.setEnabled(cardEnabled);
             iconLabel.setIcon(iconFor(statistic, cardEnabled));
             repaint();
+        }
+
+        @Override protected void paintChildren(Graphics g) {
+            super.paintChildren(g);
+            ChoiceRadioIndicator.paintTopLeft(this, g, selected, cardEnabled);
         }
 
         private static Border borderFor(boolean selected, boolean enabled) {
@@ -427,48 +419,6 @@ public final class RepresentativeStatisticChoicePanel extends JPanel {
                     BorderFactory.createLineBorder(FlashTheme.PRIMARY_BORDER, 1, true),
                     FlashTheme.pad(1, 7, 1, 7)));
             return label;
-        }
-    }
-
-    private static final class RadioDot extends JComponent {
-        private static final int SIZE = 18;
-        private boolean selected;
-
-        RadioDot() {
-            Dimension d = new Dimension(SIZE, SIZE);
-            setMinimumSize(d);
-            setPreferredSize(d);
-            setMaximumSize(d);
-            setOpaque(false);
-        }
-
-        void setSelected(boolean selected) {
-            this.selected = selected;
-            repaint();
-        }
-
-        @Override protected void paintComponent(Graphics g) {
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-            int d = 14;
-            int x = (getWidth() - d) / 2;
-            int y = (getHeight() - d) / 2;
-            if (!isEnabled()) {
-                g2.setColor(FlashTheme.BORDER_STRONG);
-                g2.setStroke(new BasicStroke(1.4f));
-                g2.drawOval(x, y, d - 1, d - 1);
-            } else if (selected) {
-                g2.setColor(FlashTheme.SELECTION_BORDER);
-                g2.fillOval(x, y, d, d);
-                g2.setColor(Color.WHITE);
-                g2.fillOval(x + 4, y + 4, d - 8, d - 8);
-            } else {
-                g2.setColor(FlashTheme.BORDER_STRONG);
-                g2.setStroke(new BasicStroke(1.6f));
-                g2.drawOval(x, y, d - 1, d - 1);
-            }
-            g2.dispose();
         }
     }
 

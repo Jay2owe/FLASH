@@ -49,6 +49,13 @@ public class RepresentativeFigureConfig {
         customDisplayRangesByChannel.clear();
     }
 
+    public void clearFigureSpecificState() {
+        selection = null;
+        layout = null;
+        tileConfig = null;
+        clearCustomDisplayRanges();
+    }
+
     public Map<String, Object> toMap() {
         Map<String, Object> root = new LinkedHashMap<String, Object>();
         root.put("schemaVersion", Integer.valueOf(SCHEMA_VERSION));

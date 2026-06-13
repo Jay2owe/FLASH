@@ -168,7 +168,7 @@ public class RepresentativeSelectionPanelTest {
     }
 
     @Test
-    public void recommendedRowsAreSelectedAndHighlightedWhenDialogOpens()
+    public void recommendedRowsAreGuidanceOnlyWhenDialogOpens()
             throws Exception {
         final RepresentativeSeries controlA = series("0", "Control", "Control-A");
         final RepresentativeSeries controlB = series("1", "Control", "Control-B");
@@ -199,15 +199,15 @@ public class RepresentativeSelectionPanelTest {
                                         treatmentA, treatmentB, treatmentC),
                                 RepresentativeStatistic.QUICK, table);
                 try {
-                    assertTrue(panel.hasCompleteSelection());
-                    assertEquals(controlB, panel.selectedSeries("Control"));
-                    assertEquals(treatmentB, panel.selectedSeries("Treatment"));
+                    assertFalse(panel.hasCompleteSelection());
+                    assertNull(panel.selectedSeries("Control"));
+                    assertNull(panel.selectedSeries("Treatment"));
+                    assertTrue(panel.isRecommendedForTests("1"));
+                    assertTrue(panel.isRecommendedForTests("4"));
 
                     List<String> highlighted = panel.statsPanelForTests()
                             .highlightedSeriesIdsForTest();
-                    assertEquals(2, highlighted.size());
-                    assertTrue(highlighted.contains("1"));
-                    assertTrue(highlighted.contains("4"));
+                    assertTrue(highlighted.isEmpty());
                 } finally {
                     panel.dispose();
                 }

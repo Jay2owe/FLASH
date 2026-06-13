@@ -34,12 +34,21 @@ import flash.pipeline.results.RepresentativeFigureDetailsWriter;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.ui.CardChoice;
+import flash.pipeline.ui.FlashTheme;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.wizard.ConditionManifestPanel;
 import ij.IJ;
 
+import javax.swing.BorderFactory;
+import javax.swing.BoxLayout;
 import javax.swing.JComboBox;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -98,7 +107,15 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
                 IJ.log("[Representative Figure] Statistic chooser cancelled.");
                 return;
             }
-            boolean loadedNamed = loadNamedProjectParametersIfPresent(directory, choice.saveName);
+            String rememberedSaveName = config.saveName();
+            boolean savedNamedFigure =
+                    hasSavedNamedProjectParameters(directory, choice.saveName);
+            boolean loadedNamed = savedNamedFigure
+                    && loadNamedProjectParametersIfPresent(directory, choice.saveName);
+            if (startsFreshNamedFigure(
+                    rememberedSaveName, choice.saveName, savedNamedFigure)) {
+                config.clearFigureSpecificState();
+            }
             config.saveName = choice.saveName;
             applyCliSaveNameOverride();
             List<SeriesMeta> metas = loadSourceMetadata(directory);
@@ -508,6 +525,42 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
         return false;
     }
 
+    private boolean hasSavedNamedProjectParameters(String directory, String saveName) {
+        String cleanName = RepresentativeFigureConfig.normalizeSaveName(saveName);
+        if (directory == null || directory.trim().isEmpty() || cleanName.isEmpty()) {
+            return false;
+        }
+        try {
+            ProjectFile project = ProjectFileIO.read(
+                    FlashProjectLayout.forDirectory(directory).configurationWriteDir());
+            if (project == null || project.extras == null) {
+                return false;
+            }
+            if (!representativeFigureBySaveName(
+                    project.extras.get(RepresentativeFigureConfig.PROJECT_COLLECTION_KEY),
+                    cleanName).isEmpty()) {
+                return true;
+            }
+            Map<String, Object> current = stringObjectMap(
+                    project.extras.get(RepresentativeFigureConfig.PROJECT_EXTRA_KEY));
+            return !current.isEmpty() && sameSaveName(current.get("saveName"), cleanName);
+        } catch (RuntimeException e) {
+            IJ.log("[Representative Figure] Could not check named figure settings for '"
+                    + cleanName + "': " + e.getMessage());
+            return false;
+        }
+    }
+
+    static boolean startsFreshNamedFigure(String rememberedSaveName,
+                                          String requestedSaveName,
+                                          boolean savedNamedFigure) {
+        String cleanRequested =
+                RepresentativeFigureConfig.normalizeSaveName(requestedSaveName);
+        return !cleanRequested.isEmpty()
+                && !savedNamedFigure
+                && !sameSaveName(rememberedSaveName, cleanRequested);
+    }
+
     private File writeProjectExtras(String directory,
                                     Map<String, Object> representative) throws IOException {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
@@ -835,36 +888,35 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
         dialog.setWorkflowTracker(new String[]{"Statistic", "Conditions", "Select Images",
                 "Display Ranges", "Layout", "Build"}, 3);
         dialog.addHeader("Display Ranges");
-        dialog.addMessage("Choose whether to keep the display ranges from Set Up Configuration or adjust them for this representative figure.");
-        String[] choices = hasRememberedRanges
-                ? (hasSetupRanges
-                        ? new String[]{DisplayRangeChoice.USE_REMEMBERED_LABEL,
-                                DisplayRangeChoice.USE_SETUP_LABEL,
-                                DisplayRangeChoice.ADJUST_NOW_LABEL}
-                        : new String[]{DisplayRangeChoice.USE_REMEMBERED_LABEL,
-                                DisplayRangeChoice.ADJUST_NOW_LABEL})
-                : new String[]{DisplayRangeChoice.USE_SETUP_LABEL,
-                        DisplayRangeChoice.ADJUST_NOW_LABEL};
-        final JComboBox<String> displayRangeChoice = dialog.addChoice("Display range setup",
-                choices,
-                hasRememberedRanges
-                        ? DisplayRangeChoice.USE_REMEMBERED_LABEL
-                        : DisplayRangeChoice.USE_SETUP_LABEL);
-        final Runnable refreshPrimaryLabel = new Runnable() {
+        JLabel intro = new JLabel("<html><body width='500'>Choose how the figure should get its display ranges. "
+                + "Measurements are unchanged.</body></html>");
+        intro.setFont(FlashTheme.body());
+        intro.setForeground(FlashTheme.TEXT_PRIMARY);
+        intro.setBorder(FlashTheme.pad(0, 2, 4, 2));
+        dialog.addComponent(intro);
+        final JComboBox<String> displayRangeChoice = dialog.addCardChoice(
+                "Display range setup",
+                displayRangeCardOptions(hasRememberedRanges, hasSetupRanges),
+                defaultDisplayRangeChoiceValue(hasRememberedRanges, hasSetupRanges));
+        final DisplayRangeDetailsPanel detailsPanel =
+                new DisplayRangeDetailsPanel();
+        dialog.addComponent(detailsPanel);
+        final Runnable refreshChoiceDetails = new Runnable() {
             @Override public void run() {
                 Object selected = displayRangeChoice.getSelectedItem();
-                boolean adjustNow = DisplayRangeChoice.ADJUST_NOW_LABEL.equals(
-                        selected == null ? null : selected.toString());
+                String choice = selected == null ? null : selected.toString();
+                boolean adjustNow = DisplayRangeChoice.ADJUST_NOW_LABEL.equals(choice);
                 dialog.setPrimaryButtonText(
                         NextStepLabels.afterRepresentativeDisplayRangeChoice(adjustNow));
+                detailsPanel.setChoice(choice);
             }
         };
         displayRangeChoice.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) {
-                refreshPrimaryLabel.run();
+                refreshChoiceDetails.run();
             }
         });
-        refreshPrimaryLabel.run();
+        refreshChoiceDetails.run();
 
         if (!dialog.showDialog()) {
             return null;
@@ -877,6 +929,69 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
             return DisplayRangeChoice.useRemembered();
         }
         return DisplayRangeChoice.useSetup();
+    }
+
+    static String[] displayRangeChoiceValues(boolean hasRememberedRanges,
+                                             boolean hasSetupRanges) {
+        if (hasRememberedRanges) {
+            if (hasSetupRanges) {
+                return new String[]{DisplayRangeChoice.USE_REMEMBERED_LABEL,
+                        DisplayRangeChoice.USE_SETUP_LABEL,
+                        DisplayRangeChoice.ADJUST_NOW_LABEL};
+            }
+            return new String[]{DisplayRangeChoice.USE_REMEMBERED_LABEL,
+                    DisplayRangeChoice.ADJUST_NOW_LABEL};
+        }
+        if (hasSetupRanges) {
+            return new String[]{DisplayRangeChoice.USE_SETUP_LABEL,
+                    DisplayRangeChoice.ADJUST_NOW_LABEL};
+        }
+        return new String[]{DisplayRangeChoice.ADJUST_NOW_LABEL};
+    }
+
+    static String defaultDisplayRangeChoiceValue(boolean hasRememberedRanges,
+                                                 boolean hasSetupRanges) {
+        if (hasRememberedRanges) {
+            return DisplayRangeChoice.USE_REMEMBERED_LABEL;
+        }
+        if (hasSetupRanges) {
+            return DisplayRangeChoice.USE_SETUP_LABEL;
+        }
+        return DisplayRangeChoice.ADJUST_NOW_LABEL;
+    }
+
+    private static CardChoice.Option[] displayRangeCardOptions(
+            boolean hasRememberedRanges,
+            boolean hasSetupRanges) {
+        String[] values = displayRangeChoiceValues(hasRememberedRanges,
+                hasSetupRanges);
+        CardChoice.Option[] options = new CardChoice.Option[values.length];
+        for (int i = 0; i < values.length; i++) {
+            options[i] = displayRangeCardOption(values[i]);
+        }
+        return options;
+    }
+
+    private static CardChoice.Option displayRangeCardOption(String value) {
+        if (DisplayRangeChoice.USE_REMEMBERED_LABEL.equals(value)) {
+            return new CardChoice.Option(value,
+                    "Saved figure",
+                    "Use saved figure ranges",
+                    "save",
+                    "Saved");
+        }
+        if (DisplayRangeChoice.USE_SETUP_LABEL.equals(value)) {
+            return new CardChoice.Option(value,
+                    "Set Up config",
+                    "Use configured ranges",
+                    "settings",
+                    "Consistent");
+        }
+        return new CardChoice.Option(DisplayRangeChoice.ADJUST_NOW_LABEL,
+                "Adjust now",
+                "Tune selected images",
+                "sliders",
+                "Preview");
     }
 
     private boolean hasCompleteRememberedRanges(RepresentativeSelection selection) {
@@ -1034,6 +1149,72 @@ public class RepresentativeFigureAnalysis implements Analysis, RunRecordAware {
             this.saveName = RepresentativeFigureConfig.normalizeSaveName(saveName);
             this.statisticChanged = statisticChanged;
         }
+    }
+
+    private static final class DisplayRangeDetailsPanel extends JPanel {
+        private static final int WIDTH = 518;
+        private static final int HEIGHT = 86;
+
+        private final JLabel bodyLabel = new JLabel();
+        private final JLabel scopeLabel = new JLabel();
+
+        DisplayRangeDetailsPanel() {
+            setLayout(new BorderLayout(0, 4));
+            setOpaque(true);
+            setBackground(FlashTheme.SURFACE_RAISED);
+            setAlignmentX(Component.LEFT_ALIGNMENT);
+            setMaximumSize(new Dimension(WIDTH, HEIGHT));
+            setPreferredSize(new Dimension(WIDTH, HEIGHT));
+            setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(FlashTheme.BORDER, 1, true),
+                    FlashTheme.pad(9, 12, 9, 12)));
+
+            JLabel title = new JLabel("Next step");
+            title.setFont(FlashTheme.h2());
+            title.setForeground(FlashTheme.TEXT_HEADER);
+            add(title, BorderLayout.NORTH);
+
+            JPanel text = new JPanel();
+            text.setOpaque(false);
+            text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
+
+            bodyLabel.setFont(FlashTheme.body());
+            bodyLabel.setForeground(FlashTheme.TEXT_PRIMARY);
+            bodyLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            text.add(bodyLabel);
+
+            scopeLabel.setFont(FlashTheme.caption());
+            scopeLabel.setForeground(FlashTheme.TEXT_MUTED);
+            scopeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            text.add(scopeLabel);
+
+            add(text, BorderLayout.CENTER);
+        }
+
+        void setChoice(String choice) {
+            bodyLabel.setText(displayRangeNextStepText(choice));
+            scopeLabel.setText(displayRangeScopeText(choice));
+        }
+    }
+
+    static String displayRangeNextStepText(String choice) {
+        if (DisplayRangeChoice.ADJUST_NOW_LABEL.equals(choice)) {
+            return "Open the display-range editor for the selected representative images.";
+        }
+        if (DisplayRangeChoice.USE_REMEMBERED_LABEL.equals(choice)) {
+            return "Use the saved representative display ranges and go straight to Layout.";
+        }
+        return "Use the display ranges from Set Up Configuration and go straight to Layout.";
+    }
+
+    static String displayRangeScopeText(String choice) {
+        if (DisplayRangeChoice.ADJUST_NOW_LABEL.equals(choice)) {
+            return "Use this when the figure needs channel-specific tuning before layout.";
+        }
+        if (DisplayRangeChoice.USE_REMEMBERED_LABEL.equals(choice)) {
+            return "Affects the figure PNG only; measurements and source images are unchanged.";
+        }
+        return "Good when the figure should match existing presentation-ready images.";
     }
 
     private static final class DisplayRangeChoice {

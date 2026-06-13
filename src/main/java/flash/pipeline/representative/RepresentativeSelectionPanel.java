@@ -138,7 +138,6 @@ public final class RepresentativeSelectionPanel extends JPanel {
                 new ThumbnailThreadFactory());
         buildUi();
         applyRememberedSelection(rememberedSelection);
-        applyRecommendedSelectionDefaults();
         updateStatus();
     }
 
@@ -279,24 +278,6 @@ public final class RepresentativeSelectionPanel extends JPanel {
             RepresentativeSeries current = matchingCurrentSeries(condition, remembered);
             if (current != null) {
                 selectSeries(current);
-            }
-        }
-    }
-
-    private void applyRecommendedSelectionDefaults() {
-        if (recommendedSeriesIdByCondition.isEmpty()) {
-            return;
-        }
-        for (Map.Entry<String, String> entry : recommendedSeriesIdByCondition.entrySet()) {
-            String condition = RepresentativeSelection.conditionLabel(entry.getKey());
-            if (selectedByCondition.containsKey(condition)) {
-                continue;
-            }
-            SeriesRowPanel recommendedRow =
-                    rowBySeriesId.get(clean(entry.getValue()));
-            if (recommendedRow != null
-                    && sameCondition(recommendedRow.series, condition)) {
-                selectSeries(recommendedRow.series);
             }
         }
     }

@@ -35,6 +35,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -147,6 +148,56 @@ public class RepresentativeFigureAnalysisTest {
         assertEquals("count.lif",
                 analysis.configForTests().selection.seriesForCondition("Control")
                         .sourcePath().getName());
+    }
+
+    @Test
+    public void newRepresentativeFigureSaveNameStartsFresh() {
+        assertTrue(RepresentativeFigureAnalysis.startsFreshNamedFigure(
+                "Mean intensity", "Cell count", false));
+        assertFalse(RepresentativeFigureAnalysis.startsFreshNamedFigure(
+                "Mean intensity", "Mean intensity", false));
+        assertFalse(RepresentativeFigureAnalysis.startsFreshNamedFigure(
+                "Mean intensity", "Cell count", true));
+        assertFalse(RepresentativeFigureAnalysis.startsFreshNamedFigure(
+                "Mean intensity", "", false));
+    }
+
+    @Test
+    public void displayRangeCardsReflectAvailableSources() {
+        assertArrayEquals(new String[]{
+                        "Use remembered representative ranges",
+                        "Use display ranges already set up",
+                        "Adjust now"},
+                RepresentativeFigureAnalysis.displayRangeChoiceValues(true, true));
+        assertArrayEquals(new String[]{
+                        "Use remembered representative ranges",
+                        "Adjust now"},
+                RepresentativeFigureAnalysis.displayRangeChoiceValues(true, false));
+        assertArrayEquals(new String[]{
+                        "Use display ranges already set up",
+                        "Adjust now"},
+                RepresentativeFigureAnalysis.displayRangeChoiceValues(false, true));
+        assertArrayEquals(new String[]{"Adjust now"},
+                RepresentativeFigureAnalysis.displayRangeChoiceValues(false, false));
+
+        assertEquals("Use remembered representative ranges",
+                RepresentativeFigureAnalysis.defaultDisplayRangeChoiceValue(true, true));
+        assertEquals("Use display ranges already set up",
+                RepresentativeFigureAnalysis.defaultDisplayRangeChoiceValue(false, true));
+        assertEquals("Adjust now",
+                RepresentativeFigureAnalysis.defaultDisplayRangeChoiceValue(false, false));
+    }
+
+    @Test
+    public void displayRangeDetailsExplainNextStep() {
+        assertEquals("Open the display-range editor for the selected representative images.",
+                RepresentativeFigureAnalysis.displayRangeNextStepText("Adjust now"));
+        assertEquals("Use the saved representative display ranges and go straight to Layout.",
+                RepresentativeFigureAnalysis.displayRangeNextStepText(
+                        "Use remembered representative ranges"));
+        assertEquals("Use the display ranges from Set Up Configuration and go straight to Layout.",
+                RepresentativeFigureAnalysis.displayRangeNextStepText(
+                        "Use display ranges already set up"));
     }
 
     @Test
