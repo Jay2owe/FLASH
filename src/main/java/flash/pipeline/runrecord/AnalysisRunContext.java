@@ -233,22 +233,39 @@ public final class AnalysisRunContext implements AutoCloseable {
 
     @Override
     public void close() {
+        close(true);
+    }
+
+    /**
+     * Finalise the record without waiting for background fingerprint tasks.
+     * Used after GUI cancellation so returning to the main FLASH window is not
+     * delayed by best-effort metadata collection.
+     */
+    public void closeWithoutWaitingForFingerprints() {
+        close(false);
+    }
+
+    private void close(boolean waitForFingerprints) {
         synchronized (lock) {
             if (closed) {
                 return;
             }
             closed = true;
         }
-        // Drain fingerprint tasks WITHOUT holding the lock, so in-flight tasks
-        // can acquire it to publish their results.
-        fingerprintExecutor.shutdown();
-        try {
-            if (!fingerprintExecutor.awaitTermination(FINGERPRINT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+        if (waitForFingerprints) {
+            // Drain fingerprint tasks WITHOUT holding the lock, so in-flight tasks
+            // can acquire it to publish their results.
+            fingerprintExecutor.shutdown();
+            try {
+                if (!fingerprintExecutor.awaitTermination(FINGERPRINT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                    fingerprintExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
                 fingerprintExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
             }
-        } catch (InterruptedException e) {
+        } else {
             fingerprintExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
         }
         synchronized (lock) {
             for (RunRecord.InputItem input : record.inputs) {

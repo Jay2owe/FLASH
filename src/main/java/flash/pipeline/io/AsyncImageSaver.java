@@ -1,5 +1,6 @@
 package flash.pipeline.io;
 
+import flash.pipeline.execution.AnalysisCancellation;
 import flash.pipeline.image.ImageOps;
 import ij.IJ;
 import ij.ImagePlus;
@@ -10,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -35,7 +37,7 @@ public class AsyncImageSaver {
         IO_POOL.allowCoreThreadTimeOut(true);
     }
 
-    private static final List<Future<?>> pending = new ArrayList<Future<?>>();
+    private static final List<PendingSave> pending = new ArrayList<PendingSave>();
     private static final AtomicBoolean firstSaveLogged = new AtomicBoolean(false);
 
     /**
@@ -45,22 +47,16 @@ public class AsyncImageSaver {
     public static void saveAsTiffAsync(ImagePlus imp, String path) {
         logFirstSave();
         final ImagePlus copy = ImageOps.duplicateThreadSafe(imp);
-        Runnable task = new Runnable() {
+        submitPending(new Runnable() {
             @Override
             public void run() {
                 try {
                     saveTiffAtomically(copy, path);
                 } catch (IOException e) {
                     throw new RuntimeException("Failed to save TIFF atomically: " + path, e);
-                } finally {
-                    copy.changes = false;
-                    copy.close();
                 }
             }
-        };
-        synchronized (pending) {
-            pending.add(IO_POOL.submit(task));
-        }
+        }, copy);
     }
 
     /**
@@ -70,29 +66,30 @@ public class AsyncImageSaver {
     public static void saveAsPngAsync(ImagePlus imp, String path) {
         logFirstSave();
         final ImagePlus copy = ImageOps.duplicateThreadSafe(imp);
-        Runnable task = new Runnable() {
+        submitPending(new Runnable() {
             @Override
             public void run() {
                 try {
                     savePngAtomically(copy, path);
                 } catch (IOException e) {
                     throw new RuntimeException("Failed to save PNG atomically: " + path, e);
-                } finally {
-                    copy.changes = false;
-                    copy.close();
                 }
             }
-        };
+        }, copy);
+    }
+
+    private static void submitPending(Runnable task, ImagePlus imageToClose) {
+        PendingSave save = new PendingSave(task, imageToClose);
+        Future<?> future = IO_POOL.submit(save);
+        save.setFuture(future);
         synchronized (pending) {
-            pending.add(IO_POOL.submit(task));
+            pending.add(save);
         }
     }
 
     /** Package-private: submit a synthetic save job (test seam). */
     static void submitTask(Runnable task) {
-        synchronized (pending) {
-            pending.add(IO_POOL.submit(task));
-        }
+        submitPending(task, null);
     }
 
     /** Package-private: number of pending save jobs (test seam). */
@@ -105,9 +102,7 @@ public class AsyncImageSaver {
     /** Package-private: reset all state for test isolation. */
     static void resetForTest() {
         synchronized (pending) {
-            for (Future<?> f : pending) {
-                f.cancel(true);
-            }
+            cancelAll(pending);
             pending.clear();
         }
         IO_POOL.purge();
@@ -204,9 +199,14 @@ public class AsyncImageSaver {
      *                     Capped at the number of remaining saves.
      */
     public static void waitForAllWithProgress(int drainThreads) {
-        List<Future<?>> toWait;
+        if (AnalysisCancellation.wasCancelRequestedInActiveScope()) {
+            cancelPendingSaves("Analysis cancelled; queued image saves will not block the main UI.");
+            return;
+        }
+
+        List<PendingSave> toWait;
         synchronized (pending) {
-            toWait = new ArrayList<Future<?>>(pending);
+            toWait = new ArrayList<PendingSave>(pending);
             pending.clear();
         }
         final int total = toWait.size();
@@ -236,9 +236,15 @@ public class AsyncImageSaver {
         // Wait for all save jobs, updating progress as each completes
         List<String> errors = new ArrayList<String>();
         int done = 0;
-        for (Future<?> f : toWait) {
+        for (PendingSave save : toWait) {
             try {
+                Future<?> f = save.future();
+                if (f == null) {
+                    continue;
+                }
                 f.get();
+            } catch (CancellationException e) {
+                // A GUI cancel may have interrupted a running save before this drain began.
             } catch (Exception e) {
                 String msg = e.getMessage();
                 if (e.getCause() != null) {
@@ -267,5 +273,139 @@ public class AsyncImageSaver {
 
         IJ.showStatus("");
         firstSaveLogged.set(false);
+    }
+
+    private static void cancelPendingSaves(String reason) {
+        List<PendingSave> toCancel;
+        synchronized (pending) {
+            toCancel = new ArrayList<PendingSave>(pending);
+            pending.clear();
+        }
+        if (toCancel.isEmpty()) {
+            firstSaveLogged.set(false);
+            return;
+        }
+
+        CancelCounts counts = cancelAll(toCancel);
+        IO_POOL.purge();
+        IO_POOL.setCorePoolSize(1);
+        IO_POOL.setMaximumPoolSize(1);
+        firstSaveLogged.set(false);
+
+        IJ.log("[FLASH] " + reason);
+        IJ.log("[FLASH] Image-save cleanup: cancelled " + counts.queued
+                + " queued, released " + counts.running
+                + " running, already finished " + counts.finished + ".");
+        IJ.showStatus("Image saving cancelled.");
+        IJ.showProgress(1.0);
+    }
+
+    private static CancelCounts cancelAll(List<PendingSave> saves) {
+        CancelCounts counts = new CancelCounts();
+        List<PendingSave> remaining = new ArrayList<PendingSave>();
+        for (PendingSave save : saves) {
+            if (save.cancelQueuedBeforeInterrupt()) {
+                counts.queued++;
+            } else {
+                remaining.add(save);
+            }
+        }
+        for (PendingSave save : remaining) {
+            PendingSave.CancelResult result = save.cancelAfterQueuedPass();
+            if (result == PendingSave.CancelResult.QUEUED) {
+                counts.queued++;
+            } else if (result == PendingSave.CancelResult.RUNNING) {
+                counts.running++;
+            } else {
+                counts.finished++;
+            }
+        }
+        return counts;
+    }
+
+    private static final class CancelCounts {
+        int queued;
+        int running;
+        int finished;
+    }
+
+    private static final class PendingSave implements Runnable {
+        enum CancelResult {
+            QUEUED,
+            RUNNING,
+            FINISHED
+        }
+
+        private final Runnable task;
+        private final ImagePlus imageToClose;
+        private final AtomicBoolean started = new AtomicBoolean(false);
+        private final AtomicBoolean finished = new AtomicBoolean(false);
+        private final AtomicBoolean closed = new AtomicBoolean(false);
+        private volatile Future<?> future;
+
+        PendingSave(Runnable task, ImagePlus imageToClose) {
+            this.task = task;
+            this.imageToClose = imageToClose;
+        }
+
+        void setFuture(Future<?> future) {
+            this.future = future;
+        }
+
+        Future<?> future() {
+            return future;
+        }
+
+        @Override
+        public void run() {
+            started.set(true);
+            try {
+                if (task != null) {
+                    task.run();
+                }
+            } finally {
+                finished.set(true);
+                closeImage();
+            }
+        }
+
+        boolean cancelQueuedBeforeInterrupt() {
+            if (started.get() || finished.get()) {
+                return false;
+            }
+            Future<?> f = future;
+            if (f != null) {
+                f.cancel(false);
+            }
+            if (!started.get()) {
+                closeImage();
+                return true;
+            }
+            return false;
+        }
+
+        CancelResult cancelAfterQueuedPass() {
+            Future<?> f = future;
+            boolean wasStarted = started.get();
+            boolean wasFinished = finished.get() || (f != null && f.isDone() && !wasStarted);
+            if (f != null) {
+                f.cancel(true);
+            }
+            if (wasFinished || finished.get()) {
+                return CancelResult.FINISHED;
+            }
+            if (wasStarted || started.get()) {
+                return CancelResult.RUNNING;
+            }
+            closeImage();
+            return CancelResult.QUEUED;
+        }
+
+        private void closeImage() {
+            if (imageToClose != null && closed.compareAndSet(false, true)) {
+                imageToClose.changes = false;
+                imageToClose.close();
+            }
+        }
     }
 }

@@ -130,6 +130,35 @@ public class AnalysisRunCoordinatorTest {
     }
 
     @Test
+    public void guiCancellationAfterOutputsKeepsWarningRunRecord() throws Exception {
+        File project = temp.newFolder("project");
+        final File output = temp.newFile("partial-output.txt");
+        AnalysisRunCoordinator coordinator = newCoordinator(BinSetupDispatcher.Outcome.COMPLETED);
+        final RecordingAnalysis analysis = new RecordingAnalysis();
+        AnalysisCancellation.Scope scope = AnalysisCancellation.openGuiAnalysisScope();
+        try {
+            RunResult result = coordinator.run(analysis, 4, "3D Object Analysis",
+                    project.getAbsolutePath(), null, null, "", new Callable<Void>() {
+                        @Override
+                        public Void call() {
+                            analysis.current.recordOutput(output, "txt");
+                            AnalysisCancellation.markDialogCancelRequested();
+                            return null;
+                        }
+                    });
+
+            assertEquals("warn", result.status);
+            RunRecord record = RunRecordIO.readLatest(latestRecordFile(project));
+            assertEquals("warn", record.status);
+            assertEquals(1, record.outputs.size());
+            assertTrue(record.messages.get(record.messages.size() - 1).text
+                    .contains("cancelled"));
+        } finally {
+            scope.close();
+        }
+    }
+
+    @Test
     public void successfulRunRecordsOk() throws Exception {
         File project = temp.newFolder("project");
         AnalysisRunCoordinator coordinator = newCoordinator(BinSetupDispatcher.Outcome.COMPLETED);

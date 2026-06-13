@@ -78,11 +78,12 @@ public class AnalysisRunCoordinator extends AbstractService {
         RuntimeException runtimeFailure = null;
         Error errorFailure = null;
         boolean discardRecord = false;
+        boolean guiCancel = false;
         try {
             if (body != null) {
                 body.call();
             }
-            boolean guiCancel = AnalysisCancellation.wasCancelRequestedInActiveScope();
+            guiCancel = AnalysisCancellation.wasCancelRequestedInActiveScope();
             if (guiCancel && !context.hasRecordedOutputs()) {
                 discardRecord = true;
             } else if (binOutcomeProvider.lastOutcome() == BinSetupDispatcher.Outcome.CANCELLED) {
@@ -91,6 +92,7 @@ public class AnalysisRunCoordinator extends AbstractService {
                 context.warn("Analysis was cancelled after output recording had started.");
             }
         } catch (Exception e) {
+            guiCancel = AnalysisCancellation.wasCancelRequestedInActiveScope();
             if (isMissingSetupParameter(e)) {
                 context.warn(e.getMessage());
             } else {
@@ -98,6 +100,7 @@ public class AnalysisRunCoordinator extends AbstractService {
                 runtimeFailure = (e instanceof RuntimeException) ? (RuntimeException) e : new RuntimeException(e);
             }
         } catch (Error e) {
+            guiCancel = AnalysisCancellation.wasCancelRequestedInActiveScope();
             context.error("Analysis failed", e);
             errorFailure = e;
         } finally {
@@ -106,6 +109,8 @@ public class AnalysisRunCoordinator extends AbstractService {
             }
             if (discardRecord && runtimeFailure == null && errorFailure == null) {
                 context.discard();
+            } else if (guiCancel) {
+                context.closeWithoutWaitingForFingerprints();
             } else {
                 context.close();
             }

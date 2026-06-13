@@ -1,5 +1,6 @@
 package flash.pipeline.io;
 
+import flash.pipeline.execution.AnalysisCancellation;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ByteProcessor;
@@ -167,6 +168,51 @@ public class AsyncImageSaverTest {
     }
 
     // ── helper ──────────────────────────────────────────────────────
+
+    @Test
+    public void guiCancellationDoesNotWaitForBlockedDrain() throws Exception {
+        final CountDownLatch running = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        final AtomicInteger queuedRan = new AtomicInteger(0);
+
+        AsyncImageSaver.submitTask(new Runnable() {
+            @Override
+            public void run() {
+                running.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {
+                }
+            }
+        });
+        assertTrue("first save should start", running.await(5, TimeUnit.SECONDS));
+
+        AsyncImageSaver.submitTask(new Runnable() {
+            @Override
+            public void run() {
+                queuedRan.incrementAndGet();
+            }
+        });
+        assertEquals(2, AsyncImageSaver.pendingCount());
+
+        AnalysisCancellation.Scope scope = AnalysisCancellation.openGuiAnalysisScope();
+        long elapsedMillis;
+        try {
+            AnalysisCancellation.markDialogCancelRequested();
+            long started = System.nanoTime();
+            AsyncImageSaver.waitForAllWithProgress(2);
+            elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        } finally {
+            scope.close();
+            release.countDown();
+        }
+
+        assertTrue("cancelled drain should return promptly; took " + elapsedMillis + " ms",
+                elapsedMillis < 1000L);
+        assertEquals(0, AsyncImageSaver.pendingCount());
+        Thread.sleep(100L);
+        assertEquals("queued save should have been cancelled", 0, queuedRan.get());
+    }
 
     @Test
     public void pngSavePublishesOnlyFinalFile() throws Exception {
