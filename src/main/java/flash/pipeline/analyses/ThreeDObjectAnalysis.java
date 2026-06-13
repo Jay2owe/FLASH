@@ -951,14 +951,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 gdOpts.addHelpText("Per-object Pearson and Manders, plus Costes thresholds/significance "
                         + "at both object and image level.");
 
-                gdOpts.addHeader("Colocalisation Thresholds");
-                for (String chName : cfg.channelNames) {
-                    Double prev = markerThresholds.get(chName);
-                    objectBindings.thresholdFields.add(gdOpts.addNumericField(
-                            chName + " Coloc Threshold (%)",
-                            prev != null ? prev : 30.0, 0));
-                }
-
                 // Dedicated section: voxel-vs-box semantics kept separate from Volumetric/CPC.
                 gdOpts.addHeader("Bounding-Box Colocalisation");
                 objectBindings.doBBOverlapToggle =
@@ -973,12 +965,50 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         gdOpts.addToggle("Bounding-box volume fill (BBVolColoc)", doBBVol);
                 gdOpts.addHelpText("Box fill: partner object voxels filling this object's bounding box, as a "
                         + "percentage of the box volume: single best partner and total of all partners.");
+
+                // Unified per-channel threshold table: one row per channel carrying the
+                // volumetric Coloc % and the bounding-box BB Coloc % side by side,
+                // replacing the two separate per-channel field lists.
+                gdOpts.addHeader("Colocalisation Thresholds (%)");
+                gdOpts.addHelpText("Per-channel cutoffs. Coloc % is voxel overlap (Volumetric); "
+                        + "BB Coloc % is bounding-box overlap/fill. Each column greys out when no "
+                        + "method that uses it is selected.");
+                gdOpts.addChannelNumericTableHeader("Channel", "Coloc %", "BB Coloc %");
+                final List<JTextField> colocThresholdFields = new ArrayList<JTextField>();
+                final List<JTextField> bbColocThresholdFields = new ArrayList<JTextField>();
                 for (String chName : cfg.channelNames) {
+                    Double prev = markerThresholds.get(chName);
                     Double prevBB = bbThresholds.get(chName);
-                    objectBindings.bbThresholdFields.add(gdOpts.addNumericField(
-                            chName + " BB Coloc Threshold (%)",
-                            prevBB != null ? prevBB : 30.0, 0));
+                    PipelineDialog.ChannelNumericRow thrRow = gdOpts.addChannelDualNumericRow(
+                            chName,
+                            prev != null ? prev : 30.0,
+                            prevBB != null ? prevBB : 30.0);
+                    objectBindings.thresholdFields.add(thrRow.primaryField);
+                    objectBindings.bbThresholdFields.add(thrRow.secondaryField);
+                    colocThresholdFields.add(thrRow.primaryField);
+                    bbColocThresholdFields.add(thrRow.secondaryField);
                 }
+
+                // Grey out each column when no method consuming it is enabled. Values are
+                // still read (disabled fields keep their text), so a greyed column simply
+                // shows the cutoff that would apply if its method were turned on.
+                final Runnable updateThresholdEnablement = new Runnable() {
+                    @Override public void run() {
+                        boolean colocOn = isSelected(objectBindings.doVolumetricToggle);
+                        boolean bbOn = isSelected(objectBindings.doBBOverlapToggle)
+                                || isSelected(objectBindings.doBBVolToggle);
+                        for (JTextField f : colocThresholdFields) {
+                            f.setEnabled(colocOn);
+                        }
+                        for (JTextField f : bbColocThresholdFields) {
+                            f.setEnabled(bbOn);
+                        }
+                    }
+                };
+                objectBindings.doVolumetricToggle.addChangeListener(updateThresholdEnablement);
+                objectBindings.doBBOverlapToggle.addChangeListener(updateThresholdEnablement);
+                objectBindings.doBBVolToggle.addChangeListener(updateThresholdEnablement);
+                updateThresholdEnablement.run();
 
                 if (analyseFullImagesWithoutRois) {
                     gdOpts.addHeader("Analysis Region");
@@ -1049,12 +1079,12 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 doBBOverlap = gdOpts.getNextBoolean();
                 doBBCpc = gdOpts.getNextBoolean();
                 doBBVol = gdOpts.getNextBoolean();
+                // Read interleaved (Coloc % then BB Coloc %) to match the unified
+                // per-channel rows registered in addChannelDualNumericRow order.
                 markerThresholds.clear();
-                for (String chName : cfg.channelNames) {
-                    markerThresholds.put(chName, gdOpts.getNextNumber());
-                }
                 bbThresholds.clear();
                 for (String chName : cfg.channelNames) {
+                    markerThresholds.put(chName, gdOpts.getNextNumber());
                     bbThresholds.put(chName, gdOpts.getNextNumber());
                 }
                 for (int r = 0; r < roiSetNames.length; r++) {

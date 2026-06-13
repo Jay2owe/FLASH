@@ -59,6 +59,7 @@ import flash.pipeline.roi.RoiSetImageBinding;
 import flash.pipeline.roi.RoiSetValidator;
 import flash.pipeline.ui.NextStepLabels;
 import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.HelpButton;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceOps;
 import flash.pipeline.zslice.ZSliceSelection;
@@ -548,9 +549,6 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 gd.addAnalysisHelpHeader("Fluorescence Intensity Analysis", FLASH_Pipeline.IDX_INTENSITY);
 
                 final IntensityPresetBindings pb = new IntensityPresetBindings();
-                addIntensitySetupControls(gd, directory, cfg, channelIdentities, roiSetNameList,
-                        binarization, thresholds, filterSources, roiZipSelected, channelNames,
-                        anyRois, pb);
 
                 gd.addSubHeader("Analysis Options");
                 final ToggleSwitch useDeconvToggle =
@@ -562,33 +560,55 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                         gd.addToggle("Intensity-spatial analysis", runIntensitySpatial);
                 pb.intensitySpatialToggle = intensitySpatialToggle;
 
-                gd.addHeader("Filter Source (per channel)");
+                gd.addHeader("Filter & Binarise (per channel)");
+                gd.addHelpText("Binarise creates a binary mask from the filtered image at a given "
+                        + "threshold, then ANDs it with the raw image. Hover a channel for details.");
+                gd.addChannelTableHeader("Channel", "Filter source", "Binarise");
+
                 final List<JComboBox<String>> filterSourceChoices = new ArrayList<JComboBox<String>>();
                 pb.filterSourceChoices = filterSourceChoices;
+                final List<ToggleSwitch> binarizeToggles = new ArrayList<ToggleSwitch>();
+                pb.binarizeToggles = binarizeToggles;
+                final List<PipelineDialog.ChannelRow> channelRows =
+                        new ArrayList<PipelineDialog.ChannelRow>();
+
                 for (int i = 0; i < channelNames.length; i++) {
                     String savedFilterLabel = savedFilterChoiceLabel(i, cfg);
                     String[] filterSourceOptions = new String[]{
                             savedFilterLabel, "Basic background and noise removal"
                     };
-                    JComboBox<String> filterChoice = gd.addChoice(channelNames[i] + " filter source",
+                    PipelineDialog.ChannelRow channelRow = gd.addChannelRow(
+                            channelNames[i],
                             filterSourceOptions,
                             "Bin filter".equals(filterSources[i])
                                     ? savedFilterLabel
-                                    : "Basic background and noise removal");
-                    filterSourceChoices.add(filterChoice);
-                    gd.addHelpText(buildFilterSummaryLine(i, cfg, channelNames, filterSources,
-                            binarization));
+                                    : "Basic background and noise removal",
+                            binarization[i]);
+                    filterSourceChoices.add(channelRow.filterChoice);
+                    binarizeToggles.add(channelRow.binariseToggle);
+                    channelRows.add(channelRow);
                 }
 
-                gd.addHeader("Binarise Signal (per channel)");
-                gd.addHelpText("Creates a binary mask from the filtered image at a given threshold, "
-                        + "then ANDs it with the raw image.");
-
-                final List<ToggleSwitch> binarizeToggles = new ArrayList<ToggleSwitch>();
-                for (int i = 0; i < channelNames.length; i++) {
-                    binarizeToggles.add(gd.addToggle("Binarise " + channelNames[i], binarization[i]));
+                final javax.swing.JLabel filterDetailLine = gd.addHelpText(
+                        buildFilterSummaryLine(0, cfg, channelNames, filterSources, binarization));
+                for (int i = 0; i < channelRows.size(); i++) {
+                    final int channelIndex = i;
+                    PipelineDialog.ChannelRow channelRow = channelRows.get(i);
+                    String tip = "<html>" + buildFilterSummaryLine(
+                            i, cfg, channelNames, filterSources, binarization) + "</html>";
+                    channelRow.nameLabel.setToolTipText(tip);
+                    channelRow.filterChoice.setToolTipText(tip);
+                    java.awt.event.MouseAdapter detailHover = new java.awt.event.MouseAdapter() {
+                        @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                            gd.setHelpText(filterDetailLine, buildFilterSummaryLine(
+                                    channelIndex, cfg, channelNames, filterSources, binarization));
+                        }
+                    };
+                    channelRow.rowPanel.addMouseListener(detailHover);
+                    channelRow.nameLabel.addMouseListener(detailHover);
+                    channelRow.filterChoice.addMouseListener(detailHover);
+                    channelRow.binariseToggle.addMouseListener(detailHover);
                 }
-                pb.binarizeToggles = binarizeToggles;
 
                 final Runnable updatePrimaryLabel = new Runnable() {
                     @Override public void run() {
@@ -712,6 +732,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                             roiToggles.add(gd2.addToggle(roiZipNames[r], roiZipSelected[r]));
                         }
                     }
+                    gd2.beginAdvancedSection("intensity.channelRoiMask");
                     gd2.addHeader("Channel ROI Mask");
                     gd2.addHelpText("The chosen channel's filter and threshold are used to build the mask, "
                             + "which is then ANDed with each measurement channel. "
@@ -721,6 +742,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     System.arraycopy(channelNames, 0, roiChannels, 1, channelNames.length);
                     final JComboBox<String> roiChannelCombo =
                             gd2.addChoice("Channel ROI", roiChannels, roiChannelChoice);
+                    gd2.endAdvancedSection();
                     LoadFromRunButton.install(gd2, "IntensityAnalysisV2", new File(directory),
                             new LoadedRunParameterApplier() {
                                 @Override public LoadedRunParameters.Result applyLoadedParameters(
@@ -3903,11 +3925,27 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         lbl.setFont(lbl.getFont().deriveFont(java.awt.Font.PLAIN, 12f));
         if (!available) lbl.setEnabled(false);
         row.add(lbl);
+        row.add(javax.swing.Box.createHorizontalStrut(6));
+        row.add(spatialAnalysisHelpButton(key));
         row.add(javax.swing.Box.createHorizontalGlue());
         row.add(toggle);
         row.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 26));
         panel.add(row);
         panel.add(javax.swing.Box.createVerticalStrut(3));
+    }
+
+    private static JButton spatialAnalysisHelpButton(final IntensitySpatialConfig.AnalysisKey key) {
+        final String label = intensitySpatialAnalysisLabel(key);
+        final JButton help = HelpButton.question("About " + label);
+        help.addActionListener(new java.awt.event.ActionListener() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                JOptionPane.showMessageDialog(help,
+                        intensitySpatialAnalysisHelpHtml(key),
+                        "About " + label,
+                        JOptionPane.INFORMATION_MESSAGE);
+            }
+        });
+        return help;
     }
 
     private static javax.swing.JComponent spatialSectionHeader(String text) {
@@ -4414,6 +4452,125 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         if (key == IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D) return "Native 3D cross-mark";
         if (key == IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D) return "Native 3D distance shells";
         return key.name();
+    }
+
+    private static String intensitySpatialAnalysisHelpHtml(IntensitySpatialConfig.AnalysisKey key) {
+        String label = intensitySpatialAnalysisLabel(key);
+        String[] help = intensitySpatialAnalysisHelpParts(key);
+        return "<html><body style='width: 360px'>"
+                + "<b>" + label + "</b><br><br>"
+                + "<b>What it measures</b><br>" + help[0] + "<br><br>"
+                + "<b>When to use it</b><br>" + help[1]
+                + "</body></html>";
+    }
+
+    private static String[] intensitySpatialAnalysisHelpParts(IntensitySpatialConfig.AnalysisKey key) {
+        if (key == IntensitySpatialConfig.AnalysisKey.PATCHINESS) {
+            return new String[]{
+                    "Splits the ROI into physical tiles and reports how uneven the signal is, including tile coefficient of variation, Gini inequality, and lacunarity.",
+                    "Use for the basic question \"is this signal diffuse or clumped?\" It is a good default for comparing spatial heterogeneity between samples."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.HOTSPOTSCAN) {
+            return new String[]{
+                    "Runs a local hotspot scan on a downsampled grid and reports hotspot fraction, Moran's I spatial clustering, and a permutation p-value.",
+                    "Use when bright signal may form focal enriched zones. It is slower than patchiness because it uses random permutations."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.NULLMODEL) {
+            return new String[]{
+                    "Compares raw pixel variance with a simple random shot-noise model and reports p-value, z-score, and pass/fail columns.",
+                    "Use as a sanity check for whether raw intensity variation exceeds random noise. It is not a pattern classifier and does not use binary masks."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.GRANULARITY) {
+            return new String[]{
+                    "Tests the configured physical scales and reports the scale where intensity variation is strongest, plus the energy at each scale.",
+                    "Use to distinguish fine puncta from coarse blobs or broad domains. Adjust the granularity scales if your structures are much smaller or larger."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.DEPTH_PROFILE) {
+            return new String[]{
+                    "Measures mean signal in distance bands from the ROI edge and reports rim-core ratio, depth slope, peak depth, and edge coupling.",
+                    "Use when the biological question is whether signal sits near a boundary, in the core, or changes with distance from the ROI edge."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.ANISOTROPY) {
+            return new String[]{
+                    "Uses a 2D structure tensor to estimate directional organization, dominant angle, and orientation entropy in the raw signal.",
+                    "Use for fibres, stripes, elongated processes, or other aligned structures within each slice or MIP."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.PERIODICITY) {
+            return new String[]{
+                    "Uses a 2D frequency spectrum to estimate repeating wavelength, stripe angle, stripiness, and peak spectral power.",
+                    "Use when the image may contain regular bands or repeating spacing. Avoid it for irregular texture where no repeat pattern is expected."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.GLCM) {
+            return new String[]{
+                    "Computes grey-level co-occurrence matrix texture: contrast, entropy, homogeneity, energy, and correlation between neighbouring pixels.",
+                    "Use for general local texture roughness or smoothness when you do not expect a single direction, hotspot, or repeating period."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.TEXTURECLASS) {
+            return new String[]{
+                    "Clusters per-pixel intensity and texture features into the configured number of classes and reports the fraction in each class.",
+                    "Use for exploratory comparisons of mixed texture states. Class numbers are relative labels, so interpret them alongside representative images."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.SCALEDIVERGENCE) {
+            return new String[]{
+                    "Summarises how intensity mass changes across box sizes using bounded multifractal-style delta-alpha and asymmetry values.",
+                    "Use for exploratory scale-free or multi-scale heterogeneity questions, especially when signal organisation is not captured by one tile size."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.CROSSCORR_FAST) {
+            return new String[]{
+                    "Measures direct Pearson correlation plus the strongest shifted cross-correlation peak between two channels.",
+                    "Use as a quick cross-channel screen for co-variation or small spatial offsets. It avoids the heavier Coloc 2 calculations."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.CROSSMARK) {
+            return new String[]{
+                    "Runs full 2D cross-channel association: Pearson, shifted cross-correlation, mark correlation, Costes randomisation, and Manders overlap where available.",
+                    "Use for formal colocalisation or marker-association questions. It is slower than fast correlation and benefits from meaningful thresholds."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.ENTROPY_MI) {
+            return new String[]{
+                    "Measures normalised mutual information and the strongest shifted mutual-information peak between two channels.",
+                    "Use when channels may be related non-linearly, for example one marker increases with another but not in a simple straight-line correlation."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL) {
+            return new String[]{
+                    "Measures source-channel mean intensity in 2D distance shells around a partner channel's binarised mask, plus shell slope and area under the curve.",
+                    "Use for halo, rim, exclusion, or proximity questions around a segmented partner signal. Requires at least one binarised channel."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.ANISOTROPY_3D) {
+            return new String[]{
+                    "Measures native 3D directional organisation through the z-stack using volumetric structure-tensor coherency, angle, and entropy.",
+                    "Use when orientation through depth matters and the stack has enough z-slices. It is slower than the 2D anisotropy option."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.CROSSMARK_3D) {
+            return new String[]{
+                    "Runs native 3D cross-channel colocalisation across the volume, including Pearson, Costes randomisation, and Manders overlap where available.",
+                    "Use for true volumetric colocalisation questions when a MIP could hide depth separation between channels."
+            };
+        }
+        if (key == IntensitySpatialConfig.AnalysisKey.DISTANCE_SHELL_3D) {
+            return new String[]{
+                    "Measures source-channel mean intensity in 3D distance shells around a partner channel's binarised volume, plus shell slope and area under the curve.",
+                    "Use for volumetric halo, rim, exclusion, or proximity questions around segmented structures. Requires a binarised partner channel and enough z-slices."
+            };
+        }
+        return new String[]{
+                "Runs the selected intensity-spatial metric and appends its columns to the intensity output.",
+                "Use when this metric matches the spatial question you want to ask for this channel or channel pair."
+        };
     }
 
     private static double positiveDoubleOrDefault(double value, double fallback) {
