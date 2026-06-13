@@ -80,10 +80,8 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JSeparator;
 import javax.swing.JTextField;
 import javax.swing.JTextArea;
-import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import java.awt.Color;
 import java.awt.Component;
@@ -818,35 +816,11 @@ public class FLASH_Pipeline implements PlugIn {
             startAnalysisStatusScan(directory, pd, statusRowsByAnalysis, statusRowsReady,
                     pendingStatuses, pendingScanner);
 
-            pd.addHeader("Current Directory");
-            final JLabel dirLabel = pd.addMessage(directory);
-            JButton changeBtn = pd.addButton("Change Directory");
-            changeBtn.addActionListener(e -> {
-                // TODO(project-home-screen): route this through ProjectHomeDialog
-                // with EDT-safe load/classify work. Keeping the builder here
-                // preserves the existing full-edit behaviour for this stage.
-                if (!confirmProjectSetupEditIfResultsExist()) {
-                    return;
-                }
-                ProjectBuilderDialog.Result picked = ProjectBuilderDialog.open(
-                        javax.swing.SwingUtilities.getWindowAncestor(changeBtn),
-                        RecentProjectsStore.resolveStoreDir(),
-                        directory == null ? null : new java.io.File(directory));
-                if (picked != null) {
-                    directory = picked.outputRoot.getAbsolutePath();
-                    fastReopen = false;
-                    dirLabel.setText("<html><body width='280'>" + directory + "</body></html>");
-                    startAnalysisStatusScan(directory, pd, statusRowsByAnalysis, statusRowsReady,
-                            pendingStatuses, pendingScanner);
-                }
-            });
-
-            addConditionStatusRow(pd);
-
             addRecipeWarningPanel(pd);
 
             final ToggleSwitch[] togglesByAnalysis = new ToggleSwitch[analyses.length];
-            pd.setNorthSlot(buildQuickStartPanel(pd, togglesByAnalysis));
+            pd.setNorthSlot(buildQuickStartPanel(pd, togglesByAnalysis,
+                    statusRowsByAnalysis, statusRowsReady, pendingStatuses, pendingScanner));
 
             addAnalysisSection(pd, "Setup", new int[]{
                     IDX_CREATE_BIN,
@@ -909,6 +883,14 @@ public class FLASH_Pipeline implements PlugIn {
                 }
                 if ("dependencies".equals(pd.getActionCommand())) {
                     showDependenciesDialog();
+                    continue;
+                }
+                if ("change_project".equals(pd.getActionCommand())) {
+                    switchProjectFromMainDialog(null);
+                    continue;
+                }
+                if ("edit_project_setup".equals(pd.getActionCommand())) {
+                    editCurrentProjectSetupFromMainDialog(null);
                     continue;
                 }
                 return null;
@@ -1031,24 +1013,27 @@ public class FLASH_Pipeline implements PlugIn {
         return sb.toString();
     }
 
-    private void addConditionStatusRow(PipelineDialog pd) {
-        LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
-        String statusText;
-        if (animals.isEmpty()) {
-            statusText = "Conditions: no animals found yet — run an analysis or set up the project.";
-        } else {
-            statusText = "Conditions: "
-                    + ConditionReviewSupport.evaluate(directory, animals).summary();
+    private String conditionStatusSummary() {
+        if (directory == null || directory.trim().isEmpty()) {
+            return "Pick a directory first.";
         }
-        pd.addMessage(statusText);
-        JButton reviewBtn = pd.addButton("Review conditions...");
-        reviewBtn.addActionListener(e -> {
-            if (directory == null) {
-                IJ.showMessage("Review conditions", "Pick a directory first.");
-                return;
-            }
-            reviewConditionsFromPicker(ResultAnimalScanner.collect(directory));
-        });
+        LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
+        if (animals.isEmpty()) {
+            return "No animals found yet - run an analysis or set up the project.";
+        }
+        return ConditionReviewSupport.evaluate(directory, animals).summary();
+    }
+
+    private void updateConditionSummaryLabel(JLabel label) {
+        String summary = conditionStatusSummary();
+        label.setText(summary);
+        label.setToolTipText(summary);
+    }
+
+    private void updateDirectorySummaryLabel(JLabel label) {
+        String fullPath = directory == null ? "" : directory;
+        label.setText(compactDirectoryPathForDisplay(fullPath));
+        label.setToolTipText(fullPath.trim().isEmpty() ? "No project selected" : fullPath);
     }
 
     private void reviewConditionsFromPicker(Set<String> animals) {
@@ -1061,6 +1046,62 @@ public class FLASH_Pipeline implements PlugIn {
         options.title = "Review condition assignments";
         options.primaryButtonText = "Save conditions";
         ConditionReviewSupport.reviewAndSave(null, directory, animals, options);
+    }
+
+    private boolean switchProjectFromMainDialog(Window owner) {
+        ProjectLaunchSelection picked = chooseProjectFromHome(owner,
+                RecentProjectsStore.resolveStoreDir());
+        return applyMainDialogProjectSelection(picked);
+    }
+
+    private boolean editCurrentProjectSetupFromMainDialog(Window owner) {
+        if (!confirmProjectSetupEditIfResultsExist()) {
+            return false;
+        }
+        ProjectBuilderDialog.Result picked = ProjectBuilderDialog.open(
+                owner,
+                RecentProjectsStore.resolveStoreDir(),
+                directory == null ? null : new java.io.File(directory));
+        return applyMainDialogProjectSelection(selectionFromBuilder(picked));
+    }
+
+    private boolean applyMainDialogProjectSelection(ProjectLaunchSelection picked) {
+        if (picked == null || picked.outputRoot == null) {
+            return false;
+        }
+        String previousDirectory = directory;
+        boolean previousFastReopen = fastReopen;
+        String nextDirectory = picked.outputRoot.getAbsolutePath();
+        if (!sameDirectoryPath(previousDirectory, nextDirectory)
+                && !PreFlightChecks.confirmProceedOnOutputFolder(nextDirectory, picked.fastReopen)) {
+            return false;
+        }
+        directory = nextDirectory;
+        fastReopen = picked.fastReopen;
+        if (!confirmInputSourceAndWarn(true)) {
+            directory = previousDirectory;
+            fastReopen = previousFastReopen;
+            return false;
+        }
+        resetProjectScopedRuntimeState();
+        return true;
+    }
+
+    private void resetProjectScopedRuntimeState() {
+        skipAutoAggregateForBatch = false;
+        releaseImageCache();
+        initAnalyses();
+    }
+
+    private static boolean sameDirectoryPath(String first, String second) {
+        if (first == null || second == null) {
+            return false;
+        }
+        try {
+            return new File(first).getCanonicalFile().equals(new File(second).getCanonicalFile());
+        } catch (IOException e) {
+            return new File(first).getAbsoluteFile().equals(new File(second).getAbsoluteFile());
+        }
     }
 
     /**
@@ -1160,22 +1201,28 @@ public class FLASH_Pipeline implements PlugIn {
         }
     }
 
-    private JPanel buildQuickStartPanel(final PipelineDialog pd, final ToggleSwitch[] togglesByAnalysis) {
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+    private JPanel buildQuickStartPanel(final PipelineDialog pd,
+                                        final ToggleSwitch[] togglesByAnalysis,
+                                        final int[] statusRowsByAnalysis,
+                                        final boolean[] statusRowsReady,
+                                        final Map<Integer, AnalysisStatus>[] pendingStatuses,
+                                        final AnalysisStatusScanner[] pendingScanner) {
+        JPanel panel = new JPanel(new java.awt.BorderLayout(18, 0));
         panel.setBackground(new Color(245, 245, 245));
         panel.setBorder(BorderFactory.createEmptyBorder(6, 20, 6, 20));
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel quickColumn = new JPanel();
+        quickColumn.setLayout(new BoxLayout(quickColumn, BoxLayout.Y_AXIS));
+        quickColumn.setOpaque(false);
+        quickColumn.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JPanel headerRow = new JPanel();
         headerRow.setLayout(new BoxLayout(headerRow, BoxLayout.X_AXIS));
         headerRow.setOpaque(false);
         headerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JLabel header = new JLabel("Quick start");
-        header.setFont(header.getFont().deriveFont(Font.BOLD, 13f));
-        header.setForeground(new Color(55, 71, 79));
-        headerRow.add(header);
+        headerRow.add(topPanelHeaderLabel("Quick start"));
         headerRow.add(Box.createHorizontalStrut(6));
 
         final JButton helpBtn = HelpButton.question("Open FLASH help and workflow advice.");
@@ -1190,14 +1237,8 @@ public class FLASH_Pipeline implements PlugIn {
         });
         headerRow.add(helpBtn);
         headerRow.add(Box.createHorizontalGlue());
-        panel.add(headerRow);
-        panel.add(Box.createVerticalStrut(4));
-
-        JSeparator separator = new JSeparator(SwingConstants.HORIZONTAL);
-        separator.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 1));
-        separator.setAlignmentX(Component.LEFT_ALIGNMENT);
-        panel.add(separator);
-        panel.add(Box.createVerticalStrut(5));
+        quickColumn.add(headerRow);
+        quickColumn.add(Box.createVerticalStrut(5));
 
         final JLabel recipeCaption = new JLabel(
                 "<html><body width='300'>Pick a recipe or tick analyses individually.</body></html>");
@@ -1229,13 +1270,13 @@ public class FLASH_Pipeline implements PlugIn {
         buttonRows.setAlignmentX(Component.LEFT_ALIGNMENT);
         buttonRows.add(recipeButtonRow(standardRecipeBtn, quickCountRecipeBtn));
         buttonRows.add(Box.createVerticalStrut(2));
-        buttonRows.add(recipeButtonRow(fullRecipeBtn, lastRunRecipeBtn, customRecipeBtn));
-        buttonRows.add(Box.createVerticalStrut(2));
-        buttonRows.add(recipeButtonRow(presentationRecipeBtn));
+        buttonRows.add(recipeButtonRow(fullRecipeBtn, presentationRecipeBtn));
         buttonRows.add(Box.createVerticalStrut(2));
         buttonRows.add(recipeButtonRow(fastPresentableResultsBtn));
         buttonRows.add(Box.createVerticalStrut(2));
         buttonRows.add(recipeButtonRow(saveRecipeBtn));
+        buttonRows.add(Box.createVerticalStrut(2));
+        buttonRows.add(recipeButtonRow(lastRunRecipeBtn, customRecipeBtn));
 
         standardRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "standard-3d-intensity"));
         quickCountRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "quick-cell-count"));
@@ -1254,11 +1295,142 @@ public class FLASH_Pipeline implements PlugIn {
         });
         saveRecipeBtn.addActionListener(e -> saveCurrentSelectionAsRecipe(pd, togglesByAnalysis));
 
-        panel.add(buttonRows);
-        panel.add(Box.createVerticalStrut(3));
+        quickColumn.add(buttonRows);
+        quickColumn.add(Box.createVerticalStrut(3));
+        quickColumn.add(recipeCaption);
 
-        panel.add(recipeCaption);
+        panel.add(quickColumn, java.awt.BorderLayout.WEST);
+        panel.add(buildProjectSummaryPanel(pd, statusRowsByAnalysis, statusRowsReady,
+                pendingStatuses, pendingScanner), java.awt.BorderLayout.CENTER);
+
         return panel;
+    }
+
+    @SuppressWarnings("unchecked")
+    private JPanel buildQuickStartPanel(final PipelineDialog pd, final ToggleSwitch[] togglesByAnalysis) {
+        final int[] statusRowsByAnalysis = new int[analyses.length];
+        Arrays.fill(statusRowsByAnalysis, -1);
+        final boolean[] statusRowsReady = new boolean[]{false};
+        final Map<Integer, AnalysisStatus>[] pendingStatuses = new Map[1];
+        final AnalysisStatusScanner[] pendingScanner = new AnalysisStatusScanner[1];
+        return buildQuickStartPanel(pd, togglesByAnalysis, statusRowsByAnalysis, statusRowsReady,
+                pendingStatuses, pendingScanner);
+    }
+
+    private JPanel buildProjectSummaryPanel(final PipelineDialog pd,
+                                            final int[] statusRowsByAnalysis,
+                                            final boolean[] statusRowsReady,
+                                            final Map<Integer, AnalysisStatus>[] pendingStatuses,
+                                            final AnalysisStatusScanner[] pendingScanner) {
+        JPanel summaryColumn = new JPanel();
+        summaryColumn.setLayout(new BoxLayout(summaryColumn, BoxLayout.Y_AXIS));
+        summaryColumn.setOpaque(false);
+        summaryColumn.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        final JLabel directoryLabel = topPanelValueLabel("");
+        updateDirectorySummaryLabel(directoryLabel);
+        final JLabel conditionsLabel = topPanelValueLabel("");
+        updateConditionSummaryLabel(conditionsLabel);
+
+        JButton changeBtn = new JButton("Change project...");
+        changeBtn.setFocusPainted(false);
+        changeBtn.addActionListener(e -> {
+            pd.closeWithAction("change_project");
+        });
+
+        JButton editSetupBtn = new JButton("Edit setup...");
+        editSetupBtn.setFocusPainted(false);
+        editSetupBtn.addActionListener(e -> {
+            pd.closeWithAction("edit_project_setup");
+        });
+
+        JButton reviewBtn = new JButton("Review conditions...");
+        reviewBtn.setFocusPainted(false);
+        reviewBtn.addActionListener(e -> {
+            if (directory == null) {
+                IJ.showMessage("Review conditions", "Pick a directory first.");
+                return;
+            }
+            reviewConditionsFromPicker(ResultAnimalScanner.collect(directory));
+            updateConditionSummaryLabel(conditionsLabel);
+        });
+
+        summaryColumn.add(topPanelHeaderLabel("Current Project"));
+        summaryColumn.add(Box.createVerticalStrut(5));
+        summaryColumn.add(directoryLabel);
+        summaryColumn.add(Box.createVerticalStrut(4));
+        summaryColumn.add(recipeButtonRow(changeBtn, editSetupBtn));
+        summaryColumn.add(Box.createVerticalStrut(9));
+        summaryColumn.add(topPanelHeaderLabel("Conditions"));
+        summaryColumn.add(Box.createVerticalStrut(5));
+        summaryColumn.add(conditionsLabel);
+        summaryColumn.add(Box.createVerticalStrut(4));
+        summaryColumn.add(recipeButtonRow(reviewBtn));
+        summaryColumn.add(Box.createVerticalGlue());
+        return summaryColumn;
+    }
+
+    private JLabel topPanelHeaderLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+        label.setForeground(new Color(55, 71, 79));
+        label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return label;
+    }
+
+    private JLabel topPanelValueLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(label.getFont().deriveFont(Font.PLAIN, 11f));
+        label.setForeground(new Color(33, 33, 33));
+        label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        label.setMaximumSize(new java.awt.Dimension(320, 18));
+        return label;
+    }
+
+    static String compactDirectoryPathForDisplay(String path) {
+        return compactDirectoryPathForDisplay(path, 46);
+    }
+
+    static String compactDirectoryPathForDisplay(String path, int maxChars) {
+        if (path == null || path.trim().isEmpty()) {
+            return "No project selected";
+        }
+        String trimmed = path.trim();
+        if (maxChars <= 0 || trimmed.length() <= maxChars) {
+            return trimmed;
+        }
+
+        String separator = trimmed.indexOf('\\') >= 0 ? "\\" : "/";
+        String[] rawParts = trimmed.split("[\\\\/]+");
+        List<String> parts = new ArrayList<String>();
+        for (String part : rawParts) {
+            if (part != null && !part.isEmpty()) {
+                parts.add(part);
+            }
+        }
+        if (parts.isEmpty()) {
+            return trimmed.substring(Math.max(0, trimmed.length() - maxChars));
+        }
+
+        String prefix = "..." + separator;
+        String tail = parts.get(parts.size() - 1);
+        for (int i = parts.size() - 2; i >= 0; i--) {
+            String candidate = parts.get(i) + separator + tail;
+            if ((prefix + candidate).length() > maxChars) {
+                break;
+            }
+            tail = candidate;
+        }
+
+        String compact = prefix + tail;
+        if (compact.length() <= maxChars) {
+            return compact;
+        }
+        int availableTailChars = maxChars - prefix.length();
+        if (availableTailChars <= 0) {
+            return trimmed.substring(Math.max(0, trimmed.length() - maxChars));
+        }
+        return prefix + tail.substring(Math.max(0, tail.length() - availableTailChars));
     }
 
     private JPanel recipeButtonRow(JButton first) {
@@ -1751,6 +1923,10 @@ public class FLASH_Pipeline implements PlugIn {
 
     private void reportGuiStepFailure(String label, Throwable t) {
         String context = label == null || label.trim().isEmpty() ? "FLASH" : label.trim();
+        if (t instanceof NoClassDefFoundError
+                && PluginInstallGuard.reportMissingInternalClass(context, (NoClassDefFoundError) t)) {
+            return;
+        }
         String message = describeThrowable(t);
         IJ.log("[FLASH] " + context + " FAILED: " + message);
         try {
@@ -2563,6 +2739,7 @@ public class FLASH_Pipeline implements PlugIn {
     private void releaseImageCache() {
         if (imageCache == null) return;
         imageCache.release();
+        imageCache = null;
     }
 
     private void initAnalyses() {

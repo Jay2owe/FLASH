@@ -16,6 +16,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.io.File;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -136,6 +137,7 @@ public class FLASH_PipelineRecipeTest {
             JButton presentation = findButton(quickStart, "Presentation");
             JButton fastPresentableResults = findButton(quickStart, "Fast Presentable Results");
             JButton lastRun = findButton(quickStart, "Last run");
+            JButton clear = findButton(quickStart, "Clear Recipe");
             JButton save = findButton(quickStart, "Save selection as recipe...");
             JButton help = findButton(quickStart, "?");
             JLabel caption = findLabelContaining(quickStart, "Pick a recipe");
@@ -144,12 +146,13 @@ public class FLASH_PipelineRecipeTest {
             assertNotNull(presentation);
             assertNotNull(fastPresentableResults);
             assertNotNull(lastRun);
+            assertNotNull(clear);
             assertNotNull(save);
             assertNotNull(help);
             assertNotNull(caption);
             assertSame(standard, standard.getParent().getComponent(0));
-            assertSame(findButton(quickStart, "Full pipeline").getParent(), lastRun.getParent());
-            assertSame(presentation, presentation.getParent().getComponent(0));
+            assertSame(findButton(quickStart, "Full pipeline").getParent(), presentation.getParent());
+            assertSame(lastRun.getParent(), clear.getParent());
             assertSame(fastPresentableResults, fastPresentableResults.getParent().getComponent(0));
             assertEquals(Component.LEFT_ALIGNMENT, caption.getAlignmentX(), 0.001f);
             assertEquals(new Color(232, 245, 253), save.getBackground());
@@ -158,6 +161,58 @@ public class FLASH_PipelineRecipeTest {
             assertEquals(save.getForeground(), help.getForeground());
             assertTrue(save.isOpaque());
             assertTrue(save.isContentAreaFilled());
+        } finally {
+            dialog.closeWithAction("test");
+        }
+    }
+
+    @Test
+    public void quickStartDirectoryShowsTailAndKeepsFullPathTooltip() throws Exception {
+        File project = temp.newFolder("Amyloid Project", "2, 4, and 8 Weeks", "MOAB-2.AF488");
+        String fullPath = project.getAbsolutePath();
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        setDirectory(pipeline, fullPath);
+        PipelineDialog dialog = new PipelineDialog("Recipes");
+        try {
+            JPanel quickStart = quickStartPanel(pipeline, dialog);
+            JLabel directory = findLabelContaining(quickStart, "MOAB-2.AF488");
+
+            assertNotNull(directory);
+            assertEquals("...\\2, 4, and 8 Weeks\\MOAB-2.AF488", directory.getText());
+            assertEquals(fullPath, directory.getToolTipText());
+        } finally {
+            dialog.closeWithAction("test");
+        }
+    }
+
+    @Test
+    public void quickStartProjectSwitchButtonReturnsChangeProjectAction() throws Exception {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        PipelineDialog dialog = new PipelineDialog("Recipes");
+        try {
+            JPanel quickStart = quickStartPanel(pipeline, dialog);
+
+            assertNotNull(findLabelContaining(quickStart, "Current Project"));
+            assertNotNull(findButton(quickStart, "Edit setup..."));
+
+            findButton(quickStart, "Change project...").doClick();
+
+            assertEquals("change_project", dialog.getActionCommand());
+        } finally {
+            dialog.closeWithAction("test");
+        }
+    }
+
+    @Test
+    public void quickStartEditSetupButtonReturnsEditAction() throws Exception {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        PipelineDialog dialog = new PipelineDialog("Recipes");
+        try {
+            JPanel quickStart = quickStartPanel(pipeline, dialog);
+
+            findButton(quickStart, "Edit setup...").doClick();
+
+            assertEquals("edit_project_setup", dialog.getActionCommand());
         } finally {
             dialog.closeWithAction("test");
         }
@@ -241,6 +296,12 @@ public class FLASH_PipelineRecipeTest {
                 "buildQuickStartPanel", PipelineDialog.class, ToggleSwitch[].class);
         method.setAccessible(true);
         return (JPanel) method.invoke(pipeline, dialog, toggles);
+    }
+
+    private static void setDirectory(FLASH_Pipeline pipeline, String directory) throws Exception {
+        Field field = FLASH_Pipeline.class.getDeclaredField("directory");
+        field.setAccessible(true);
+        field.set(pipeline, directory);
     }
 
     private static JButton findButton(Container container, String text) {
