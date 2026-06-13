@@ -11,6 +11,7 @@ import flash.pipeline.runrecord.LoadedRunParameterApplier;
 import flash.pipeline.runrecord.LoadedRunParameters;
 import flash.pipeline.runrecord.ui.LoadFromRunButton;
 import flash.pipeline.ui.NextStepLabels;
+import flash.pipeline.ui.CardChoice;
 import flash.pipeline.ui.PipelineDialog;
 import ij.IJ;
 
@@ -124,8 +125,23 @@ public class SpectralDecontaminationDialog {
         dialog.addComponent(presetRow);
 
         dialog.addHeader("Goal");
-        dialog.addChoice("Goal", SpectralDecontaminationConfig.Goal.labels(),
-                config.getGoal().getLabel());
+        final String goalDefault = config.getGoal().getLabel();
+        final String goalImage = SpectralDecontaminationConfig.Goal.CREATE_CLEANED_IMAGE.getLabel();
+        final String goalMask = SpectralDecontaminationConfig.Goal.CREATE_CLEANED_MASK.getLabel();
+        final String goalScore = SpectralDecontaminationConfig.Goal.SCORE_EXISTING_OBJECTS.getLabel();
+        final String goalMeasure = SpectralDecontaminationConfig.Goal.MEASURE_CLEANED_SIGNAL_ONLY.getLabel();
+        dialog.addCardChoice(null,
+                new CardChoice.Option[]{
+                        new CardChoice.Option(goalImage, "Cleaned image", "Write a corrected stack",
+                                "microscope", goalImage.equals(goalDefault) ? "Default" : null),
+                        new CardChoice.Option(goalMask, "Cleaned mask", "Write a binary cleaned mask",
+                                "stack-2", goalMask.equals(goalDefault) ? "Default" : null),
+                        new CardChoice.Option(goalScore, "Score objects", "Score existing object maps",
+                                "chart-bar", goalScore.equals(goalDefault) ? "Default" : null),
+                        new CardChoice.Option(goalMeasure, "Measure only", "Measure cleaned signal only",
+                                "ruler-2", goalMeasure.equals(goalDefault) ? "Default" : null),
+                },
+                goalDefault);
 
         dialog.addHeader("Target Channel");
         dialog.addChoice("Target channel", channelChoices,

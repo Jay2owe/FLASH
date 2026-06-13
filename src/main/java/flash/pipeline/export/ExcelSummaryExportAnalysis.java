@@ -17,6 +17,8 @@ import flash.pipeline.results.StartHereWriter;
 import flash.pipeline.runrecord.AnalysisRunContext;
 import flash.pipeline.runrecord.RunRecordAware;
 
+import flash.pipeline.ui.CardChoice;
+import flash.pipeline.ui.CardListChoice;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.ui.wizard.ConditionReviewSupport;
@@ -323,7 +325,6 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
      * Main-panel configuration dialog. Shows only:
      * <ul>
      *   <li>Preset dropdown populated from the FLASH preset directory.</li>
-     *   <li>{@code [Save as preset...]} button.</li>
      *   <li>Read-only preview label listing which sheets the preset will emit.</li>
      * </ul>
      * Returns the chosen preset on OK, or {@code null} on Cancel.
@@ -341,18 +342,15 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         pd.setWorkflowTracker(excelWorkflow(projectRoot), 0);
         pd.addHeader("Preset");
 
-        // Custom row: Preset combo + Save-as-preset button (kept out of the
-        // combos retrieval list so retrieval order stays clean).
-        final JComboBox<String> presetCombo = new JComboBox<String>();
-        populatePresetChoice(presetCombo, presetIO, selected[0].getName());
-        final JButton saveButton = new JButton("Save as preset...");
-        flash.pipeline.ui.FlashIcons.apply(saveButton, flash.pipeline.ui.FlashIcons.save());
-        JPanel presetRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        presetRow.setOpaque(false);
-        presetRow.add(new JLabel("Preset:"));
-        presetRow.add(presetCombo);
-        presetRow.add(saveButton);
-        pd.addComponent(presetRow);
+        // Preset chooser: a scrollable card list of every stock + saved preset.
+        // Its backing combo is the single source of truth, so the listener below
+        // (and the rest of the form sync) drive off presetCombo exactly as a
+        // dropdown would. It is kept out of the combos retrieval list so
+        // PipelineDialog's retrieval order stays clean.
+        final CardListChoice presetList = new CardListChoice(
+                buildPresetRows(presetIO), selected[0].getName());
+        final JComboBox<String> presetCombo = presetList.comboBox();
+        pd.addComponent(presetList);
 
         final JLabel previewLabel = pd.addMessage(buildPreviewHtml(selected[0]));
 
@@ -378,12 +376,19 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         final String highlightOff = "Off";
         final String highlightYellow = "Yellow";
         final String highlightGradient = "P-gradient";
-        final String[] highlightOptions = { highlightOff, highlightYellow, highlightGradient };
-        final JComboBox<String> highlightCombo = pd.addChoice(
-                "Statistics highlight",
-                highlightOptions,
-                highlightLabel(selected[0].getSignificanceHighlight(),
-                        highlightOff, highlightYellow, highlightGradient));
+        final String highlightDefault = highlightLabel(selected[0].getSignificanceHighlight(),
+                highlightOff, highlightYellow, highlightGradient);
+        final JComboBox<String> highlightCombo = pd.addCardChoice(
+                "Significance highlight",
+                new CardChoice.Option[]{
+                        new CardChoice.Option(highlightOff, "Off", "Plain cells, no fill", "close-x",
+                                highlightOff.equals(highlightDefault) ? "Default" : null),
+                        new CardChoice.Option(highlightYellow, "Yellow", "Flat yellow on hits", "palette",
+                                highlightYellow.equals(highlightDefault) ? "Default" : null),
+                        new CardChoice.Option(highlightGradient, "P-gradient", "Shade by p-value depth", "chart-bar",
+                                highlightGradient.equals(highlightDefault) ? "Default" : null),
+                },
+                highlightDefault);
 
         final ToggleSwitch starsToggle = pd.addToggle(
                 "Significance stars (e.g. *, **, ***)",
@@ -492,64 +497,28 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             }
         });
 
-        saveButton.addActionListener(e -> {
-            String proposed = (String) JOptionPane.showInputDialog(
-                    null,
-                    "Name for saved preset:",
-                    "Save Excel Preset",
-                    JOptionPane.PLAIN_MESSAGE,
-                    null, null,
-                    selected[0].getName());
-            if (proposed == null || proposed.trim().isEmpty()) return;
-            ExcelExportPreset source = selected[0];
-            ExcelExportPreset toSave = new ExcelExportPreset(
-                    proposed.trim(), source.getDescription(),
-                    source.isIncludeExperimentalConditionsSheet(),
-                    source.isIncludeDataSummarySheet(),
-                    source.isIncludePerMetricSheets(),
-                    source.isIncludeStatisticsSheet(),
-                    source.getMetricSheetDetail(),
-                    source.isIncludeMethodsAppendix(),
-                    source.getSignificanceHighlight(),
-                    source.getHeaderStyle(),
-                    source.isSignificanceStars(),
-                    source.isIncludeTextureFeatures());
-            try {
-                presetIO.save(toSave);
-                selected[0] = toSave;
-                populatePresetChoice(presetCombo, presetIO, toSave.getName());
-                previewLabel.setText(buildPreviewHtml(toSave));
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(null,
-                        "Could not save preset: " + ex.getMessage(),
-                        "Save Excel Preset", JOptionPane.ERROR_MESSAGE);
-            }
-        });
-
         boolean accepted = pd.showDialog();
         return accepted ? selected[0] : null;
     }
 
-    private static void populatePresetChoice(JComboBox<String> combo,
-                                             ExcelExportPresetIO presetIO,
-                                             String selectedName) {
-        combo.removeAllItems();
-        String match = null;
+    /**
+     * Builds one preset card row per stock + saved preset, in the order {@link
+     * ExcelExportPresetIO#listAll()} returns them. The exploratory default is
+     * tagged with a green "Default" chip.
+     */
+    private static CardListChoice.Row[] buildPresetRows(ExcelExportPresetIO presetIO) {
+        String defaultName = ExcelExportPreset.exploratoryDefault().getName();
+        List<CardListChoice.Row> rows = new ArrayList<CardListChoice.Row>();
         try {
             for (ExcelExportPreset preset : presetIO.listAll()) {
-                combo.addItem(preset.getName());
-                if (selectedName != null && selectedName.equals(preset.getName())) {
-                    match = preset.getName();
-                }
+                String chip = defaultName.equals(preset.getName()) ? "Default" : null;
+                rows.add(new CardListChoice.Row(preset.getName(), preset.getName(),
+                        preset.getDescription(), chip));
             }
         } catch (IOException e) {
             IJ.log("Could not list excel presets: " + e.getMessage());
         }
-        if (match != null) {
-            combo.setSelectedItem(match);
-        } else if (combo.getItemCount() > 0) {
-            combo.setSelectedIndex(0);
-        }
+        return rows.toArray(new CardListChoice.Row[0]);
     }
 
     private static String highlightLabel(ExcelExportPreset.SignificanceHighlight value,

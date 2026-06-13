@@ -3,6 +3,8 @@ package flash.pipeline.decontamination;
 import flash.pipeline.analyses.Analysis;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.bin.BinField;
+import flash.pipeline.bin.BinSetupDispatcher;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.decontamination.wizard.SpectralDecontamPreset;
 import flash.pipeline.decontamination.wizard.SpectralDecontaminationSetup;
@@ -22,6 +24,7 @@ import flash.pipeline.runrecord.RunRecordAware;
 import flash.pipeline.runtime.DependencyId;
 import flash.pipeline.runtime.FeatureDependencyGate;
 import flash.pipeline.ui.NextStepLabels;
+import flash.pipeline.ui.CardChoice;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
 import flash.pipeline.zslice.ZSliceRange;
@@ -30,10 +33,12 @@ import ij.ImagePlus;
 import ij.ImageStack;
 import ij.process.ImageProcessor;
 
+import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -81,6 +86,11 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
     @Override
     public boolean requiresHeadedMode() {
         return true;
+    }
+
+    @Override
+    public Set<BinField> requiredBinFields() {
+        return EnumSet.of(BinField.CHANNEL_NAMES);
     }
 
     @Override
@@ -164,15 +174,37 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
             IJ.log("QC report enabled: " + (qualityReport != null && qualityReport.isEnabled()));
         }
 
-        BinConfig binConfig;
+        BinSetupDispatcher.Outcome setupOutcome;
         try {
-            binConfig = loadBinConfig(directory);
-        } catch (IOException e) {
-            String message = "Could not read channel names from channel_config.json. "
-                    + "Run Set Up Configuration before Spectral Decontamination. " + e.getMessage();
+            setupOutcome = BinSetupDispatcher.ensure(
+                    directory, TITLE, requiredBinFields(),
+                    benefitsFromRois(), suppressDialogs, cliConfig);
+        } catch (IllegalArgumentException e) {
+            String detail = e.getMessage() == null ? "Missing channel_names." : e.getMessage();
+            String message = "Spectral Decontamination needs channel names. "
+                    + "Run Set Up Configuration first or pass channel_names=... in headless mode. "
+                    + detail;
             IJ.log("Spectral Decontamination: " + message);
             recordWarn(message);
-            if (!headless && !suppressDialogs) {
+            if (!headless && !suppressDialogs && !GraphicsEnvironment.isHeadless()) {
+                IJ.showMessage("Spectral Decontamination", message);
+            }
+            return;
+        }
+        if (setupOutcome == BinSetupDispatcher.Outcome.CANCELLED) {
+            String message = "Spectral Decontamination setup cancelled by user.";
+            IJ.log("[FLASH] " + message);
+            recordWarn(message);
+            return;
+        }
+
+        BinConfig binConfig = loadBinConfig(directory);
+        if (!binConfig.hasChannelNames()) {
+            String message = "Spectral Decontamination needs channel names. "
+                    + "Run Set Up Configuration first or use the setup prompt to enter them.";
+            IJ.log("Spectral Decontamination: " + message);
+            recordWarn(message);
+            if (!headless && !suppressDialogs && !GraphicsEnvironment.isHeadless()) {
                 IJ.showMessage("Spectral Decontamination", message);
             }
             return;
@@ -343,8 +375,8 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         }
     }
 
-    BinConfig loadBinConfig(String directory) throws IOException {
-        return BinConfigIO.readFromDirectory(directory);
+    BinConfig loadBinConfig(String directory) {
+        return BinConfigIO.readPartialFromDirectory(directory);
     }
 
     private InteractiveSetupResult completeInteractiveSetup(String directory,
@@ -2354,9 +2386,23 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                 == SpectralDecontaminationConfig.ConditionSource.USE_EXISTING_CONDITION_FILE) {
             defaultLabel = SpectralDecontaminationConfig.ConditionSource.INFER_FROM_IMAGE_NAMES.getLabel();
         }
-        final JComboBox<String> sourceChoice = dialog.addChoice(
+        final String srcUseFile =
+                SpectralDecontaminationConfig.ConditionSource.USE_EXISTING_CONDITION_FILE.getLabel();
+        final String srcInfer =
+                SpectralDecontaminationConfig.ConditionSource.INFER_FROM_IMAGE_NAMES.getLabel();
+        final String srcAssign =
+                SpectralDecontaminationConfig.ConditionSource.ASSIGN_MANUALLY.getLabel();
+        final String srcDefault = defaultLabel;
+        final JComboBox<String> sourceChoice = dialog.addCardChoice(
                 "Condition source",
-                SpectralDecontaminationConfig.ConditionSource.labels(),
+                new CardChoice.Option[]{
+                        new CardChoice.Option(srcUseFile, "Use file", "Use existing CSV", "folder-open",
+                                srcUseFile.equals(srcDefault) ? "Default" : null),
+                        new CardChoice.Option(srcInfer, "Infer names", "Infer from image names", "tags",
+                                srcInfer.equals(srcDefault) ? "Default" : null),
+                        new CardChoice.Option(srcAssign, "Assign", "Assign manually", "pencil",
+                                srcAssign.equals(srcDefault) ? "Default" : null),
+                },
                 defaultLabel);
         final Runnable refreshPrimaryLabel = new Runnable() {
             @Override public void run() {
