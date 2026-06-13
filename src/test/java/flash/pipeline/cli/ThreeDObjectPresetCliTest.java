@@ -24,6 +24,22 @@ public class ThreeDObjectPresetCliTest {
     }
 
     @Test
+    public void objectRegionFilterParseAndSerialize() {
+        CLIConfig parsed = CLIArgumentParser.parse(
+                "dir=[/tmp/data] object.regions=[SCN,Cortex] object.exclude_regions=[PVN]");
+
+        assertTrue(parsed.getSelectedAnalyses()[4]);
+        assertEquals("SCN", parsed.getObject().getIncludeRegions().get(0));
+        assertEquals("Cortex", parsed.getObject().getIncludeRegions().get(1));
+        assertEquals("PVN", parsed.getObject().getExcludeRegions().get(0));
+
+        CLIConfig reparsed = CLIArgumentParser.parse(CLIArgumentParser.serialize(parsed));
+        assertEquals("SCN", reparsed.getObject().getIncludeRegions().get(0));
+        assertEquals("Cortex", reparsed.getObject().getIncludeRegions().get(1));
+        assertEquals("PVN", reparsed.getObject().getExcludeRegions().get(0));
+    }
+
+    @Test
     public void objectIntensityColocalizationAliasesParse() {
         CLIConfig snakeCase = CLIArgumentParser.parse(
                 "dir=[/tmp/data] object.do_intensity_coloc=true");

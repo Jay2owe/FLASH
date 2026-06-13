@@ -27,6 +27,22 @@ public class IntensityPresetCliTest {
     }
 
     @Test
+    public void intensityRegionFilterParseAndSerialize() {
+        CLIConfig parsed = CLIArgumentParser.parse(
+                "dir=[/tmp/data] intensity.regions=[SCN,Cortex] intensity.exclude_regions=[PVN]");
+
+        assertTrue(parsed.getSelectedAnalyses()[7]);
+        assertEquals("SCN", parsed.getIntensity().getIncludeRegions().get(0));
+        assertEquals("Cortex", parsed.getIntensity().getIncludeRegions().get(1));
+        assertEquals("PVN", parsed.getIntensity().getExcludeRegions().get(0));
+
+        CLIConfig reparsed = CLIArgumentParser.parse(CLIArgumentParser.serialize(parsed));
+        assertEquals("SCN", reparsed.getIntensity().getIncludeRegions().get(0));
+        assertEquals("Cortex", reparsed.getIntensity().getIncludeRegions().get(1));
+        assertEquals("PVN", reparsed.getIntensity().getExcludeRegions().get(0));
+    }
+
+    @Test
     public void intensitySpatialPresetDefaultsMergeWithExplicitCliOverrides() {
         IntensitySpatialConfig preset = IntensitySpatialConfig.builder()
                 .enabled(true)
