@@ -8,6 +8,7 @@ import flash.pipeline.ui.PipelineDialog;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Validator for ROI Manager contents.
@@ -110,6 +111,14 @@ public final class RoiSetValidator {
 
     /** Structural validation over an explicit ROI list (testable without a RoiManager). */
     public static void validateStructural(List<Roi> rois) {
+        validateStructural(rois, null);
+    }
+
+    /**
+     * Structural validation over an explicit ROI list, optionally constrained to a
+     * known project-token set. Passing {@code null} skips the project-token check.
+     */
+    public static void validateStructural(List<Roi> rois, Set<String> allowedTokens) {
         if (rois == null || rois.isEmpty()) {
             throw new IllegalStateException("ROI set is empty.");
         }
@@ -135,6 +144,14 @@ public final class RoiSetValidator {
             throw new IllegalStateException("ROI set has " + rois.size() + " ROIs but "
                     + byToken.size() + " image tokens; expected exactly 2 per token (drawn + "
                     + "cropped). Duplicate or unbound ROIs are present.");
+        }
+        if (allowedTokens != null) {
+            for (String token : byToken.keySet()) {
+                if (!allowedTokens.contains(token)) {
+                    throw new IllegalStateException(
+                            "ROI token " + token + " is not part of the current project image set.");
+                }
+            }
         }
     }
 
