@@ -1,0 +1,47 @@
+{
+  "name": "DAPI + IBA1 + GFAP (standard triple)",
+  "description": "Nuclear counterstain plus microglia and astrocyte markers.",
+  "libraryVersion": "1",
+  "zSliceMode": "FULL",
+  "channels": [
+    {
+      "name": "DAPI",
+      "color": "Blue",
+      "objectThreshold": "5",
+      "particleSize": "20-5000",
+      "displayRange": "250-65535",
+      "intensityThreshold": "20",
+      "segmentationMethod": "classical",
+      "filterPreset": "Clustered Small",
+      "markerId": "nuclei_dapi",
+      "shape": "round",
+      "crowdingSensitive": true
+    },
+    {
+      "name": "IBA1",
+      "color": "Green",
+      "objectThreshold": "5",
+      "particleSize": "100-50000",
+      "displayRange": "100-65535",
+      "intensityThreshold": "10",
+      "segmentationMethod": "classical",
+      "filterPreset": "Ramified Cells (Microglia/Astrocytes)",
+      "markerId": "microglia_iba1",
+      "shape": "complex",
+      "crowdingSensitive": true
+    },
+    {
+      "name": "GFAP",
+      "color": "Red",
+      "objectThreshold": "10",
+      "particleSize": "500-250000",
+      "displayRange": "250-65535",
+      "intensityThreshold": "20",
+      "segmentationMethod": "classical",
+      "filterPreset": "Ramified Cells (Microglia/Astrocytes)",
+      "markerId": "astrocytes_gfap",
+      "shape": "complex",
+      "crowdingSensitive": true
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+package flash.pipeline.help;
+
+import flash.pipeline.FLASH_Pipeline;
+import org.junit.Test;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+public class AnalysisDialogHelpAttachmentTest {
+
+    @Test
+    public void requiredAnalysisDialogsAttachCatalogHelpTopics() throws Exception {
+        assertSourceContains("src/main/java/flash/pipeline/analyses/CreateBinFileAnalysis.java",
+                helpCall("Set Up Configuration", "IDX_CREATE_BIN"));
+        assertSourceContains("src/main/java/flash/pipeline/analyses/DrawAndSaveROIsAnalysis.java",
+                helpCall("Draw ROIs and Orientate Images", "IDX_DRAW_ROIS"));
+        assertSourceContains("src/main/java/flash/pipeline/analyses/SplitAndMergeImageChannelsAnalysis.java",
+                helpCall("Make Presentation Images", "IDX_SPLIT_MERGE"));
+        assertSourceContains("src/main/java/flash/pipeline/analyses/IntensityAnalysisV2.java",
+                helpCall("Fluorescence Intensity Analysis", "IDX_INTENSITY"));
+        assertSourceContains("src/main/java/flash/pipeline/analyses/ThreeDObjectAnalysis.java",
+                helpCall("3D Object Analysis", "IDX_3D_OBJECT"));
+        assertSourceContains("src/main/java/flash/pipeline/analyses/SpatialAnalysis.java",
+                helpCall("Spatial Analysis", "IDX_SPATIAL"));
+    }
+
+    @Test
+    public void multiPageDialogsKeepHelpOnBackPages() throws Exception {
+        assertSourceContains("src/main/java/flash/pipeline/analyses/CreateBinFileAnalysis.java",
+                "fork.addSetupHelpHeader(\"Settings Mode\", SetupHelpCatalog.SETTINGS_MODE);");
+        assertSourceContains("src/main/java/flash/pipeline/analyses/CreateBinFileAnalysis.java",
+                "sdDialog.addAnalysisHelpHeader(\"Set Up Configuration\", FLASH_Pipeline.IDX_CREATE_BIN);");
+        assertSourceContains("src/main/java/flash/pipeline/analyses/CreateBinFileAnalysis.java",
+                "cpDialog.addAnalysisHelpHeader(\"Set Up Configuration\", FLASH_Pipeline.IDX_CREATE_BIN);");
+        assertSourceContains("src/main/java/flash/pipeline/analyses/CreateBinFileAnalysis.java",
+                "gdSize.addAnalysisHelpHeader(\"Set Up Configuration\", FLASH_Pipeline.IDX_CREATE_BIN);");
+        assertSourceContains("src/main/java/flash/pipeline/analyses/IntensityAnalysisV2.java",
+                "gd2.addAnalysisHelpHeader(\"Fluorescence Intensity Analysis\", FLASH_Pipeline.IDX_INTENSITY);");
+        assertSourceContains("src/main/java/flash/pipeline/analyses/ThreeDObjectAnalysis.java",
+                "gdPA.addAnalysisHelpHeader(\"3D Object Analysis\", FLASH_Pipeline.IDX_3D_OBJECT);");
+    }
+
+    /**
+     * The per-section "?" buttons in the Spatial dialog were consolidated into the
+     * single analysis "?", whose dialog now carries a collapsible controls manual.
+     * Verify the manual documents a control from every former section instead.
+     */
+    @Test
+    public void spatialSectionControlsAreDocumentedInControlsManual() {
+        ControlHelpTopic topic = ControlsHelpCatalog.forAnalysis(FLASH_Pipeline.IDX_SPATIAL);
+        assertTrue("Spatial controls manual is missing", topic != null);
+        assertControlDocumented(topic, "Nearest neighbor distances");
+        assertControlDocumented(topic, "Volumetric overlap");
+        assertControlDocumented(topic, "Bounding-box overlap");
+        assertControlDocumented(topic, "Voronoi territory analysis");
+        assertControlDocumented(topic, "3D shape features");
+        assertControlDocumented(topic, "K-means clustering");
+        assertControlDocumented(topic, "Generate density heatmaps");
+    }
+
+    private static void assertControlDocumented(ControlHelpTopic topic, String label) {
+        for (ControlHelpTopic.Group group : topic.groups) {
+            for (ControlHelpTopic.Control control : group.controls) {
+                if (control.label.equals(label)) {
+                    return;
+                }
+            }
+        }
+        fail("control not documented in the Spatial controls manual: " + label);
+    }
+
+    @Test
+    public void attachedDialogTopicsExistInCatalog() {
+        assertCatalogTopic(FLASH_Pipeline.IDX_CREATE_BIN);
+        assertCatalogTopic(FLASH_Pipeline.IDX_DRAW_ROIS);
+        assertCatalogTopic(FLASH_Pipeline.IDX_SPLIT_MERGE);
+        assertCatalogTopic(FLASH_Pipeline.IDX_INTENSITY);
+        assertCatalogTopic(FLASH_Pipeline.IDX_3D_OBJECT);
+        assertCatalogTopic(FLASH_Pipeline.IDX_SPATIAL);
+    }
+
+    private static void assertCatalogTopic(int analysisIndex) {
+        assertTrue("missing reusable help topic for analysis index " + analysisIndex,
+                AnalysisHelpCatalog.hasTopic(analysisIndex));
+    }
+
+    private static void assertSourceContains(String path, String expected) throws Exception {
+        String source = new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8);
+        assertTrue(path + " should contain " + expected, source.contains(expected));
+    }
+
+    private static String helpCall(String title, String indexConstant) {
+        return "addAnalysisHelpHeader(\"" + title + "\", FLASH_Pipeline." + indexConstant + ")";
+    }
+}

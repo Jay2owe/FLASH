@@ -1,0 +1,219 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "modelKey": "stardist_versatile_fluo",
+      "name": "StarDist - Versatile fluorescent nuclei",
+      "description": "General 2D fluorescent nuclei model from the StarDist Fiji plugin.",
+      "engine": "stardist",
+      "source": "stock_resource",
+      "resourcePath": "models/2D/dsb2018_heavy_augment.zip",
+      "fijiModelChoice": "Versatile (fluorescent nuclei)",
+      "defaults": {
+        "probThresh": 0.479071,
+        "nmsThresh": 0.3
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "stardist_dsb2018_paper",
+      "name": "StarDist - DSB 2018 paper",
+      "description": "StarDist DSB 2018 model from the original 2D paper.",
+      "engine": "stardist",
+      "source": "stock_resource",
+      "resourcePath": "models/2D/dsb2018_paper.zip",
+      "fijiModelChoice": "DSB 2018 (from StarDist 2D paper)",
+      "defaults": {
+        "probThresh": 0.417819,
+        "nmsThresh": 0.5
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "stardist_he_nuclei",
+      "name": "StarDist - H&E nuclei",
+      "description": "StarDist H&E nuclei model. Advanced RGB-oriented stock option.",
+      "engine": "stardist",
+      "source": "stock_resource",
+      "resourcePath": "models/2D/he_heavy_augment.zip",
+      "fijiModelChoice": "Versatile (H&E nuclei)",
+      "defaults": {
+        "probThresh": 0.692478,
+        "nmsThresh": 0.3
+      },
+      "metadata": {
+        "advanced": true,
+        "rgbOnly": true
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_cyto3",
+      "name": "Cellpose - cyto3",
+      "description": "Recommended first-pass model for irregular whole-cell bodies and glial soma.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "cyto3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": true
+    },
+    {
+      "modelKey": "cellpose_cyto2",
+      "name": "Cellpose - cyto2",
+      "description": "Legacy whole-cell model that can perform better on older cytoplasmic datasets.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "cyto2",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": true
+    },
+    {
+      "modelKey": "cellpose_cyto",
+      "name": "Cellpose - cyto",
+      "description": "Older cytoplasm model. Useful mainly for legacy comparisons.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "cyto",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": true
+    },
+    {
+      "modelKey": "cellpose_nuclei",
+      "name": "Cellpose - nuclei",
+      "description": "Built for rounded nuclear objects rather than irregular whole-cell bodies.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "nuclei",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_tissuenet_cp3",
+      "name": "Cellpose - tissuenet_cp3",
+      "description": "Broad tissue-trained model. Useful when cyto3 under-segments tissue sections.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "tissuenet_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_livecell_cp3",
+      "name": "Cellpose - livecell_cp3",
+      "description": "Cultured-cell model. Usually less suitable for fixed tissue sections.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "livecell_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_yeast_PhC_cp3",
+      "name": "Cellpose - yeast_PhC_cp3",
+      "description": "Cellpose 3 phase-contrast yeast model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "yeast_PhC_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_yeast_BF_cp3",
+      "name": "Cellpose - yeast_BF_cp3",
+      "description": "Cellpose 3 brightfield yeast model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "yeast_BF_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_bact_phase_cp3",
+      "name": "Cellpose - bact_phase_cp3",
+      "description": "Cellpose 3 phase-contrast bacteria model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "bact_phase_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_bact_fluor_cp3",
+      "name": "Cellpose - bact_fluor_cp3",
+      "description": "Cellpose 3 fluorescent bacteria model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "bact_fluor_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_deepbacs_cp3",
+      "name": "Cellpose - deepbacs_cp3",
+      "description": "Cellpose 3 DeepBacs bacteria model.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "deepbacs_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": false
+    },
+    {
+      "modelKey": "cellpose_cyto2_cp3",
+      "name": "Cellpose - cyto2_cp3",
+      "description": "Cellpose 3 cyto2 model variant.",
+      "engine": "cellpose",
+      "source": "stock_builtin",
+      "pretrainedModel": "cyto2_cp3",
+      "defaults": {
+        "diameter": 30.0,
+        "flowThreshold": 0.4,
+        "cellprobThreshold": 0.0
+      },
+      "supportsSecondChannel": true
+    }
+  ]
+}

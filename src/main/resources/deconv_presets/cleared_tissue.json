@@ -1,0 +1,11 @@
+{
+  "name": "Cleared Tissue — Gibson-Lanni 20",
+  "description": "Cleared-tissue preset with Gibson-Lanni PSF and sample RI fixed to 1.46.",
+  "engineKey": "DL2",
+  "algorithm": "RL_TV",
+  "psfModel": "GIBSON_LANNI",
+  "iterations": 20,
+  "regularization": 0.01,
+  "scopeModality": "WIDEFIELD",
+  "sampleRI": 1.46
+}

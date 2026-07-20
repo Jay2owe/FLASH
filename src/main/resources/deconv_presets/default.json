@@ -1,0 +1,11 @@
+{
+  "name": "Default — Gibson-Lanni, RL 15",
+  "description": "Balanced widefield starting point with Gibson-Lanni PSF and light TV regularization.",
+  "engineKey": "DL2",
+  "algorithm": "RL_TV",
+  "psfModel": "GIBSON_LANNI",
+  "iterations": 15,
+  "regularization": 0.01,
+  "scopeModality": "WIDEFIELD",
+  "sampleRI": 1.33
+}

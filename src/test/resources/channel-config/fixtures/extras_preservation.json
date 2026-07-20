@@ -1,0 +1,47 @@
+{
+  "_comment": "Unknown root and per-channel keys are preserved through ChannelConfigCodec extras.",
+  "schemaVersion": 1,
+  "writerId": "FLASH stage 08 fixture",
+  "writtenAtMillis": 1700000004000,
+  "channels": [
+    {
+      "_comment": "Per-channel unknown keys must survive decode and re-encode.",
+      "index": 0,
+      "name": "DAPI",
+      "color": "Blue",
+      "markerId": "dapi",
+      "markerShape": "nucleus",
+      "markerCrowdingSensitive": false,
+      "threshold": "default",
+      "size": "100-Infinity",
+      "minmax": "None",
+      "intensityThreshold": "default",
+      "segmentationMethod": "classical",
+      "filterPreset": "Default",
+      "status": {
+        "name": "committed",
+        "color": "committed",
+        "marker": "committed",
+        "threshold": "committed",
+        "size": "committed",
+        "minmax": "committed",
+        "intensityThreshold": "committed",
+        "segmentation": "committed",
+        "filter": "committed"
+      },
+      "futureChannelNote": "retain me",
+      "futureChannelObject": {
+        "enabled": true,
+        "score": 4.0
+      }
+    }
+  ],
+  "zSliceMode": "FULL",
+  "zSliceSelections": {},
+  "clickCaptureUsed": false,
+  "futureRootNote": "retain me",
+  "futureRootObject": {
+    "owner": "stage-08",
+    "version": 1.0
+  }
+}

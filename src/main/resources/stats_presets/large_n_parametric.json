@@ -1,0 +1,9 @@
+{
+  "name": "Large-N parametric",
+  "description": "Sample sizes large enough that the central limit theorem applies. Forces parametric tests (Welch's t / ANOVA) with Bonferroni post-hoc.",
+  "libraryVersion": "1",
+  "pairedMode": "OFF",
+  "distributionMode": "ASSUME_NORMAL",
+  "postHocMethod": "BONFERRONI",
+  "metricFilter": null
+}

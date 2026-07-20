@@ -1,0 +1,11 @@
+{
+  "name": "Standard 3D + Intensity",
+  "description": "Count cells in 3D, measure intensity per ROI, aggregate, export.",
+  "flashVersion": "0.x",
+  "analyses": ["DrawROIs", "SplitMerge", "ThreeDObject", "Intensity", "Aggregation", "Excel"],
+  "modulePresets": {
+    "ThreeDObject": "count_coloc_standard",
+    "Intensity": "roi_mean",
+    "Excel": "Exploratory (default - all sheets, raw values)"
+  }
+}

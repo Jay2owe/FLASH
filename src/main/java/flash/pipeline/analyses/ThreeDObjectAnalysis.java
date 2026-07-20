@@ -1,0 +1,7994 @@
+package flash.pipeline.analyses;
+
+import flash.pipeline.FLASH_Pipeline;
+import flash.pipeline.bin.BinConfig;
+import flash.pipeline.bin.BinConfigIO;
+import flash.pipeline.bin.BinField;
+import flash.pipeline.bin.BinSetupDispatcher;
+import flash.pipeline.bin.ChannelConfig;
+import flash.pipeline.bin.ChannelConfigIO;
+import flash.pipeline.bin.ChannelIdentities;
+import flash.pipeline.analyses.wizard.ThreeDObjectPreset;
+import flash.pipeline.analyses.wizard.ThreeDObjectPresetIO;
+import flash.pipeline.analyses.wizard.ThreeDObjectSetupConfig;
+import flash.pipeline.analyses.wizard.SpatialSetupConfig;
+import flash.pipeline.analyses.spatial.DiskLabelImageProvider;
+import flash.pipeline.analyses.spatial.InMemoryLabelImageProvider;
+import flash.pipeline.analyses.spatial.LabelImageProvider;
+import flash.pipeline.analyses.spatial.SectionKey;
+import flash.pipeline.atlas.AtlasRegionColumns;
+import flash.pipeline.cli.CLIConfig;
+import flash.pipeline.deconv.DeconvolvedInputResolver;
+import flash.pipeline.deconv.ExpectedDeconvParams;
+import flash.pipeline.deconv.routing.DeconvConfigBridge;
+import flash.pipeline.deconv.routing.DeconvRouting;
+import flash.pipeline.deconv.routing.DeconvRoutingGroup;
+import flash.pipeline.deconv.routing.DeconvRoutingResolver;
+import flash.pipeline.cellpose.Cellpose3DRunner;
+import flash.pipeline.image.AdaptiveParallelism;
+import flash.pipeline.image.FilterExecutor;
+import flash.pipeline.image.ImageCalcOps;
+import flash.pipeline.image.ImageOps;
+import flash.pipeline.image.NamedFilterLoader;
+import flash.pipeline.image.OrientationOps;
+import flash.pipeline.image.ParallelContext;
+import flash.pipeline.image.ThresholdOps;
+import flash.pipeline.image.WindowManagerLock;
+import flash.pipeline.intelligence.ColocalizationMetrics;
+import flash.pipeline.intelligence.JunkFileFilter;
+import flash.pipeline.intelligence.MetadataDiagnostics;
+import flash.pipeline.io.AsyncImageSaver;
+import flash.pipeline.io.BoundedImageLoader;
+import flash.pipeline.io.CalibrationIO;
+import flash.pipeline.io.CsvTableIO;
+import flash.pipeline.io.DeferredImageSupplier;
+import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.io.ImageSourceDispatcher;
+import flash.pipeline.io.SeriesMeta;
+import flash.pipeline.naming.ChannelFilenameCodec;
+import flash.pipeline.naming.ImageOrientationResolver;
+import flash.pipeline.naming.ImageNameParser;
+import flash.pipeline.naming.NameParts;
+import flash.pipeline.naming.ResolvedImageMetadata;
+import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.progress.AnalysisProgressReporter;
+import flash.pipeline.recipes.RecipeReplayModelResolver;
+import flash.pipeline.results.ObjectAnalysisDetailsWriter;
+import flash.pipeline.results.ObjectCsvColumnOrder;
+import flash.pipeline.results.RunIdCsv;
+import flash.pipeline.stardist.StarDist3DRunner;
+import flash.pipeline.results.ResultsTableCleaner;
+import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.LoadedRunParameterApplier;
+import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.runrecord.ParameterSnapshot;
+import flash.pipeline.runrecord.RunRecordAware;
+import flash.pipeline.runrecord.ui.LoadFromRunButton;
+import flash.pipeline.runtime.DependencyId;
+import flash.pipeline.runtime.FeatureDependencyGate;
+import flash.pipeline.runtime.PluginInstallGuard;
+import flash.pipeline.orientation.OrientationImageIdentity;
+import flash.pipeline.roi.RegionMask;
+import flash.pipeline.roi.RegionSelectionFilter;
+import flash.pipeline.roi.RoiIO;
+import flash.pipeline.roi.RoiSetImageBinding;
+import flash.pipeline.roi.RoiSetValidator;
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationRunFailureException;
+import flash.pipeline.segmentation.SegmentationTokenParser;
+import flash.pipeline.zslice.ZSliceOps;
+
+import flash.pipeline.ui.NextStepLabels;
+import flash.pipeline.ui.PipelineDialog;
+import flash.pipeline.ui.FlashIcons;
+
+import flash.pipeline.objects.BoundingBoxColoc;
+import flash.pipeline.objects.CpcUtils;
+import flash.pipeline.objects.ObjectIntensityProfiler;
+import flash.pipeline.objects.ObjectProfileCsvReader;
+import flash.pipeline.objects.ObjectProfileCsvWriter;
+import flash.pipeline.objects.ObjectProfileFigureWriter;
+import flash.pipeline.objects.ObjectProfileResult;
+import flash.pipeline.objects.OipConfig;
+import flash.pipeline.objects.ProfileAggregator;
+import flash.pipeline.segmentation.EnhancedClassicalParameters;
+import flash.pipeline.segmentation.EnhancedClassicalRunner;
+import flash.pipeline.segmentation.MorphPredicate;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
+
+import ij.IJ;
+import ij.ImagePlus;
+import ij.WindowManager;
+import ij.measure.Calibration;
+import ij.measure.ResultsTable;
+import ij.plugin.ChannelSplitter;
+
+import ij.text.TextWindow;
+
+import java.awt.Frame;
+import java.awt.Dimension;
+import java.awt.GraphicsEnvironment;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JTextField;
+import flash.pipeline.ui.ToggleSwitch;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
+
+/**
+ * Partial migration of objectAnalysis().
+ *
+ * Requires the external plugins used by the macro:
+ * - 3D Objects Counter
+ * - 3D MultiColoc
+ *
+ * Reads channel config from the active FLASH configuration folder.
+ * Applies per-channel filter macro if present in that configuration folder.
+ */
+public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
+    private static final String FULL_IMAGE_ROI_SET_NAME = "Full image";
+    private static final Pattern MULTICOLOC_INTERACTION_COUNT_PATTERN =
+            Pattern.compile("(\\d+)\\s+(convergent|interaction)");
+
+    enum NoRoiDecision {
+        DRAW_ROIS,
+        ANALYSE_FULL_IMAGE,
+        CANCEL
+    }
+
+    enum ExistingObjectDataMode {
+        OVERWRITE,
+        EXTEND,
+        SKIP,
+        CANCEL
+    }
+
+    interface ExistingObjectDataPrompt {
+        ExistingObjectDataMode choose(File outputDir, List<File> existingCsvs);
+    }
+
+    interface NoRoiDecisionPrompt {
+        NoRoiDecision choose();
+    }
+
+    interface RoiDrawingWorkflowLauncher {
+        void launch(String directory);
+    }
+
+    private static final class RoiSetSelection {
+        final List<File> roiZips;
+        final String[] roiSetNames;
+        final boolean analyseFullImagesWithoutRois;
+
+        private RoiSetSelection(List<File> roiZips, String[] roiSetNames,
+                                boolean analyseFullImagesWithoutRois) {
+            this.roiZips = roiZips == null
+                    ? Collections.<File>emptyList()
+                    : new ArrayList<File>(roiZips);
+            this.roiSetNames = roiSetNames == null
+                    ? new String[0]
+                    : Arrays.copyOf(roiSetNames, roiSetNames.length);
+            this.analyseFullImagesWithoutRois = analyseFullImagesWithoutRois;
+        }
+
+        static RoiSetSelection saved(List<File> roiZips, String[] roiSetNames) {
+            return new RoiSetSelection(roiZips, roiSetNames, false);
+        }
+
+        static RoiSetSelection fullImages() {
+            return new RoiSetSelection(Collections.<File>emptyList(), new String[0], true);
+        }
+
+        boolean hasSavedRois() {
+            return roiZips != null && !roiZips.isEmpty();
+        }
+    }
+
+    /** Root for segmentation-related images: label maps, masked images, and filtered inputs. */
+    static final class SegmentationImageRoot {
+        final File root;
+
+        SegmentationImageRoot(File root) {
+            this.root = root;
+        }
+
+        static SegmentationImageRoot forDirectory(String directory) {
+            FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+            return new SegmentationImageRoot(layout.analysisImagesSegmentationDir());
+        }
+
+        File animalDir(String animalName) { return new File(root, animalName); }
+    }
+
+    private static final ExistingObjectDataPrompt DEFAULT_EXISTING_OBJECT_DATA_PROMPT =
+            new ExistingObjectDataPrompt() {
+                @Override
+                public ExistingObjectDataMode choose(File outputDir, List<File> existingCsvs) {
+                    Object[] options = new Object[]{"Extend Existing Data", "Overwrite Existing Data", "Cancel"};
+                    int choice = JOptionPane.showOptionDialog(
+                            null,
+                            existingObjectDataPromptMessage(outputDir, existingCsvs),
+                            "3D Object Analysis - Existing Data Found",
+                            JOptionPane.DEFAULT_OPTION,
+                            JOptionPane.WARNING_MESSAGE,
+                            null,
+                            options,
+                            options[0]);
+
+                    if (choice == 0) return ExistingObjectDataMode.EXTEND;
+                    if (choice == 1) return ExistingObjectDataMode.OVERWRITE;
+                    return ExistingObjectDataMode.CANCEL;
+                }
+            };
+
+    interface SpatialOptionsDialogLauncher {
+        SpatialSetupConfig.DerivedConfig launch(String directory,
+                                                   List<String> channelNames,
+                                                   Map<String, Double> markerThresholds,
+                                                   Map<String, Double> bbThresholds,
+                                                   boolean lockVolumetricColoc,
+                                                   boolean lockCpcColoc,
+                                                   boolean lockBBOverlap,
+                                                   boolean lockBBCpc,
+                                                   boolean lockBBVol);
+
+        default SpatialSetupConfig.DerivedConfig launch(String directory,
+                                                   List<String> channelNames,
+                                                   Map<String, Double> markerThresholds,
+                                                   Map<String, Double> bbThresholds,
+                                                   boolean lockVolumetricColoc,
+                                                   boolean lockCpcColoc,
+                                                   boolean lockBBOverlap,
+                                                   boolean lockBBCpc,
+                                                   boolean lockBBVol,
+                                                   String[] workflowSteps,
+                                                   int workflowActiveIndex) {
+            return launch(directory, channelNames, markerThresholds, bbThresholds,
+                    lockVolumetricColoc, lockCpcColoc, lockBBOverlap, lockBBCpc, lockBBVol);
+        }
+    }
+
+    private static final SpatialOptionsDialogLauncher DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER =
+            new SpatialOptionsDialogLauncher() {
+                @Override
+                public SpatialSetupConfig.DerivedConfig launch(String directory,
+                                                                  List<String> channelNames,
+                                                                  Map<String, Double> markerThresholds,
+                                                                  Map<String, Double> bbThresholds,
+                                                                  boolean lockVolumetricColoc,
+                                                                  boolean lockCpcColoc,
+                                                                  boolean lockBBOverlap,
+                                                                  boolean lockBBCpc,
+                                                                  boolean lockBBVol) {
+                    return launch(directory, channelNames, markerThresholds, bbThresholds,
+                            lockVolumetricColoc, lockCpcColoc, lockBBOverlap, lockBBCpc, lockBBVol,
+                            new String[]{"Setup", "Spatial Analysis", "Run"}, 1);
+                }
+
+                @Override
+                public SpatialSetupConfig.DerivedConfig launch(String directory,
+                                                                  List<String> channelNames,
+                                                                  Map<String, Double> markerThresholds,
+                                                                  Map<String, Double> bbThresholds,
+                                                                  boolean lockVolumetricColoc,
+                                                                  boolean lockCpcColoc,
+                                                                  boolean lockBBOverlap,
+                                                                  boolean lockBBCpc,
+                                                                  boolean lockBBVol,
+                                                                  String[] workflowSteps,
+                                                                  int workflowActiveIndex) {
+                    SpatialAnalysis spatialOptions = new SpatialAnalysis();
+                    spatialOptions.setSuppressDialogs(false);
+                    spatialOptions.setMarkerThresholds(markerThresholds == null
+                            ? new LinkedHashMap<String, Double>()
+                            : new LinkedHashMap<String, Double>(markerThresholds));
+                    spatialOptions.setBBThresholds(bbThresholds == null
+                            ? new LinkedHashMap<String, Double>()
+                            : new LinkedHashMap<String, Double>(bbThresholds));
+                    return spatialOptions.showOptionsDialogForChainedRun(
+                            directory, channelNames, lockVolumetricColoc, lockCpcColoc,
+                            lockBBOverlap, lockBBCpc, lockBBVol,
+                            NextStepLabels.RUN_3D_OBJECT_ANALYSIS,
+                            workflowSteps, workflowActiveIndex);
+                }
+            };
+
+    private boolean headless = false;
+    private boolean suppressDialogs = false;
+    private boolean verboseLogging = false;
+    private boolean skipExisting = false;
+    private int parallelThreads = 1;
+    private int loaderThreads = 1;
+    private int loaderPercent = 0;
+    private boolean useTifCache = false;
+    private flash.pipeline.io.ImageCache imageCache = null;
+    private flash.pipeline.report.QualityReport qualityReport = null;
+    private long lifOpenTimeMs = 0;
+    private boolean compactLog = false;
+    private boolean classicalCentroidFilter = true;
+    private boolean doVolumetric = true;
+    private boolean doCpc = true;
+    private boolean doIntensityColoc = false;
+    private boolean doBBOverlap = false;
+    private boolean doBBCpc = false;
+    private boolean doBBVol = false;
+    // Object Intensity Profiling (OIP). Radial/marginal/principal-axis are the user's recommended
+    // defaults (ticked on first open); angular/shell/within-box are opt-in. Nothing runs unless at
+    // least one family is enabled.
+    private boolean doRadialProfile = true;
+    private boolean doMarginalProfile = true;
+    private boolean doPrincipalAxisProfile = true;
+    private boolean doAngularProfile = false;
+    private boolean doShellColoc = false;
+    private boolean doWithinBoxCorr = false;
+    private OipConfig.Region oipRegion = OipConfig.Region.WHOLE_BOX;
+    private OipConfig.IntensityNorm oipIntensityNorm = OipConfig.IntensityNorm.PER_OBJECT_MINMAX;
+    private int oipRadialBins = 20;
+    private int oipAngularBins = 12;
+    private int oipShells = 3;
+    private int oipResampleN = 50;
+    private double oipBoxPadPct = 0.0;
+    private double oipRingThresholdPct = 50.0;
+    private boolean oipGenerateFigures = true;
+    /** Per-image OIP curves collected during the (possibly parallel) pass; written once at the end. */
+    private final java.util.List<ImageProfiles> oipCollected =
+            java.util.Collections.synchronizedList(new java.util.ArrayList<ImageProfiles>());
+    private Map<String, Double> markerThresholds = new LinkedHashMap<String, Double>();
+    /** Per-channel bounding-box coloc threshold (%), independent of {@link #markerThresholds}. */
+    private final Map<String, Double> bbThresholds = new LinkedHashMap<String, Double>();
+    /** Sentinel for "no marker chosen" in the cluster-resolution marker dropdown. */
+    static final String OVERLAP_MARKER_NONE = "None";
+    /**
+     * Marker channel whose centroids resolve fused/clustered target objects. Empty or
+     * {@link #OVERLAP_MARKER_NONE} disables the feature. See {@link #appendOverlapCountColumns}.
+     */
+    private String clusterMarkerChannel = OVERLAP_MARKER_NONE;
+    /** Per-channel toggle: count {@link #clusterMarkerChannel} centroids inside this channel's objects. */
+    private final Map<String, Boolean> clusterTargets = new LinkedHashMap<String, Boolean>();
+    private boolean wizardExtractProcessLength = false;
+    private boolean wizardRunSpatial = false;
+    private int wizardNuclearMarkerIndex = -1;
+    private boolean[] wizardProcessChannels = null;
+    private SpatialSetupConfig.DerivedConfig wizardSpatialConfig = null;
+    private final Map<SectionKey, Map<String, ImagePlus>> retainedLabels =
+            new LinkedHashMap<SectionKey, Map<String, ImagePlus>>();
+    private SpatialOptionsDialogLauncher spatialOptionsDialogLauncher =
+            DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER;
+    private ExistingObjectDataPrompt existingObjectDataPrompt =
+            DEFAULT_EXISTING_OBJECT_DATA_PROMPT;
+    private Boolean guiDecisionDialogsAvailableForTest = null;
+    private NoRoiDecisionPrompt noRoiDecisionPrompt = new NoRoiDecisionPrompt() {
+        @Override
+        public NoRoiDecision choose() {
+            return showNoRoiDecisionDialog();
+        }
+    };
+    private RoiDrawingWorkflowLauncher roiDrawingWorkflowLauncher =
+            new RoiDrawingWorkflowLauncher() {
+                @Override
+                public void launch(String directory) {
+                    launchRoiDrawingWorkflowDirect(directory);
+                }
+            };
+    private static final String OBJECT_PRESET_PLACEHOLDER = "(choose preset)";
+    private final AtomicBoolean calibrationWritten = new AtomicBoolean(false);
+    private boolean useDeconvolvedInput = true;
+    // Per-run per-channel routing for this analysis's ANALYSIS group, built once by
+    // DeconvRoutingResolver before the input supplier is wrapped (Stage 15). Replaces the whole-image
+    // useDeconvolvedInput boolean as the driver of the input swap and the TIF cache decision.
+    private DeconvRouting deconvRouting = null;
+    // Stage 18 (Limitation 1): per-channel expected deconv params derived from the persisted config,
+    // threaded into the routed-input resolver so a parameter change (with unchanged source bytes)
+    // invalidates a mirror instead of silently serving stale-param pixels.
+    private ExpectedDeconvParams expectedDeconvParams = null;
+    private CLIConfig cliConfig = null;
+    private AnalysisRunContext runRecordContext = null;
+    private AnalysisProgressReporter objectProgressReporter = AnalysisProgressReporter.disabled();
+    private final ThreadLocal<AnalysisProgressReporter.WorkHandle> objectImageProgress =
+            new ThreadLocal<AnalysisProgressReporter.WorkHandle>();
+    private final ThreadLocal<AnalysisProgressReporter.WorkHandle> objectRoiProgress =
+            new ThreadLocal<AnalysisProgressReporter.WorkHandle>();
+
+    /** Shared lock for all legacy ImageJ1/plugin paths that touch WindowManager or Prefs. */
+    private static final ReentrantLock COUNTER3D_LOCK = WindowManagerLock.LOCK;
+
+    private static final class FatalSegmentationException extends RuntimeException {
+        FatalSegmentationException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /** Lazy runtime check: is mcib3d-core available for native (thread-safe) object counting? */
+    private static volatile Boolean mcib3dAvailable = null;
+
+    /** Heap floor below which the count-once-assign-per-ROI optimisation is disabled (8 GiB). */
+    private static final long COUNT_ONCE_HEAP_FLOOR = 8L * 1024 * 1024 * 1024;
+
+    /**
+     * Returns true if the count-once-assign-per-ROI optimisation has enough
+     * heap headroom to run on this image without OOMing. The optimisation
+     * keeps unfiltered+filtered+preDetection+labelMap clones per channel
+     * across all ROI iterations, so a 2 GB stack on an 8 GB heap can hold
+     * ~28 full-stack copies before GC pressure causes pauses or OOM.
+     *
+     * Gate: {@code heap >= 8 GiB} AND {@code stackBytes <= heap/16}.
+     */
+    private static boolean canRunCountOnce(ImagePlus imp) {
+        if (imp == null) return false;
+        long maxMem = Runtime.getRuntime().maxMemory();
+        long stackBytes = estimateStackBytes(imp);
+        if (maxMem < COUNT_ONCE_HEAP_FLOOR) {
+            IJ.log("  [3D] count-once disabled: heap " + (maxMem / (1024 * 1024))
+                    + " MB < 8 GB floor - falling back to per-ROI counting.");
+            return false;
+        }
+        if (stackBytes > maxMem / 16) {
+            IJ.log("  [3D] count-once disabled: stack " + (stackBytes / (1024 * 1024))
+                    + " MB > heap/16 (" + (maxMem / 16 / (1024 * 1024))
+                    + " MB) - falling back to per-ROI counting.");
+            return false;
+        }
+        return true;
+    }
+
+    /** Approximate full multi-channel stack byte size for a multi-dim ImagePlus. */
+    private static long estimateStackBytes(ImagePlus imp) {
+        if (imp == null) return 0;
+        long w = imp.getWidth();
+        long h = imp.getHeight();
+        long c = Math.max(1, imp.getNChannels());
+        long z = Math.max(1, imp.getNSlices());
+        long t = Math.max(1, imp.getNFrames());
+        long bytesPerPixel;
+        switch (imp.getBitDepth()) {
+            case 8:  bytesPerPixel = 1; break;
+            case 16: bytesPerPixel = 2; break;
+            case 32: bytesPerPixel = 4; break;
+            case 24: bytesPerPixel = 4; break; // RGB stored as int
+            default: bytesPerPixel = 4; break;
+        }
+        return w * h * c * z * t * bytesPerPixel;
+    }
+
+    /** In-memory image registry, replaces WindowManager lookups when headless (sequential mode). */
+    private final Map<String, ImagePlus> imageRegistry = new LinkedHashMap<String, ImagePlus>();
+
+    /** Thread-local image registry for parallel execution. When set, overrides the instance field. */
+    private final ThreadLocal<Map<String, ImagePlus>> threadLocalRegistry = new ThreadLocal<Map<String, ImagePlus>>();
+
+    /**
+     * Per-image durable-identity binding token (index = 0-based series index); {@code null}
+     * where identity could not be resolved. Computed once in {@link #run(String)} before
+     * processing and read-only thereafter, so parallel workers may share it safely. Region-scoped
+     * ROI zips cover an image subset and bind by this token rather than by positional index.
+     */
+    private String[] imageBindTokens;
+
+    /** One named ROI zip loaded into memory as uncropped/cropped ROI pairs. */
+    private static final class RoiSetData {
+        final String name;
+        final ij.gui.Roi[] rois;
+        final boolean fullImage;
+
+        RoiSetData(String name, ij.gui.Roi[] rois) {
+            this(name, rois, false);
+        }
+
+        private RoiSetData(String name, ij.gui.Roi[] rois, boolean fullImage) {
+            this.name = name == null ? "" : name;
+            this.rois = rois == null ? new ij.gui.Roi[0] : rois;
+            this.fullImage = fullImage;
+        }
+
+        static RoiSetData fullImage() {
+            return new RoiSetData(FULL_IMAGE_ROI_SET_NAME, new ij.gui.Roi[0], true);
+        }
+    }
+
+    /** Returns the active registry: thread-local if set, otherwise the instance-level one. */
+    private Map<String, ImagePlus> activeRegistry() {
+        Map<String, ImagePlus> local = threadLocalRegistry.get();
+        return local != null ? local : imageRegistry;
+    }
+
+    /** True when running inside a parallel worker with a thread-local image registry. */
+    private boolean isParallelRegistryContext() {
+        return threadLocalRegistry.get() != null;
+    }
+
+    @Override
+    public Set<BinField> requiredBinFields() {
+        return EnumSet.of(
+                BinField.CHANNEL_NAMES,
+                BinField.CHANNEL_COLORS,
+                BinField.OBJECT_THRESHOLDS,
+                BinField.PARTICLE_SIZES,
+                BinField.SEGMENTATION_METHODS,
+                BinField.FILTER_PRESETS,
+                BinField.Z_SLICE);
+    }
+
+    @Override
+    public boolean benefitsFromRois() {
+        return true;
+    }
+
+    @Override
+    public void setHeadless(boolean headless) {
+        this.headless = headless;
+    }
+
+    @Override
+    public void setSuppressDialogs(boolean suppress) {
+        this.suppressDialogs = suppress;
+    }
+
+    @Override
+    public void setVerboseLogging(boolean verbose) {
+        this.verboseLogging = verbose;
+    }
+
+    @Override
+    public void setSkipExisting(boolean skip) {
+        this.skipExisting = skip;
+    }
+
+    @Override
+    public void setParallelThreads(int threads) {
+        this.parallelThreads = Math.max(1, threads);
+    }
+
+    @Override
+    public void setImageCache(flash.pipeline.io.ImageCache cache) {
+        this.imageCache = cache;
+    }
+
+    @Override
+    public void setLoaderThreads(int threads) {
+        this.loaderThreads = Math.max(1, threads);
+    }
+
+    @Override
+    public void setLoaderPercent(int percent) {
+        this.loaderPercent = Math.max(0, Math.min(percent, 100));
+    }
+
+    @Override
+    public void setUseTifCache(boolean use) {
+        this.useTifCache = use;
+    }
+
+    @Override
+    public void setQualityReport(flash.pipeline.report.QualityReport report) {
+        this.qualityReport = report;
+    }
+
+    @Override
+    public void setCliConfig(CLIConfig config) {
+        this.cliConfig = config;
+        if (config != null) {
+            this.useDeconvolvedInput = config.isThreeDUseDeconv();
+        }
+    }
+
+    @Override
+    public void setRunRecordContext(AnalysisRunContext context) {
+        this.runRecordContext = context;
+    }
+
+    void applyPreset(String directory, ThreeDObjectPreset preset) {
+        if (preset == null) return;
+        BinConfig cfg = loadBinConfig(directory);
+        ChannelIdentities identities = ChannelConfigIO.readChannelIdentities(
+                FlashProjectLayout.forDirectory(directory).configurationWriteDir());
+        ThreeDObjectSetupConfig.DerivedConfig derived =
+                ThreeDObjectSetupConfig.fromPreset(cfg, identities, preset);
+        applyThreeDObjectDerivedConfig(cfg, derived);
+    }
+
+    void setSpatialOptionsDialogLauncherForTest(SpatialOptionsDialogLauncher launcher) {
+        this.spatialOptionsDialogLauncher = launcher == null
+                ? DEFAULT_SPATIAL_OPTIONS_DIALOG_LAUNCHER
+                : launcher;
+    }
+
+    void setExistingObjectDataPromptForTest(ExistingObjectDataPrompt prompt) {
+        this.existingObjectDataPrompt = prompt == null
+                ? DEFAULT_EXISTING_OBJECT_DATA_PROMPT
+                : prompt;
+    }
+
+    void setNoRoiDecisionPromptForTest(NoRoiDecisionPrompt prompt) {
+        this.noRoiDecisionPrompt = prompt == null
+                ? new NoRoiDecisionPrompt() {
+                    @Override
+                    public NoRoiDecision choose() {
+                        return showNoRoiDecisionDialog();
+                    }
+                }
+                : prompt;
+    }
+
+    void setRoiDrawingWorkflowLauncherForTest(RoiDrawingWorkflowLauncher launcher) {
+        this.roiDrawingWorkflowLauncher = launcher == null
+                ? new RoiDrawingWorkflowLauncher() {
+                    @Override
+                    public void launch(String directory) {
+                        launchRoiDrawingWorkflowDirect(directory);
+                    }
+                }
+                : launcher;
+    }
+
+    void setGuiDecisionDialogsAvailableForTest(Boolean available) {
+        this.guiDecisionDialogsAvailableForTest = available;
+    }
+
+    private static boolean gateStarDistFeature(String featureDisplayName) {
+        return FeatureDependencyGate.gate(DependencyId.STARDIST_RUNTIME,
+                "3D Object Analysis", featureDisplayName)
+                && FeatureDependencyGate.gate(DependencyId.TENSORFLOW_NATIVE_RUNTIME,
+                "3D Object Analysis", featureDisplayName);
+    }
+
+    private static boolean gateCellposeFeature(String featureDisplayName) {
+        return FeatureDependencyGate.gate(DependencyId.CELLPOSE_RUNTIME,
+                "3D Object Analysis", featureDisplayName);
+    }
+
+    private static boolean gateObjectsCounterPlusFeature(String featureDisplayName) {
+        return FeatureDependencyGate.gate(DependencyId.OBJECTS_COUNTER_3D_PLUS,
+                "3D Object Analysis", featureDisplayName)
+                && FeatureDependencyGate.gate(DependencyId.MCIB3D_CORE,
+                "3D Object Analysis", featureDisplayName);
+    }
+
+    private static boolean isMcib3dAvailable() {
+        Boolean cached = mcib3dAvailable;
+        if (cached != null) {
+            return cached.booleanValue();
+        }
+        synchronized (ThreeDObjectAnalysis.class) {
+            if (mcib3dAvailable == null) {
+                mcib3dAvailable = Boolean.valueOf(ObjectsCounter3DWrapper.isMcib3dAvailable());
+            }
+            return mcib3dAvailable.booleanValue();
+        }
+    }
+
+    private static boolean usesStarDistSegmentation(BinConfig cfg) {
+        if (cfg == null) return false;
+        for (int i = 0; i < cfg.numChannels(); i++) {
+            SegmentationMethod method = cfg.segmentationMethod(i);
+            if (method.isStarDist()) return true;
+        }
+        return false;
+    }
+
+    private static boolean usesCellposeSegmentation(BinConfig cfg) {
+        if (cfg == null) return false;
+        for (int i = 0; i < cfg.numChannels(); i++) {
+            SegmentationMethod method = cfg.segmentationMethod(i);
+            if (method.isCellpose()) return true;
+        }
+        return false;
+    }
+
+    private static boolean usesEnhancedClassicalSegmentation(BinConfig cfg) {
+        if (cfg == null) return false;
+        for (int i = 0; i < cfg.numChannels(); i++) {
+            SegmentationMethod method = cfg.segmentationMethod(i);
+            if (method.isEnhancedClassical()) return true;
+        }
+        return false;
+    }
+
+    private static boolean usesClassicalSegmentation(BinConfig cfg) {
+        if (cfg == null) return false;
+        for (int i = 0; i < cfg.numChannels(); i++) {
+            SegmentationMethod method = cfg.segmentationMethod(i);
+            if (method.isClassical()) return true;
+        }
+        return false;
+    }
+
+    private static boolean requiresMcib3dMorphometry(BinConfig cfg) {
+        if (cfg == null) return false;
+        for (int i = 0; i < cfg.numChannels(); i++) {
+            if (cfg.usesLabelImageSegmentation(i) || cfg.isEnhancedClassical(i)) return true;
+        }
+        return false;
+    }
+
+    private ImagePlus prepareCellposeSecondChannelInput(int primaryChannelIndex,
+                                                        String primaryChannelName,
+                                                        ImagePlus primaryChannel,
+                                                        File binDir,
+                                                        int companionChannelIndex,
+                                                        ImagePlus companionChannel,
+                                                        String companionChannelName,
+                                                        String companionFilterFilename) {
+        if (companionChannelIndex < 0) return null;
+
+        String chTag = " [Ch " + (primaryChannelIndex + 1) + "]";
+        if (companionChannelIndex == primaryChannelIndex) {
+            IJ.log("WARNING:" + chTag + " Cellpose companion channel cannot be the same as the primary channel. Falling back to single-channel input.");
+            return null;
+        }
+        if (companionChannel == null) {
+            IJ.log("WARNING:" + chTag + " Cellpose companion channel C" + (companionChannelIndex + 1)
+                    + " is unavailable. Falling back to single-channel input.");
+            return null;
+        }
+        if (primaryChannel == null
+                || primaryChannel.getWidth() != companionChannel.getWidth()
+                || primaryChannel.getHeight() != companionChannel.getHeight()
+                || primaryChannel.getStackSize() != companionChannel.getStackSize()) {
+            IJ.log("WARNING:" + chTag + " Cellpose companion channel C" + (companionChannelIndex + 1)
+                    + " does not match the primary channel dimensions. Falling back to single-channel input.");
+            return null;
+        }
+
+        ImagePlus filteredCompanion = ImageOps.duplicateThreadSafe(companionChannel);
+        filteredCompanion.setTitle((companionChannelName == null ? "Companion" : companionChannelName) + "_cellpose_companion_input");
+
+        File filterMacro = companionFilterFilename == null ? null : new File(binDir, companionFilterFilename);
+        if (filterMacro != null && filterMacro.exists()) {
+            try {
+                FilterExecutor.runIjmFileThreadSafe(filteredCompanion, filterMacro);
+                if (!compactLog) {
+                    IJ.log("    -" + chTag + " Cellpose companion filter applied from Ch "
+                            + (companionChannelIndex + 1) + ": " + companionFilterFilename);
+                }
+            } catch (Exception e) {
+                IJ.log("    -" + chTag + " Cellpose companion filter error from Ch "
+                        + (companionChannelIndex + 1) + ": " + e.getMessage());
+            }
+        } else {
+            String defaultMacro = NamedFilterLoader.loadDefaultFilter();
+            if (defaultMacro != null) {
+                FilterExecutor.runThreadSafe(filteredCompanion, defaultMacro);
+                if (!compactLog) {
+                    IJ.log("    -" + chTag + " Default filter applied to Cellpose companion from Ch "
+                            + (companionChannelIndex + 1) + " (no " + companionFilterFilename + " found)");
+                }
+            }
+        }
+
+        if (!compactLog) {
+            IJ.log("    -" + chTag + " Cellpose companion channel: C" + (companionChannelIndex + 1)
+                    + " (" + companionChannelName + ")");
+        }
+        return filteredCompanion;
+    }
+
+    private static ImagePlus[] snapshotCellposeCompanionSources(ImagePlus[] channels,
+                                                                int[] companionIndexes,
+                                                                String[] channelNames) {
+        if (channels == null) return new ImagePlus[0];
+        ImagePlus[] snapshots = new ImagePlus[channels.length];
+        if (companionIndexes == null) return snapshots;
+        for (int companionIndex : companionIndexes) {
+            if (companionIndex < 0 || companionIndex >= channels.length) continue;
+            if (snapshots[companionIndex] != null || channels[companionIndex] == null) continue;
+            snapshots[companionIndex] = ImageOps.duplicateThreadSafe(channels[companionIndex]);
+            if (channelNames != null && companionIndex < channelNames.length) {
+                snapshots[companionIndex].setTitle(channelNames[companionIndex] + "_cellpose_companion_source");
+            }
+        }
+        return snapshots;
+    }
+
+    private static void closeQuietly(ImagePlus[] images) {
+        if (images == null) return;
+        for (ImagePlus image : images) {
+            closeQuietly(image);
+        }
+    }
+
+    /**
+     * Store image in the registry.
+     * In parallel mode, callers must explicitly opt into WindowManager visibility
+     * via ensureInWindowManager() while holding the global ImageJ lock.
+     */
+    private void registerImage(String title, ImagePlus imp, boolean needsWindowManager) {
+        if (imp == null) return;
+        imp.setTitle(title);
+        activeRegistry().put(title, imp);
+        if (isParallelRegistryContext()) return;
+        if (!headless) {
+            if (imp.getWindow() == null) imp.show();
+        } else if (needsWindowManager) {
+            if (imp.getWindow() == null) imp.show();
+            if (imp.getWindow() != null) imp.getWindow().setVisible(false);
+        }
+    }
+
+    /** Retrieve image from registry (no WindowManager dependency). */
+    private ImagePlus getRegisteredImage(String title) {
+        return activeRegistry().get(title);
+    }
+
+    /** Ensure an image is visible in WindowManager (for external plugins). */
+    private void ensureInWindowManager(ImagePlus imp) {
+        if (imp == null) return;
+        if (imp.getWindow() == null) imp.show();
+        if ((headless || isParallelRegistryContext()) && imp.getWindow() != null) {
+            imp.getWindow().setVisible(false);
+        }
+    }
+
+    /** Remove image from registry and close it. */
+    private void unregisterAndClose(String title) {
+        ImagePlus imp = activeRegistry().remove(title);
+        if (imp != null) {
+            imp.changes = false;
+            imp.close();
+            imp.flush();
+        }
+    }
+
+    /** Hide all currently open image windows (for suppressing Counter3D GUI side effects). */
+    private static void hideAllImageWindows() {
+        if (!COUNTER3D_LOCK.isHeldByCurrentThread()) {
+            throw new IllegalStateException(
+                "hideAllImageWindows() must be called under COUNTER3D_LOCK");
+        }
+        int[] ids = WindowManager.getIDList();
+        if (ids == null) return;
+        for (int id : ids) {
+            ImagePlus imp = WindowManager.getImage(id);
+            if (imp != null && imp.getWindow() != null) {
+                imp.getWindow().setVisible(false);
+            }
+        }
+        // Also hide non-image windows (Results tables etc.) except Log
+        Frame[] frames = WindowManager.getNonImageWindows();
+        if (frames != null) {
+            for (Frame f : frames) {
+                if (f != null && !"Log".equals(f.getTitle())) {
+                    f.setVisible(false);
+                }
+            }
+        }
+    }
+
+    /** Close all images in the active registry. */
+    private void clearRegistry() {
+        Map<String, ImagePlus> reg = activeRegistry();
+        for (ImagePlus imp : reg.values()) {
+            if (imp != null) {
+                imp.changes = false;
+                imp.close();
+                imp.flush();
+            }
+        }
+        reg.clear();
+    }
+
+    @Override
+    public void execute(String directory) {
+        clearRetainedSpatialLabels();
+
+        if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
+                "3D Object Analysis", "Bio-Formats image loading")) {
+            recordWarn("3D Object Analysis blocked by missing Bio-Formats runtime dependency.");
+            return;
+        }
+
+        RoiSetSelection roiSelection = resolveRoiSetsForRun(directory);
+        if (roiSelection == null) {
+            return;
+        }
+        List<File> roiZips = roiSelection.roiZips;
+        String[] roiSetNames = roiSelection.roiSetNames;
+        boolean analyseFullImagesWithoutRois = roiSelection.analyseFullImagesWithoutRois;
+
+        BinSetupDispatcher.Outcome outcome = BinSetupDispatcher.ensure(
+                directory, "3D Object Analysis", requiredBinFields(),
+                benefitsFromRois(), suppressDialogs, cliConfig);
+        if (outcome == BinSetupDispatcher.Outcome.CANCELLED) {
+            String message = "[FLASH] 3D Object Analysis cancelled by user.";
+            IJ.log(message);
+            recordWarn(message);
+            return;
+        }
+
+        BinConfig cfg = loadBinConfig(directory);
+        RecipeReplayModelResolver.validate(new File(directory).toPath(), cfg.segmentationMethods);
+        if (usesClassicalSegmentation(cfg)
+                && !FeatureDependencyGate.gate(DependencyId.OBJECTS_COUNTER_3D,
+                "3D Object Analysis", "classical 3D object counting")) {
+            recordWarn("3D Object Analysis blocked by missing 3D Objects Counter dependency.");
+            return;
+        }
+        if (usesEnhancedClassicalSegmentation(cfg)
+                && !gateObjectsCounterPlusFeature("Enhanced Classical / 3D Objects Counter+ segmentation")) {
+            recordWarn("3D Object Analysis blocked by missing enhanced-classical 3D object dependency.");
+            return;
+        }
+        if (usesStarDistSegmentation(cfg) && !gateStarDistFeature("StarDist 3D segmentation")) {
+            recordWarn("3D Object Analysis blocked by missing StarDist 3D dependency.");
+            return;
+        }
+        if (usesCellposeSegmentation(cfg) && !gateCellposeFeature("Cellpose segmentation")) {
+            recordWarn("3D Object Analysis blocked by missing Cellpose dependency.");
+            return;
+        }
+        if (requiresMcib3dMorphometry(cfg)
+                && !FeatureDependencyGate.gate(DependencyId.MCIB3D_CORE,
+                "3D Object Analysis",
+                "mcib3d-backed 3D morphometry / shape analysis")) {
+            recordWarn("3D Object Analysis blocked by missing mcib3d dependency.");
+            return;
+        }
+        IJ.log("Channels: " + String.join(", ", cfg.channelNames));
+
+        ChannelIdentities channelIdentities = ChannelConfigIO.readChannelIdentities(
+                FlashProjectLayout.forDirectory(directory).configurationWriteDir());
+        applyCliObjectConfiguration(directory, cfg, channelIdentities);
+
+        // Stage 15 (deconv routing §C3): derive the "Use deconvolved stacks" toggle default from the
+        // persisted routing (ON when the ANALYSIS group uses deconv), and note whether the user later
+        // flips it. The explicit CLI flag (if present) is a hard override applied by the resolver.
+        final ChannelConfig deconvChannelConfig = ChannelConfigIO.read(
+                FlashProjectLayout.forDirectory(directory).configurationWriteDir());
+        final int deconvSizeC = cfg.channelNames.size();
+        final Boolean deconvCliFlag = cliConfig == null ? null : cliConfig.getThreeDUseDeconvExplicit();
+        final boolean deconvToggleDefault = DeconvRoutingResolver.toggleDefaultFor(
+                deconvChannelConfig, DeconvRoutingGroup.ANALYSIS, true);
+        useDeconvolvedInput = deconvCliFlag != null
+                ? deconvCliFlag.booleanValue() : deconvToggleDefault;
+        boolean deconvToggleShown = false;
+
+        // --- Options dialogs with Back navigation ---
+        boolean extractProcessLength = wizardExtractProcessLength;
+        boolean runSpatial = wizardRunSpatial;
+        if (markerThresholds == null) {
+            markerThresholds = new LinkedHashMap<String, Double>();
+        }
+        int nuclearMarkerIndex = wizardNuclearMarkerIndex;
+        boolean[] processChannels = wizardProcessChannels == null ? null : Arrays.copyOf(wizardProcessChannels, wizardProcessChannels.length);
+        boolean[] selectedRoiSets = new boolean[roiSetNames.length];
+        Arrays.fill(selectedRoiSets, true);
+        if (cliConfig != null && cliConfig.getObject() != null
+                && RegionSelectionFilter.hasFilter(
+                cliConfig.getObject().getIncludeRegions(), cliConfig.getObject().getExcludeRegions())) {
+            RegionSelectionFilter.apply(cliConfig.getObject().getIncludeRegions(),
+                    cliConfig.getObject().getExcludeRegions(), roiSetNames, selectedRoiSets);
+            IJ.log("[CLI] 3D Object region filter selected "
+                    + countSelected(selectedRoiSets) + " of " + selectedRoiSets.length + " region(s).");
+        }
+
+        int dialogStep = 0;
+        if (suppressDialogs) {
+            if (extractProcessLength && processChannels == null) {
+                ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
+                        cfg, channelIdentities, Collections.<String, Object>emptyMap(),
+                        analyseFullImagesWithoutRois ? Collections.<String>emptyList() : Arrays.asList(roiSetNames));
+                nuclearMarkerIndex = derived.nuclearMarkerIndex;
+                processChannels = Arrays.copyOf(derived.processChannels, derived.processChannels.length);
+            }
+        }
+        while (!suppressDialogs && dialogStep >= 0) {
+            if (dialogStep == 0) {
+                PipelineDialog gdOpts = new PipelineDialog("3D Object Analysis Options", PipelineDialog.Phase.ANALYSE);
+                gdOpts.addAnalysisHelpHeader("3D Object Analysis", FLASH_Pipeline.IDX_3D_OBJECT);
+                final ThreeDObjectDialogBindings objectBindings = new ThreeDObjectDialogBindings();
+                addThreeDObjectSetupControls(gdOpts, directory, cfg, channelIdentities,
+                        objectBindings,
+                        new ThreeDObjectConfigApplier() {
+                            @Override
+                            public void apply(String selectedPresetName,
+                                              ThreeDObjectSetupConfig.DerivedConfig derived) {
+                                applyThreeDObjectConfigToDialog(cfg, derived,
+                                        objectBindings, selectedPresetName);
+                            }
+                        });
+                gdOpts.addSubHeader("Input");
+                objectBindings.useDeconvolvedInputToggle =
+                        gdOpts.addToggle("Use deconvolved stacks if available", useDeconvolvedInput);
+
+                gdOpts.addHeader("Colocalization Method");
+                objectBindings.doVolumetricToggle =
+                        gdOpts.addToggle("Volumetric overlap (%)", doVolumetric);
+                objectBindings.doCpcToggle =
+                        gdOpts.addToggle("Centroid coincidence (CPC)", doCpc);
+                objectBindings.doIntensityColocToggle =
+                        gdOpts.addToggle("Intensity Colocalization", doIntensityColoc);
+
+                // Dedicated section: voxel-vs-box semantics kept separate from Volumetric/CPC.
+                gdOpts.addHeader("Bounding-Box Colocalisation");
+                objectBindings.doBBOverlapToggle =
+                        gdOpts.addToggle("Bounding-box overlap (% / BBColoc)", doBBOverlap);
+                objectBindings.doBBCpcToggle =
+                        gdOpts.addToggle("Bounding-box centroid coincidence (BB-CPC)", doBBCpc);
+                objectBindings.doBBVolToggle =
+                        gdOpts.addToggle("Bounding-box volume fill (BBVolColoc)", doBBVol);
+
+                // Unified per-channel threshold table: one row per channel carrying the
+                // volumetric Coloc % and the bounding-box BB Coloc % side by side,
+                // replacing the two separate per-channel field lists.
+                gdOpts.addHeader("Colocalisation Thresholds (%)");
+                gdOpts.addHelpText("Per-channel cutoffs. Coloc % is voxel overlap (Volumetric); "
+                        + "BB Coloc % is bounding-box overlap/fill. Each column greys out when no "
+                        + "method that uses it is selected.");
+                gdOpts.addChannelNumericTableHeader("Channel", "Coloc %", "BB Coloc %");
+                final List<JTextField> colocThresholdFields = new ArrayList<JTextField>();
+                final List<JTextField> bbColocThresholdFields = new ArrayList<JTextField>();
+                for (String chName : cfg.channelNames) {
+                    Double prev = markerThresholds.get(chName);
+                    Double prevBB = bbThresholds.get(chName);
+                    PipelineDialog.ChannelNumericRow thrRow = gdOpts.addChannelDualNumericRow(
+                            chName,
+                            prev != null ? prev : 30.0,
+                            prevBB != null ? prevBB : 30.0);
+                    objectBindings.thresholdFields.add(thrRow.primaryField);
+                    objectBindings.bbThresholdFields.add(thrRow.secondaryField);
+                    colocThresholdFields.add(thrRow.primaryField);
+                    bbColocThresholdFields.add(thrRow.secondaryField);
+                }
+
+                // Grey out each column when no method consuming it is enabled. Values are
+                // still read (disabled fields keep their text), so a greyed column simply
+                // shows the cutoff that would apply if its method were turned on.
+                final Runnable updateThresholdEnablement = new Runnable() {
+                    @Override public void run() {
+                        boolean colocOn = isSelected(objectBindings.doVolumetricToggle);
+                        boolean bbOn = isSelected(objectBindings.doBBOverlapToggle)
+                                || isSelected(objectBindings.doBBVolToggle);
+                        for (JTextField f : colocThresholdFields) {
+                            f.setEnabled(colocOn);
+                        }
+                        for (JTextField f : bbColocThresholdFields) {
+                            f.setEnabled(bbOn);
+                        }
+                    }
+                };
+                objectBindings.doVolumetricToggle.addChangeListener(updateThresholdEnablement);
+                objectBindings.doBBOverlapToggle.addChangeListener(updateThresholdEnablement);
+                objectBindings.doBBVolToggle.addChangeListener(updateThresholdEnablement);
+                updateThresholdEnablement.run();
+
+                // ── Object Intensity Profiling ──
+                // Per-object intensity profiles of every channel inside each object's bounding box,
+                // centred on the centroid (the relational counterpart to BB-coloc). Inline producer
+                // here; Spatial Analysis consumes the saved columns.
+                gdOpts.addHeader("Object Intensity Profiling");
+                final ToggleSwitch oipRadialT =
+                        gdOpts.addToggle("Radial profile (distance from centre)", doRadialProfile);
+                objectBindings.oipRadialToggle = oipRadialT;
+                final ToggleSwitch oipMarginalT =
+                        gdOpts.addToggle("Marginal X / Y / Z profile (image axes)", doMarginalProfile);
+                objectBindings.oipMarginalToggle = oipMarginalT;
+                final ToggleSwitch oipPcaT =
+                        gdOpts.addToggle("Principal-axis profile (object's own axes)", doPrincipalAxisProfile);
+                objectBindings.oipPrincipalAxisToggle = oipPcaT;
+                final ToggleSwitch oipAngularT =
+                        gdOpts.addToggle("Angular profile (ring completeness)", doAngularProfile);
+                objectBindings.oipAngularToggle = oipAngularT;
+                final ToggleSwitch oipShellT =
+                        gdOpts.addToggle("Concentric-shell coloc (inner/mid/outer)", doShellColoc);
+                objectBindings.oipShellToggle = oipShellT;
+                final ToggleSwitch oipWithinT =
+                        gdOpts.addToggle("Within-box correlation (Pearson / overlap)", doWithinBoxCorr);
+                objectBindings.oipWithinBoxToggle = oipWithinT;
+                final ToggleSwitch oipObjectOnlyT =
+                        gdOpts.addToggle("Restrict to object voxels only",
+                                oipRegion == OipConfig.Region.OBJECT_VOXELS);
+                objectBindings.oipObjectOnlyToggle = oipObjectOnlyT;
+                final ToggleSwitch oipFiguresT =
+                        gdOpts.addToggle("Generate aggregate OIP figures", oipGenerateFigures);
+                objectBindings.oipFiguresToggle = oipFiguresT;
+                final Runnable oipEnablement = new Runnable() {
+                    @Override public void run() {
+                        boolean any = isSelected(oipRadialT) || isSelected(oipMarginalT)
+                                || isSelected(oipPcaT) || isSelected(oipAngularT)
+                                || isSelected(oipShellT) || isSelected(oipWithinT);
+                        oipObjectOnlyT.setEnabled(any);
+                        oipFiguresT.setEnabled(any);
+                    }
+                };
+                oipRadialT.addChangeListener(oipEnablement);
+                oipMarginalT.addChangeListener(oipEnablement);
+                oipPcaT.addChangeListener(oipEnablement);
+                oipAngularT.addChangeListener(oipEnablement);
+                oipShellT.addChangeListener(oipEnablement);
+                oipWithinT.addChangeListener(oipEnablement);
+                objectBindings.oipEnablementUpdater = oipEnablement;
+                oipEnablement.run();
+
+                // Resolve fused objects: pick a marker channel, then count its centroids inside each
+                // selected target channel's objects (voxel-precise) to reveal how many objects a
+                // touching blob actually contains.
+                gdOpts.addHeader("Resolve Fused Objects");
+                String[] markerOptions = new String[cfg.channelNames.size() + 1];
+                markerOptions[0] = OVERLAP_MARKER_NONE;
+                for (int mi = 0; mi < cfg.channelNames.size(); mi++) {
+                    markerOptions[mi + 1] = cfg.channelNames.get(mi);
+                }
+                String markerDefault = (clusterMarkerChannel != null
+                        && cfg.channelNames.contains(clusterMarkerChannel))
+                        ? clusterMarkerChannel : OVERLAP_MARKER_NONE;
+                objectBindings.clusterMarkerChoice =
+                        gdOpts.addChoice("Marker channel", markerOptions, markerDefault);
+                gdOpts.addSubHeader("Count marker objects within");
+                objectBindings.clusterTargetToggles.clear();
+                objectBindings.clusterTargetChannels.clear();
+                final List<ToggleSwitch> clusterTargetToggleRefs = objectBindings.clusterTargetToggles;
+                for (String chName : cfg.channelNames) {
+                    Boolean prevTarget = clusterTargets.get(chName);
+                    ToggleSwitch targetToggle =
+                            gdOpts.addToggle(chName, prevTarget != null && prevTarget.booleanValue());
+                    objectBindings.clusterTargetToggles.add(targetToggle);
+                    objectBindings.clusterTargetChannels.add(chName);
+                }
+                final Runnable updateClusterTargetEnablement = new Runnable() {
+                    @Override public void run() {
+                        Object sel = objectBindings.clusterMarkerChoice.getSelectedItem();
+                        String marker = sel == null ? OVERLAP_MARKER_NONE : sel.toString();
+                        boolean markerChosen = !OVERLAP_MARKER_NONE.equals(marker);
+                        for (int i = 0; i < clusterTargetToggleRefs.size(); i++) {
+                            boolean isMarker = objectBindings.clusterTargetChannels.get(i).equals(marker);
+                            if (isMarker) {
+                                clusterTargetToggleRefs.get(i).setSelected(false);
+                            }
+                            clusterTargetToggleRefs.get(i).setEnabled(markerChosen && !isMarker);
+                        }
+                    }
+                };
+                objectBindings.clusterMarkerChoice.addActionListener(new java.awt.event.ActionListener() {
+                    @Override public void actionPerformed(java.awt.event.ActionEvent e) {
+                        updateClusterTargetEnablement.run();
+                    }
+                });
+                objectBindings.clusterTargetEnablementUpdater = updateClusterTargetEnablement;
+                updateClusterTargetEnablement.run();
+
+                if (analyseFullImagesWithoutRois) {
+                    gdOpts.addHeader("Analysis Region");
+                    gdOpts.addHelpText("No saved ROI sets were found. This run will analyse the full image stack for each image.");
+                } else {
+                    gdOpts.addHeader("Regions");
+                    gdOpts.addHelpText("Select the region ROI sets to include in this analysis run.");
+                    final List<ToggleSwitch> regionToggles = new ArrayList<ToggleSwitch>();
+                    for (int r = 0; r < roiSetNames.length; r++) {
+                        regionToggles.add(gdOpts.addToggle(roiSetNames[r], selectedRoiSets[r]));
+                    }
+                    addRegionSelectionButtons(gdOpts, regionToggles);
+                }
+
+                gdOpts.beginAdvancedSection("threeDObject");
+                objectBindings.extractProcessLengthToggle =
+                        gdOpts.addToggle("Extract Process Length", extractProcessLength);
+
+                objectBindings.runSpatialToggle =
+                        gdOpts.addToggle("Run Spatial Analysis", runSpatial);
+
+                final Runnable updatePrimaryLabel = new Runnable() {
+                    @Override public void run() {
+                        boolean processLengthSelected = isSelected(objectBindings.extractProcessLengthToggle);
+                        boolean spatialSelected = isSelected(objectBindings.runSpatialToggle);
+                        gdOpts.setPrimaryButtonText(NextStepLabels.afterThreeDObjectMain(
+                                processLengthSelected,
+                                spatialSelected));
+                        gdOpts.setWorkflowTracker(
+                                threeDObjectWorkflow(processLengthSelected, spatialSelected), 0);
+                    }
+                };
+                objectBindings.primaryLabelUpdater = updatePrimaryLabel;
+                objectBindings.extractProcessLengthToggle.addChangeListener(updatePrimaryLabel);
+                objectBindings.runSpatialToggle.addChangeListener(updatePrimaryLabel);
+                updatePrimaryLabel.run();
+
+                objectBindings.classicalCentroidFilterToggle =
+                        gdOpts.addToggle("Use Centroid ROI Filtering (Classical)", classicalCentroidFilter);
+
+                gdOpts.endAdvancedSection();
+
+                LoadFromRunButton.install(gdOpts, "ThreeDObjectAnalysis", new File(directory),
+                        new LoadedRunParameterApplier() {
+                            @Override public LoadedRunParameters.Result applyLoadedParameters(
+                                    Map<String, Object> parameters) {
+                                return ThreeDObjectAnalysis.this.applyLoadedParameters(
+                                        parameters, cfg, channelIdentities,
+                                        objectBindings);
+                            }
+                        });
+
+                if (!gdOpts.showDialog()) {
+                    return; // Cancel
+                }
+                useDeconvolvedInput = gdOpts.getNextBoolean();
+                deconvToggleShown = true; // an interactive toggle value was read (enables flip detection)
+                doVolumetric = gdOpts.getNextBoolean();
+                doCpc = gdOpts.getNextBoolean();
+                doIntensityColoc = gdOpts.getNextBoolean();
+                doBBOverlap = gdOpts.getNextBoolean();
+                doBBCpc = gdOpts.getNextBoolean();
+                doBBVol = gdOpts.getNextBoolean();
+                // Object Intensity Profiling toggles, in the same add-order as the inline section
+                // above (8 booleans), read here to keep the positional boolean counter aligned.
+                doRadialProfile = gdOpts.getNextBoolean();
+                doMarginalProfile = gdOpts.getNextBoolean();
+                doPrincipalAxisProfile = gdOpts.getNextBoolean();
+                doAngularProfile = gdOpts.getNextBoolean();
+                doShellColoc = gdOpts.getNextBoolean();
+                doWithinBoxCorr = gdOpts.getNextBoolean();
+                oipRegion = gdOpts.getNextBoolean()
+                        ? OipConfig.Region.OBJECT_VOXELS : OipConfig.Region.WHOLE_BOX;
+                oipGenerateFigures = gdOpts.getNextBoolean();
+                // Resolve-fused-objects controls were added (in boolean order) right after the
+                // bounding-box toggles and before the region toggles, so consume the per-channel
+                // target toggles here to keep the boolean counter aligned. The marker channel is read
+                // directly from the combo reference (no getNextChoice ordering dependency).
+                Object clusterMarkerSel = objectBindings.clusterMarkerChoice == null
+                        ? OVERLAP_MARKER_NONE : objectBindings.clusterMarkerChoice.getSelectedItem();
+                clusterMarkerChannel = clusterMarkerSel == null
+                        ? OVERLAP_MARKER_NONE : clusterMarkerSel.toString();
+                clusterTargets.clear();
+                for (String chName : cfg.channelNames) {
+                    clusterTargets.put(chName, gdOpts.getNextBoolean());
+                }
+                // Read interleaved (Coloc % then BB Coloc %) to match the unified
+                // per-channel rows registered in addChannelDualNumericRow order.
+                markerThresholds.clear();
+                bbThresholds.clear();
+                for (String chName : cfg.channelNames) {
+                    markerThresholds.put(chName, gdOpts.getNextNumber());
+                    bbThresholds.put(chName, gdOpts.getNextNumber());
+                }
+                for (int r = 0; r < roiSetNames.length; r++) {
+                    selectedRoiSets[r] = gdOpts.getNextBoolean();
+                }
+                extractProcessLength = gdOpts.getNextBoolean();
+                runSpatial = gdOpts.getNextBoolean();
+                classicalCentroidFilter = gdOpts.getNextBoolean();
+                wizardExtractProcessLength = extractProcessLength;
+                wizardRunSpatial = runSpatial;
+                nuclearMarkerIndex = wizardNuclearMarkerIndex;
+                processChannels = wizardProcessChannels == null ? null : Arrays.copyOf(wizardProcessChannels, wizardProcessChannels.length);
+
+                if (!analyseFullImagesWithoutRois && !hasSelectedRoiSets(selectedRoiSets)) {
+                    IJ.error("3D Object Analysis", "Select at least one region to analyse.");
+                    continue;
+                }
+
+                if (extractProcessLength) {
+                    dialogStep = 1;
+                } else {
+                    break;
+                }
+            } else if (dialogStep == 1) {
+                String[] names = cfg.channelNames.toArray(new String[0]);
+                if (processChannels == null) {
+                    ThreeDObjectSetupConfig.DerivedConfig derived = ThreeDObjectSetupConfig.deriveConfig(
+                            cfg, channelIdentities, Collections.<String, Object>emptyMap(),
+                            analyseFullImagesWithoutRois ? Collections.<String>emptyList() : Arrays.asList(roiSetNames));
+                    nuclearMarkerIndex = derived.nuclearMarkerIndex;
+                    processChannels = Arrays.copyOf(derived.processChannels, derived.processChannels.length);
+                }
+
+                PipelineDialog gdPA = new PipelineDialog("Process Analysis", PipelineDialog.Phase.ANALYSE);
+                gdPA.setWorkflowTracker(threeDObjectWorkflow(true, runSpatial), 1);
+                gdPA.enableBackButton();
+                gdPA.setPrimaryButtonText(NextStepLabels.afterThreeDObjectProcess(runSpatial));
+                gdPA.addAnalysisHelpHeader("3D Object Analysis", FLASH_Pipeline.IDX_3D_OBJECT);
+                gdPA.addSubHeader("Nuclear Marker");
+                String defaultNuclear = nuclearMarkerIndex >= 0 && nuclearMarkerIndex < names.length
+                        ? names[nuclearMarkerIndex] : names[0];
+                gdPA.addChoice("Nuclear Marker Channel", names, defaultNuclear);
+
+                gdPA.addHeader("Extract Process Length For");
+                gdPA.addHelpText("Select which channels contain processes to measure.");
+                for (int pc = 0; pc < names.length; pc++) {
+                    gdPA.addToggle(names[pc], processChannels != null && processChannels[pc]);
+                }
+
+                if (!gdPA.showDialog()) {
+                    if (gdPA.wasBackPressed()) {
+                        String nuclearMarkerName = gdPA.getNextChoice();
+                        nuclearMarkerIndex = cfg.channelNames.indexOf(nuclearMarkerName);
+                        processChannels = new boolean[names.length];
+                        for (int pc = 0; pc < names.length; pc++) {
+                            processChannels[pc] = gdPA.getNextBoolean();
+                        }
+                        wizardNuclearMarkerIndex = nuclearMarkerIndex;
+                        wizardProcessChannels = Arrays.copyOf(processChannels, processChannels.length);
+                        dialogStep = 0; // go back
+                        continue;
+                    }
+                    return; // Cancel
+                }
+
+                String nuclearMarkerName = gdPA.getNextChoice();
+                nuclearMarkerIndex = cfg.channelNames.indexOf(nuclearMarkerName);
+                processChannels = new boolean[names.length];
+                for (int pc = 0; pc < names.length; pc++) {
+                    processChannels[pc] = gdPA.getNextBoolean();
+                }
+                wizardNuclearMarkerIndex = nuclearMarkerIndex;
+                wizardProcessChannels = Arrays.copyOf(processChannels, processChannels.length);
+                break;
+            }
+        }
+
+        recordThreeDObjectRunParameters(
+                cfg, channelIdentities, extractProcessLength, runSpatial,
+                nuclearMarkerIndex, processChannels);
+
+        ExistingObjectDataMode existingObjectDataMode =
+                resolveExistingObjectDataMode(directory, cfg.channelNames);
+        if (existingObjectDataMode == ExistingObjectDataMode.CANCEL) {
+            String message = "[FLASH] 3D Object Analysis cancelled because existing output handling was cancelled.";
+            IJ.log(message);
+            recordWarn(message);
+            return;
+        }
+        if (existingObjectDataMode == ExistingObjectDataMode.SKIP) {
+            IJ.log("All output CSVs already exist - skipping entire 3D Object Analysis.");
+            IJ.showProgress(1.0);
+            IJ.showStatus("");
+            return;
+        }
+        boolean extendExistingObjectData =
+                existingObjectDataMode == ExistingObjectDataMode.EXTEND;
+
+        if (!prepareSpatialHandoffBeforeAnalysis(directory, cfg.channelNames, runSpatial)) {
+            return;
+        }
+
+        // Preload all ROIs directly from zip files — no RoiManager needed
+        IJ.log("ROI set selections:");
+        List<RoiSetData> selectedRoiSetData = new ArrayList<RoiSetData>();
+        if (analyseFullImagesWithoutRois) {
+            IJ.log("  ROI set '" + FULL_IMAGE_ROI_SET_NAME + "': selected (no ROI restriction)");
+            selectedRoiSetData.add(RoiSetData.fullImage());
+        } else {
+            for (int r = 0; r < roiZips.size(); r++) {
+                IJ.log("  ROI set '" + roiSetNames[r] + "': " + (selectedRoiSets[r] ? "selected" : "skipped"));
+                if (!selectedRoiSets[r]) continue;
+                List<ij.gui.Roi> rois;
+                AnalysisRunContext.InputHandle roiInput = recordInputStart(roiZips.get(r), 0);
+                long roiStarted = System.currentTimeMillis();
+                try {
+                    rois = RoiIO.loadRoisFromZip(roiZips.get(r));
+                    recordInputEnd(roiInput, "processed", roiStarted);
+                } catch (NoClassDefFoundError e) {
+                    recordInputEnd(roiInput, "failed", roiStarted);
+                    recordError("Failed to load ROI zip " + roiZips.get(r).getAbsolutePath(), e);
+                    if (PluginInstallGuard.reportMissingInternalClass("3D Object Analysis", e)) return;
+                    throw e;
+                }
+                selectedRoiSetData.add(new RoiSetData(roiSetNames[r], rois.toArray(new ij.gui.Roi[0])));
+            }
+        }
+        RoiSetData[] roiSets = selectedRoiSetData.toArray(new RoiSetData[0]);
+
+        if (roiSets.length == 0) {
+            String message = "No ROIs loaded. Run 'Draw ROIs and Orientate Images' first (must create 2 ROIs per image).";
+            IJ.error("3D Object Analysis", message);
+            recordWarn(message);
+            return;
+        }
+
+        IJ.log("ROI sets selected for analysis: " + roiSets.length);
+        for (RoiSetData roiSet : roiSets) {
+            IJ.log("  - " + roiSetDisplayName(roiSet));
+        }
+
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        File outDir = objectCsvWriteDir(directory);
+        //noinspection ResultOfMethodCallIgnored
+        outDir.mkdirs();
+
+        File objectAnalysisDetailsDir = ObjectAnalysisDetailsWriter.analysisDetailsWriteDir(new File(directory));
+        //noinspection ResultOfMethodCallIgnored
+        objectAnalysisDetailsDir.mkdirs();
+
+        File binDir = activeConfigurationDir(directory);
+        ModelCatalog modelCatalog = ModelCatalogIO.read(new File(directory).toPath().toAbsolutePath().normalize());
+        try {
+            ObjectAnalysisDetailsWriter.writeSegmentationModelsReport(
+                    objectAnalysisDetailsDir,
+                    modelCatalog,
+                    cfg.channelNames,
+                    cfg.segmentationMethods);
+            File report = ObjectAnalysisDetailsWriter.segmentationModelsReportFile(objectAnalysisDetailsDir);
+            if (report.isFile()) {
+                recordOutput(report, "txt");
+            }
+        } catch (Exception e) {
+            String message = "Warning: failed writing segmentation model audit details: " + e.getMessage();
+            IJ.log(message);
+            recordWarn(message);
+        }
+
+        SegmentationImageRoot imageRoot = SegmentationImageRoot.forDirectory(directory);
+        //noinspection ResultOfMethodCallIgnored
+        imageRoot.root.mkdirs();
+
+        // Per-channel accumulator tables (macro ultimately writes one CSV per channel)
+        Map<String, ij.measure.ResultsTable> channelTables = new LinkedHashMap<>();
+        for (String chName : cfg.channelNames) {
+            channelTables.put(chName, new ij.measure.ResultsTable());
+        }
+
+        final long analysisStartTime = System.currentTimeMillis();
+
+        // Record parameters in QC report
+        if (qualityReport != null && qualityReport.isEnabled()) {
+            String[] chNames = cfg.channelNames.toArray(new String[0]);
+            String[] channelSummaries = new String[chNames.length];
+            for (int c = 0; c < chNames.length; c++) {
+                channelSummaries[c] = build3DObjectChannelSummary(cfg, c);
+            }
+            qualityReport.add3DObjectParams(chNames, channelSummaries,
+                    extractProcessLength, runSpatial, markerThresholds,
+                    cfg.getZSliceConfig().summary());
+        }
+
+        // Stage 15: resolve the effective per-channel ANALYSIS-group routing once for this run
+        // (precedence: explicit CLI flag > interactive flip > persisted routing > legacy default),
+        // then normalize against the selected channels. Drives both the input swap and the TIF cache.
+        boolean[] deconvSelected = new boolean[deconvSizeC];
+        Arrays.fill(deconvSelected, true);
+        DeconvRoutingResolver.Result deconvResolution = DeconvRoutingResolver.resolve(
+                new DeconvRoutingResolver.Inputs()
+                        .sizeC(deconvSizeC)
+                        .selectedChannels(deconvSelected)
+                        .group(DeconvRoutingGroup.ANALYSIS)
+                        .channelConfig(deconvChannelConfig)
+                        .cliFlag(deconvCliFlag)
+                        .interactivePresent(deconvToggleShown)
+                        .toggleValue(useDeconvolvedInput)
+                        .toggleDefault(deconvToggleDefault)
+                        .legacyDefaultToggle(true));
+        this.deconvRouting = deconvResolution.routing;
+        this.expectedDeconvParams = DeconvConfigBridge.expectedParamsFor(deconvChannelConfig);
+        if (deconvResolution.warnTunedFlip) {
+            String deconvWarn = "3D Object Analysis: object thresholds / particle sizes / segmentation "
+                    + "were tuned on " + deconvResolution.tunedSourceLabel
+                    + "; the deconvolution input was flipped away from that source for this run.";
+            IJ.log("[Deconv] " + deconvWarn);
+            recordWarn(deconvWarn);
+        }
+
+        DeferredImageSupplier supplier;
+        int totalImages;
+        try {
+            supplier = ImageSourceDispatcher.createSupplier(directory);
+            totalImages = supplier.getTotalSeries();
+            supplier = wrapInputSupplier(directory, supplier);
+        } catch (Exception e) {
+            String message = "3D Object Analysis: " + e.getMessage();
+            IJ.log(message);
+            recordWarn(message);
+            if (canShowGuiDecisionDialog()) {
+                IJ.showMessage("3D Object Analysis", e.getMessage());
+            }
+            IJ.showProgress(1.0);
+            IJ.showStatus("");
+            return;
+        }
+
+        // Region-scoped ROIs cover an image subset and bind by durable image identity, so
+        // precompute each image's binding token (matching the Draw ROIs side, which names ROI
+        // pairs from the same OrientationImageIdentity) rather than relying on positional order.
+        imageBindTokens = new String[totalImages];
+        for (int t = 0; t < totalImages; t++) {
+            try {
+                String ik = OrientationImageIdentity.fromProjectSeries(
+                        directory, t, supplier.getSeriesName(t)).imageKey;
+                imageBindTokens[t] = (ik != null && !ik.trim().isEmpty())
+                        ? RoiSetImageBinding.token(ik) : null;
+            } catch (Exception ex) {
+                imageBindTokens[t] = null;
+                IJ.log("  [FLASH] No durable identity for image " + (t + 1) + ": " + ex.getMessage());
+            }
+        }
+
+        if (!validateRoiSets(roiSets, totalImages)) {
+            return;
+        }
+
+        int plannedProgressUnits = totalImages + countPlannedObjectRoiTasks(totalImages, roiSets);
+        objectProgressReporter = createProgressReporter("3D Object Analysis", plannedProgressUnits);
+        objectProgressReporter.setPhase("image and ROI analysis");
+        try {
+            if (parallelThreads > 1) {
+                // ── Parallel processing: bounded producer-consumer queue ──
+                List<Integer> indicesToProcess = new ArrayList<Integer>();
+                for (int i = 0; i < totalImages; i++) {
+                    indicesToProcess.add(i);
+                }
+                // WindowManager-dependent work is serialized separately, so StarDist no longer
+                // forces the whole analysis down to a single worker.
+                int effectiveLoaders = 1;
+                int effectiveWorkers = Math.max(1, parallelThreads - effectiveLoaders);
+                int bufferSize = Math.min(4, Math.max(2, effectiveWorkers));
+                int safeWorkers = AdaptiveParallelism.computeAndLog(supplier, effectiveWorkers, bufferSize);
+                BoundedImageLoader loader = new BoundedImageLoader(supplier, indicesToProcess, bufferSize,
+                        effectiveLoaders,
+                        useTifCache && (deconvRouting == null
+                                || !deconvRouting.groupUsesDeconv(DeconvRoutingGroup.ANALYSIS)),
+                        directory);
+                try {
+                    List<SeriesMeta> metas = ImageSourceDispatcher.readAllMetadata(directory);
+                    List<String> names = new ArrayList<String>();
+                    for (SeriesMeta m : metas) names.add(m.name);
+                    loader.setSeriesNames(names);
+                } catch (Exception e) {
+                    String message = "    - WARNING: Could not read series names for 3D object loader progress in "
+                            + directory + ": " + e.getMessage();
+                    IJ.log(message);
+                    recordWarn(message);
+                }
+                loader.start();
+                IJ.log("Thread split: " + effectiveLoaders + " loaders, " + safeWorkers + " workers");
+                compactLog = true;
+                processImagesParallel(loader, safeWorkers, directory, cfg, outDir, imageRoot, channelTables,
+                        roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
+                        analysisStartTime);
+                compactLog = false;
+            } else {
+                compactLog = false;
+                // ── Sequential processing: deferred loading with prefetch ──
+                processImagesSequential(supplier, totalImages, directory, cfg, outDir, imageRoot, channelTables,
+                        roiSets, extractProcessLength, nuclearMarkerIndex, processChannels,
+                        analysisStartTime);
+            }
+        } finally {
+            objectProgressReporter.finish("3D Object image and ROI processing finished");
+            objectProgressReporter = AnalysisProgressReporter.disabled();
+            objectImageProgress.remove();
+            objectRoiProgress.remove();
+            compactLog = false;
+        }
+
+        IJ.showProgress(1.0);
+        IJ.showStatus("");
+
+        // Ensure all coloc columns exist on each channel table
+        if (doVolumetric) ensureAllColocColumns(cfg, channelTables);
+        if (doIntensityColoc) ensureAllIntensityColocColumns(cfg, channelTables);
+        if (doCpc) ensureAllCpcColocColumns(cfg, channelTables);
+        if (doBBOverlap) ensureAllBBColocColumns(cfg, channelTables);
+        if (doBBCpc) ensureAllBBCpcColocColumns(cfg, channelTables);
+        if (doBBVol) ensureAllBBVolColocColumns(cfg, channelTables);
+        if (overlapCountEnabled(cfg)) ensureAllOverlapCountColumns(cfg, channelTables);
+        if (anyOipEnabled()) ensureAllOipColumns(cfg, channelTables);
+        // Always called: when OIP is disabled on an overwrite run this clears stale OIP artifacts.
+        writeOipOutputs(directory, extendExistingObjectData);
+
+        for (Map.Entry<String, ij.measure.ResultsTable> e : channelTables.entrySet()) {
+            try {
+                String channelName = e.getKey();
+                List<String> keep = buildOrderedObjectColumns(channelName, e.getValue(), cfg,
+                        extractProcessLength, processChannels);
+                ResultsTableCleaner.keepOnlyColumns(e.getValue(), keep.toArray(new String[0]));
+
+                File out = objectOutputCsv(outDir, channelName);
+                writeObjectResultsCsv(directory, out, channelName, e.getValue(), keep,
+                        extendExistingObjectData, currentRunId());
+                recordOutput(out, "csv");
+
+                // Write macro-style Analysis Details per channel
+                int cIndex = cfg.channelNames.indexOf(channelName);
+                if (cIndex >= 0) {
+                    if (cfg.isStarDist(cIndex)) {
+                        ObjectAnalysisDetailsWriter.writeStarDistPerChannel(
+                                objectAnalysisDetailsDir,
+                                binDir,
+                                channelName,
+                                cIndex + 1,
+                                resolvedModelEntry(modelCatalog, cfg.segmentationMethod(cIndex),
+                                        ModelEntry.Engine.STARDIST),
+                                cfg.getStarDistProbThresh(cIndex),
+                                cfg.getStarDistNmsThresh(cIndex),
+                                cfg.getStarDistLinkingMaxDistance(cIndex),
+                                cfg.getStarDistGapClosingMaxDistance(cIndex),
+                                cfg.getStarDistMaxFrameGap(cIndex),
+                                cfg.getStarDistAreaMin(cIndex),
+                                cfg.getStarDistAreaMax(cIndex),
+                                cfg.getStarDistQualityMin(cIndex),
+                                cfg.getStarDistIntensityMin(cIndex),
+                                cfg.channelNames.toArray(new String[0]),
+                                runSpatial,
+                                markerThresholds
+                        );
+                    } else if (cfg.isCellpose(cIndex)) {
+                        int cellposeCompanionIndex = cfg.getCellposeSecondChannel(cIndex);
+                        String companionChannelName = cellposeCompanionIndex >= 0
+                                && cellposeCompanionIndex < cfg.channelNames.size()
+                                ? cfg.channelNames.get(cellposeCompanionIndex)
+                                : null;
+                        ObjectAnalysisDetailsWriter.writeCellposePerChannel(
+                                objectAnalysisDetailsDir,
+                                binDir,
+                                channelName,
+                                cIndex + 1,
+                                resolvedModelEntry(modelCatalog, cfg.segmentationMethod(cIndex),
+                                        ModelEntry.Engine.CELLPOSE),
+                                cfg.getCellposeModel(cIndex),
+                                cfg.getCellposeDiameter(cIndex),
+                                cfg.getCellposeFlowThreshold(cIndex),
+                                cfg.getCellposeCellprobThreshold(cIndex),
+                                cfg.getCellposeUseGpu(cIndex),
+                                companionChannelName,
+                                cfg.channelNames.toArray(new String[0]),
+                                runSpatial,
+                                markerThresholds
+                        );
+                    } else {
+                        String thrTok = cfg.isEnhancedClassical(cIndex)
+                                ? String.valueOf(cfg.getEnhancedClassicalThreshold(cIndex))
+                                : (cIndex < cfg.channelThresholds.size() ? cfg.channelThresholds.get(cIndex) : "");
+                        String sizeTok = cfg.isEnhancedClassical(cIndex)
+                                ? cfg.getEnhancedClassicalMinSize(cIndex) + "-"
+                                + (cfg.getEnhancedClassicalMaxSize(cIndex) == Integer.MAX_VALUE
+                                ? "Infinity" : String.valueOf(cfg.getEnhancedClassicalMaxSize(cIndex)))
+                                : (cIndex < cfg.channelSizes.size() ? cfg.channelSizes.get(cIndex) : "");
+                        ObjectAnalysisDetailsWriter.writePerChannel(
+                                objectAnalysisDetailsDir,
+                                binDir,
+                                channelName,
+                                cIndex + 1,
+                                thrTok,
+                                sizeTok,
+                                cfg.channelNames.toArray(new String[0]),
+                                runSpatial,
+                                markerThresholds,
+                                null,
+                                cfg.segmentationMethod(cIndex)
+                        );
+                    }
+                    recordOutput(new File(objectAnalysisDetailsDir,
+                            ObjectAnalysisDetailsWriter.detailsFileName(channelName)), "txt");
+                }
+            } catch (Exception ex) {
+                String message = "Warning: failed saving " + e.getKey() + ": " + ex.getMessage();
+                IJ.log(message);
+                recordError(message, ex);
+            }
+        }
+
+        if (runSpatial) {
+            AsyncImageSaver.waitForAllWithProgress(parallelThreads);
+            IJ.log("--- Running Spatial Distance Analysis ---");
+            SpatialAnalysis spatial = createSpatialAnalysisForRun();
+            boolean imagesClosed = false;
+            try {
+                if (spatial.beginPhasedRun(directory)) {
+                    LabelImageProvider provider = new InMemoryLabelImageProvider(
+                            retainedLabels,
+                            new DiskLabelImageProvider(spatial, directory));
+                    spatial.runEarlyPhase(directory, provider);
+                    closeAllImagesOnly();
+                    imagesClosed = true;
+                    clearRetainedSpatialLabels();
+                    spatial.runLatePhase(directory);
+                    IJ.log("Spatial distance analysis complete.");
+                } else {
+                    closeAllImagesOnly();
+                    imagesClosed = true;
+                    clearRetainedSpatialLabels();
+                }
+            } finally {
+                spatial.endPhasedRun();
+                clearRetainedSpatialLabels();
+                if (!imagesClosed) {
+                    closeAllImagesOnly();
+                }
+            }
+        } else {
+            closeAllImagesOnly();
+            clearRetainedSpatialLabels();
+        }
+
+        AsyncImageSaver.waitForAllWithProgress(parallelThreads);
+
+        // Write QC report with segmentation overlays
+        if (qualityReport != null && qualityReport.isEnabled()) {
+            qualityReport.write3DObjectQC();
+        }
+
+        long totalTime = System.currentTimeMillis() - analysisStartTime;
+        IJ.log("__________________________________________________________");
+        if (lifOpenTimeMs > 0) {
+            IJ.log("3D Object Analysis complete. Total time: " + formatDuration(totalTime)
+                    + " (processing) + " + formatDuration(lifOpenTimeMs) + " (source open)");
+        } else {
+            IJ.log("3D Object Analysis complete. Total time: " + formatDuration(totalTime));
+        }
+
+        // Non-blocking completion signal. A modal "Finished" dialog here would
+        // stall unattended batch runs until a human clicked OK.
+        IJ.showStatus("3D Object Analysis finished.");
+    }
+
+    BinConfig loadBinConfig(String directory) {
+        return BinConfigIO.readPartialFromDirectory(directory);
+    }
+
+    private void ensureStringColumn(ResultsTable t, String col) {
+        if (t == null) return;
+        if (t.size() == 0) {
+            // Don't create a dummy row — the column will be created when real data is added.
+            return;
+        }
+        try {
+            t.getStringValue(col, 0);
+        } catch (Exception e) {
+            t.setValue(col, 0, "");
+        }
+    }
+
+    // ── Sequential image processing (original behavior) ──
+
+    private boolean hasSelectedRoiSets(boolean[] selectedRoiSets) {
+        if (selectedRoiSets == null) return false;
+        for (boolean selected : selectedRoiSets) {
+            if (selected) return true;
+        }
+        return false;
+    }
+
+    private ExistingObjectDataMode resolveExistingObjectDataMode(String directory,
+                                                                 List<String> channelNames) {
+        File outDir = objectCsvWriteDir(directory);
+        List<File> existingCsvs = existingObjectOutputCsvs(directory, channelNames);
+        if (existingCsvs.isEmpty()) {
+            return ExistingObjectDataMode.OVERWRITE;
+        }
+
+        if (skipExisting && allObjectOutputCsvsExist(directory, channelNames)) {
+            return ExistingObjectDataMode.SKIP;
+        }
+        if (skipExisting) {
+            IJ.log("Skip Existing is enabled; existing 3D Object Analysis CSVs will be extended.");
+            return ExistingObjectDataMode.EXTEND;
+        }
+
+        if (canPromptForExistingObjectData()) {
+            ExistingObjectDataMode mode = existingObjectDataPrompt.choose(outDir, existingCsvs);
+            return mode == null ? ExistingObjectDataMode.CANCEL : mode;
+        }
+
+        IJ.log("Existing 3D Object Analysis CSVs detected; non-interactive run will overwrite them.");
+        return ExistingObjectDataMode.OVERWRITE;
+    }
+
+    private boolean canPromptForExistingObjectData() {
+        return canShowGuiDecisionDialog();
+    }
+
+    private boolean canShowGuiDecisionDialog() {
+        return canShowGuiDecisionDialog(suppressDialogs, cliConfig,
+                GraphicsEnvironment.isHeadless(), imageJUiAvailableForDecisionDialog());
+    }
+
+    private boolean imageJUiAvailableForDecisionDialog() {
+        return guiDecisionDialogsAvailableForTest == null
+                ? IJ.getInstance() != null
+                : guiDecisionDialogsAvailableForTest.booleanValue();
+    }
+
+    static boolean canShowGuiDecisionDialog(boolean suppressDialogs,
+                                            CLIConfig cliConfig,
+                                            boolean runtimeHeadless) {
+        return canShowGuiDecisionDialog(suppressDialogs, cliConfig, runtimeHeadless,
+                IJ.getInstance() != null);
+    }
+
+    static boolean canShowGuiDecisionDialog(boolean suppressDialogs,
+                                            CLIConfig cliConfig,
+                                            boolean runtimeHeadless,
+                                            boolean imageJUiAvailable) {
+        return !suppressDialogs && cliConfig == null && !runtimeHeadless && imageJUiAvailable;
+    }
+
+    private static String existingObjectDataPromptMessage(File outputDir, List<File> existingCsvs) {
+        StringBuilder message = new StringBuilder();
+        message.append("Existing 3D Object Analysis CSV data was found for this project.");
+        if (outputDir != null) {
+            message.append("\n\nNew output folder:\n").append(outputDir.getAbsolutePath());
+        }
+        message.append("\n\nChoose how this run should handle the saved data:\n\n")
+                .append("Extend Existing Data: keep the existing rows and append this run's rows.\n")
+                .append("Overwrite Existing Data: replace the existing CSVs with this run's rows only.\n\n")
+                .append("Existing channel CSVs: ");
+        if (existingCsvs == null || existingCsvs.isEmpty()) {
+            message.append("none");
+        } else {
+            int shown = Math.min(existingCsvs.size(), 5);
+            for (int i = 0; i < shown; i++) {
+                if (i > 0) message.append(", ");
+                message.append(existingCsvs.get(i).getName());
+            }
+            if (existingCsvs.size() > shown) {
+                message.append(", ...");
+            }
+        }
+        return message.toString();
+    }
+
+    private RoiSetSelection resolveRoiSetsForRun(String directory) {
+        RoiSetSelection selection = discoverSavedRoiSets(directory);
+        if (selection == null) {
+            return null;
+        }
+        logRoiSets(selection);
+        if (selection.hasSavedRois()) {
+            return selection;
+        }
+
+        NoRoiDecision decision = promptForNoRoiDecision();
+        if (decision == NoRoiDecision.DRAW_ROIS) {
+            launchRoiDrawingWorkflow(directory);
+            selection = discoverSavedRoiSets(directory);
+            if (selection == null) {
+                return null;
+            }
+            logRoiSets(selection);
+            if (selection.hasSavedRois()) {
+                return selection;
+            }
+            String message = "[FLASH] 3D Object Analysis cancelled because no ROI sets "
+                    + "were saved after Draw ROIs and Orientate Images.";
+            IJ.log(message);
+            recordWarn(message);
+            return null;
+        }
+        if (decision == null || decision == NoRoiDecision.CANCEL) {
+            String message = "[FLASH] 3D Object Analysis cancelled because no ROI sets were found.";
+            IJ.log(message);
+            recordWarn(message);
+            return null;
+        }
+
+        IJ.log("[FLASH] No ROI sets found. 3D Object Analysis will analyse each full image stack.");
+        return RoiSetSelection.fullImages();
+    }
+
+    private RoiSetSelection discoverSavedRoiSets(String directory) {
+        List<File> roiZips;
+        try {
+            roiZips = RoiIO.listRoiZipFiles(new File(directory));
+        } catch (NoClassDefFoundError e) {
+            if (PluginInstallGuard.reportMissingInternalClass("3D Object Analysis", e)) {
+                return null;
+            }
+            throw e;
+        }
+        String[] roiSetNames = new String[roiZips.size()];
+        for (int r = 0; r < roiZips.size(); r++) {
+            roiSetNames[r] = roiSetNameForZip(roiZips.get(r));
+        }
+        return RoiSetSelection.saved(roiZips, roiSetNames);
+    }
+
+    private static String roiSetNameForZip(File roiZip) {
+        if (roiZip == null) {
+            return "";
+        }
+        return roiZip.getName()
+                .replace(" ROIs.zip", "")
+                .replace("ROIs.zip", "")
+                .replace(".zip", "")
+                .trim();
+    }
+
+    private static void logRoiSets(RoiSetSelection selection) {
+        int count = selection == null || selection.roiZips == null ? 0 : selection.roiZips.size();
+        IJ.log("ROI sets found: " + count);
+        if (selection == null || selection.roiSetNames == null) {
+            return;
+        }
+        for (String roiSetName : selection.roiSetNames) {
+            IJ.log("  - " + roiSetName);
+        }
+    }
+
+    private NoRoiDecision promptForNoRoiDecision() {
+        return noRoiDecisionPrompt.choose();
+    }
+
+    private NoRoiDecision showNoRoiDecisionDialog() {
+        if (!canShowGuiDecisionDialog()) {
+            return NoRoiDecision.ANALYSE_FULL_IMAGE;
+        }
+
+        Object[] options = new Object[]{"Define ROI Sets", "Analyse Full Images"};
+        int choice = JOptionPane.showOptionDialog(
+                null,
+                "No saved ROI sets were found for this project.\n\n"
+                        + "3D Object Analysis can analyse the full image stack for each image, "
+                        + "but object counts and measurements will not be restricted to a drawn region.\n\n"
+                        + "To restrict analysis to regions of interest, define ROI sets before running this analysis.",
+                "3D Object Analysis - No ROI Sets Found",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[0]);
+
+        if (choice == 0) return NoRoiDecision.DRAW_ROIS;
+        if (choice == 1) return NoRoiDecision.ANALYSE_FULL_IMAGE;
+        return NoRoiDecision.CANCEL;
+    }
+
+    private void launchRoiDrawingWorkflow(String directory) {
+        roiDrawingWorkflowLauncher.launch(directory);
+    }
+
+    private void launchRoiDrawingWorkflowDirect(String directory) {
+        IJ.log("[FLASH] Opening Draw ROIs and Orientate Images before 3D Object Analysis.");
+        DrawAndSaveROIsAnalysis roiAnalysis = new DrawAndSaveROIsAnalysis();
+        roiAnalysis.setSuppressDialogs(false);
+        roiAnalysis.setHeadless(false);
+        roiAnalysis.setCliConfig(cliConfig);
+        roiAnalysis.execute(directory);
+    }
+
+    private static String roiSetDisplayName(RoiSetData roiSet) {
+        if (roiSet == null || roiSet.fullImage) return FULL_IMAGE_ROI_SET_NAME;
+        return roiSet.name;
+    }
+
+    private void addThreeDObjectSetupControls(final PipelineDialog dialog,
+                                              final String directory,
+                                              final BinConfig cfg,
+                                              final ChannelIdentities identities,
+                                              final ThreeDObjectDialogBindings bindings,
+                                              final ThreeDObjectConfigApplier applier) {
+        final JComboBox<String> presetCombo = new JComboBox<String>(listThreeDObjectPresetNames(directory));
+        if (bindings != null) {
+            bindings.presetCombo = presetCombo;
+        }
+        final JButton savePreset = new JButton("Save as preset...");
+        flash.pipeline.ui.FlashIcons.apply(savePreset, flash.pipeline.ui.FlashIcons.save());
+        savePreset.setToolTipText("Save the current 3D Object Analysis options as a named preset.");
+        savePreset.addActionListener(e -> handleSaveThreeDObjectPreset(
+                directory, cfg, identities, bindings));
+        JButton managePreset = new JButton("Manage...");
+        managePreset.setToolTipText("Delete saved 3D Object Analysis presets.");
+        managePreset.addActionListener(e -> {
+            boolean changed = flash.pipeline.ui.config.PresetManagerDialog.manage(
+                    presetCombo, new ThreeDObjectPresetIO(new File(directory)), "Manage 3D Object Presets");
+            if (changed) {
+                refreshThreeDObjectPresetChoice(directory, bindings, OBJECT_PRESET_PLACEHOLDER);
+            }
+        });
+        JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        presetCombo.setMaximumSize(new java.awt.Dimension(260, 24));
+        row.add(presetCombo);
+        row.add(savePreset);
+        row.add(managePreset);
+        presetCombo.addActionListener(e -> {
+            if (bindings != null && bindings.programmaticChange) {
+                return;
+            }
+            Object selected = presetCombo.getSelectedItem();
+            if (selected != null && !OBJECT_PRESET_PLACEHOLDER.equals(String.valueOf(selected))) {
+                ThreeDObjectSetupConfig.DerivedConfig derived = loadThreeDObjectPresetConfig(
+                        directory, cfg, identities, String.valueOf(selected));
+                if (derived != null && applier != null) {
+                    applier.apply(String.valueOf(selected), derived);
+                }
+            }
+        });
+        dialog.addComponent(row);
+    }
+
+    private void applyThreeDObjectConfigToDialog(BinConfig cfg,
+                                                 ThreeDObjectSetupConfig.DerivedConfig derived,
+                                                 ThreeDObjectDialogBindings bindings,
+                                                 String selectedPresetName) {
+        if (derived == null || bindings == null) {
+            return;
+        }
+        applyThreeDObjectDerivedConfig(cfg, derived);
+        bindings.programmaticChange = true;
+        try {
+            if (bindings.presetCombo != null) {
+                bindings.presetCombo.setSelectedItem(
+                        selectedPresetName == null ? OBJECT_PRESET_PLACEHOLDER : selectedPresetName);
+            }
+            setToggle(bindings.doVolumetricToggle, doVolumetric);
+            setToggle(bindings.doCpcToggle, doCpc);
+            setToggle(bindings.doIntensityColocToggle, doIntensityColoc);
+            setToggle(bindings.doBBOverlapToggle, doBBOverlap);
+            setToggle(bindings.doBBCpcToggle, doBBCpc);
+            setToggle(bindings.doBBVolToggle, doBBVol);
+            setToggle(bindings.oipRadialToggle, doRadialProfile);
+            setToggle(bindings.oipMarginalToggle, doMarginalProfile);
+            setToggle(bindings.oipPrincipalAxisToggle, doPrincipalAxisProfile);
+            setToggle(bindings.oipAngularToggle, doAngularProfile);
+            setToggle(bindings.oipShellToggle, doShellColoc);
+            setToggle(bindings.oipWithinBoxToggle, doWithinBoxCorr);
+            setToggle(bindings.oipObjectOnlyToggle, oipRegion == OipConfig.Region.OBJECT_VOXELS);
+            setToggle(bindings.oipFiguresToggle, oipGenerateFigures);
+            setToggle(bindings.extractProcessLengthToggle, wizardExtractProcessLength);
+            setToggle(bindings.runSpatialToggle, wizardRunSpatial);
+            setToggle(bindings.classicalCentroidFilterToggle, classicalCentroidFilter);
+            for (int i = 0; i < bindings.thresholdFields.size() && cfg != null && i < cfg.channelNames.size(); i++) {
+                JTextField field = bindings.thresholdFields.get(i);
+                Double threshold = markerThresholds.get(cfg.channelNames.get(i));
+                if (field != null && threshold != null) {
+                    field.setText(Double.toString(threshold.doubleValue()));
+                }
+            }
+            for (int i = 0; i < bindings.bbThresholdFields.size() && cfg != null && i < cfg.channelNames.size(); i++) {
+                JTextField field = bindings.bbThresholdFields.get(i);
+                Double bbThreshold = bbThresholds.get(cfg.channelNames.get(i));
+                if (field != null && bbThreshold != null) {
+                    field.setText(Double.toString(bbThreshold.doubleValue()));
+                }
+            }
+            if (bindings.clusterMarkerChoice != null) {
+                bindings.clusterMarkerChoice.setSelectedItem(
+                        clusterMarkerChannel == null ? OVERLAP_MARKER_NONE : clusterMarkerChannel);
+            }
+            for (int i = 0; i < bindings.clusterTargetToggles.size()
+                    && i < bindings.clusterTargetChannels.size(); i++) {
+                String channelName = bindings.clusterTargetChannels.get(i);
+                setToggle(bindings.clusterTargetToggles.get(i),
+                        Boolean.TRUE.equals(clusterTargets.get(channelName)));
+            }
+        } finally {
+            bindings.programmaticChange = false;
+        }
+        if (bindings.primaryLabelUpdater != null) {
+            bindings.primaryLabelUpdater.run();
+        }
+        if (bindings.oipEnablementUpdater != null) {
+            bindings.oipEnablementUpdater.run();
+        }
+        if (bindings.clusterTargetEnablementUpdater != null) {
+            bindings.clusterTargetEnablementUpdater.run();
+        }
+    }
+
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        LoadedRunParameters.PresetLoad<ThreeDObjectPreset> load =
+                parseLoadedThreeDObjectPreset(parameters);
+        LoadedRunParameters.Result result = load.result;
+        if (load.payload != null) {
+            try {
+                ThreeDObjectSetupConfig.DerivedConfig derived =
+                        ThreeDObjectSetupConfig.fromPreset(
+                                new BinConfig(),
+                                new ChannelIdentities(
+                                        Collections.<ChannelIdentities.Entry>emptyList()),
+                                load.payload);
+                applyThreeDObjectDerivedConfig(new BinConfig(), derived);
+            } catch (IllegalArgumentException e) {
+                IJ.log("[FLASH] Rejected 3D Object run parameters: " + e.getMessage());
+                result = rejectedThreeDObjectParameters(parameters);
+            }
+        }
+        LoadedRunParameters.rememberLastResult(result);
+        return result;
+    }
+
+    private LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters,
+                                                            BinConfig cfg,
+                                                            ChannelIdentities identities,
+                                                            ThreeDObjectDialogBindings bindings) {
+        LoadedRunParameters.PresetLoad<ThreeDObjectPreset> load =
+                parseLoadedThreeDObjectPreset(parameters);
+        if (load.payload == null) {
+            if (canShowGuiDecisionDialog()) {
+                IJ.showMessage("3D Object Analysis",
+                        "The saved 3D Object settings are malformed or use an unsupported schema.");
+            }
+            return load.result;
+        }
+        try {
+            ThreeDObjectSetupConfig.DerivedConfig derived =
+                    ThreeDObjectSetupConfig.fromPreset(cfg, identities, load.payload);
+            applyThreeDObjectConfigToDialog(cfg, derived, bindings, null);
+        } catch (IllegalArgumentException e) {
+            IJ.log("[FLASH] Rejected 3D Object run parameters: " + e.getMessage());
+            if (canShowGuiDecisionDialog()) {
+                IJ.showMessage("3D Object Analysis",
+                        "Could not apply saved 3D Object settings: " + e.getMessage());
+            }
+            return rejectedThreeDObjectParameters(parameters);
+        }
+        return load.result;
+    }
+
+    private LoadedRunParameters.PresetLoad<ThreeDObjectPreset> parseLoadedThreeDObjectPreset(
+            Map<String, Object> parameters) {
+        LoadedRunParameters.PresetLoad<ThreeDObjectPreset> legacyResult =
+                LoadedRunParameters.threeDObjectPreset(parameters);
+        Map<String, Object> safe = parameters == null
+                ? Collections.<String, Object>emptyMap() : parameters;
+        try {
+            ThreeDObjectPreset preset = ThreeDObjectPreset.fromJsonObject(safe);
+            List<String> applied = new ArrayList<String>(
+                    legacyResult.result.getAppliedKeys());
+            List<String> ignored = new ArrayList<String>(
+                    legacyResult.result.getIgnoredKeys());
+            String[] schemaKeys = new String[]{
+                    "schemaVersion", "channelSettings", "channelDefaults"
+            };
+            for (String key : schemaKeys) {
+                if (safe.containsKey(key)) {
+                    if (!applied.contains(key)) applied.add(key);
+                    ignored.remove(key);
+                }
+            }
+            return new LoadedRunParameters.PresetLoad<ThreeDObjectPreset>(
+                    preset, new LoadedRunParameters.Result(applied, ignored));
+        } catch (IOException e) {
+            IJ.log("[FLASH] Rejected 3D Object run parameters: " + e.getMessage());
+            return new LoadedRunParameters.PresetLoad<ThreeDObjectPreset>(
+                    null, rejectedThreeDObjectParameters(parameters));
+        }
+    }
+
+    private static LoadedRunParameters.Result rejectedThreeDObjectParameters(
+            Map<String, Object> parameters) {
+        List<String> ignored = parameters == null
+                ? Collections.<String>emptyList()
+                : new ArrayList<String>(parameters.keySet());
+        return new LoadedRunParameters.Result(
+                Collections.<String>emptyList(), ignored);
+    }
+
+    private void handleSaveThreeDObjectPreset(String directory,
+                                               BinConfig cfg,
+                                               ChannelIdentities identities,
+                                               ThreeDObjectDialogBindings bindings) {
+        if (!canShowGuiDecisionDialog()) return;
+        if (bindings == null) {
+            IJ.showMessage("3D Object Analysis", "Could not save preset: dialog options are not available.");
+            return;
+        }
+        String name = JOptionPane.showInputDialog(
+                bindings.presetCombo,
+                "Preset name:",
+                "Save 3D Object Preset",
+                JOptionPane.PLAIN_MESSAGE);
+        if (name == null) {
+            return;
+        }
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) {
+            IJ.showMessage("3D Object Analysis", "Preset name cannot be empty.");
+            return;
+        }
+        try {
+            ThreeDObjectPreset preset = buildThreeDObjectPresetFromBindings(
+                    trimmed, cfg, identities, bindings);
+            new ThreeDObjectPresetIO(new File(directory)).save(preset);
+            IJ.log("Saved 3D Object preset: " + trimmed);
+            refreshThreeDObjectPresetChoice(directory, bindings, preset.getName());
+        } catch (IOException e) {
+            IJ.showMessage("3D Object Analysis", "Could not save preset: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            IJ.showMessage("3D Object Analysis", "Could not save preset: " + e.getMessage());
+        }
+    }
+
+    private ThreeDObjectPreset buildThreeDObjectPresetFromBindings(String name,
+                                                                   BinConfig cfg,
+                                                                   ChannelIdentities identities,
+                                                                   ThreeDObjectDialogBindings bindings) {
+        Map<String, Double> capturedThresholds = readChannelThresholds(
+                cfg, bindings.thresholdFields, "Coloc threshold");
+        Map<String, Double> capturedBBThresholds = readChannelThresholds(
+                cfg, bindings.bbThresholdFields, "BB Coloc threshold");
+        boolean extractProcess = isSelected(bindings.extractProcessLengthToggle);
+        int nuclearIndex = wizardNuclearMarkerIndex;
+        boolean[] processSelections = wizardProcessChannels == null
+                ? null : Arrays.copyOf(wizardProcessChannels, wizardProcessChannels.length);
+        if (extractProcess && (processSelections == null
+                || nuclearIndex < 0 || nuclearIndex >= cfg.numChannels())) {
+            Map<String, Object> answers = new LinkedHashMap<String, Object>();
+            answers.put("intent.process", Boolean.TRUE);
+            ThreeDObjectSetupConfig.DerivedConfig defaults =
+                    ThreeDObjectSetupConfig.deriveConfig(
+                            cfg, identities, answers, Collections.<String>emptyList());
+            processSelections = Arrays.copyOf(
+                    defaults.processChannels, defaults.processChannels.length);
+            nuclearIndex = defaults.nuclearMarkerIndex;
+        }
+        if (processSelections == null) {
+            processSelections = new boolean[cfg.numChannels()];
+        }
+        Object selectedMarker = bindings.clusterMarkerChoice == null
+                ? OVERLAP_MARKER_NONE : bindings.clusterMarkerChoice.getSelectedItem();
+        String overlapMarker = selectedMarker == null
+                ? OVERLAP_MARKER_NONE : selectedMarker.toString();
+        Map<String, Boolean> overlapTargets = readClusterTargets(cfg, bindings);
+        Map<String, ThreeDObjectPreset.ChannelSetting> channelSettings =
+                ThreeDObjectSetupConfig.captureChannelSettings(
+                        cfg, identities, capturedThresholds, capturedBBThresholds,
+                        processSelections, nuclearIndex, overlapMarker, overlapTargets);
+        return new ThreeDObjectPreset(
+                name,
+                "Saved from 3D Object Analysis dialog",
+                ThreeDObjectPreset.CURRENT_LIBRARY_VERSION,
+                isSelected(bindings.doVolumetricToggle),
+                isSelected(bindings.doCpcToggle),
+                isSelected(bindings.doIntensityColocToggle),
+                extractProcess,
+                isSelected(bindings.runSpatialToggle),
+                isSelected(bindings.classicalCentroidFilterToggle),
+                isSelected(bindings.doBBOverlapToggle),
+                isSelected(bindings.doBBCpcToggle),
+                isSelected(bindings.doBBVolToggle),
+                channelSettings,
+                isSelected(bindings.oipRadialToggle),
+                isSelected(bindings.oipMarginalToggle),
+                isSelected(bindings.oipPrincipalAxisToggle),
+                isSelected(bindings.oipAngularToggle),
+                isSelected(bindings.oipShellToggle),
+                isSelected(bindings.oipWithinBoxToggle),
+                isSelected(bindings.oipFiguresToggle),
+                isSelected(bindings.oipObjectOnlyToggle)
+                        ? OipConfig.Region.OBJECT_VOXELS.name() : OipConfig.Region.WHOLE_BOX.name(),
+                oipIntensityNorm.name(),
+                oipRadialBins,
+                oipAngularBins,
+                oipShells,
+                oipResampleN,
+                oipBoxPadPct,
+                oipRingThresholdPct);
+    }
+
+    private static Map<String, Double> readChannelThresholds(BinConfig cfg,
+                                                              List<JTextField> fields,
+                                                              String label) {
+        if (cfg == null || fields == null || fields.size() != cfg.numChannels()) {
+            throw new IllegalArgumentException(label + " controls do not match the configured channels.");
+        }
+        Map<String, Double> out = new LinkedHashMap<String, Double>();
+        for (int i = 0; i < cfg.numChannels(); i++) {
+            double value = readNumericField(fields.get(i), Double.NaN,
+                    label + " for " + cfg.channelNames.get(i));
+            if (!Double.isFinite(value) || value < 0.0 || value > 100.0) {
+                throw new IllegalArgumentException(
+                        label + " for " + cfg.channelNames.get(i)
+                                + " must be a finite percentage from 0 to 100.");
+            }
+            out.put(cfg.channelNames.get(i), Double.valueOf(value));
+        }
+        return out;
+    }
+
+    private static Map<String, Boolean> readClusterTargets(
+            BinConfig cfg, ThreeDObjectDialogBindings bindings) {
+        Map<String, Boolean> out = new LinkedHashMap<String, Boolean>();
+        if (cfg == null) return out;
+        for (int i = 0; i < cfg.numChannels(); i++) {
+            boolean selected = bindings != null
+                    && i < bindings.clusterTargetToggles.size()
+                    && isSelected(bindings.clusterTargetToggles.get(i));
+            out.put(cfg.channelNames.get(i), Boolean.valueOf(selected));
+        }
+        return out;
+    }
+
+    /**
+     * Capture the confirmed dialog settings into the run record so a later
+     * "Load settings from previous run" can restore them. GUI runs open the
+     * record with an empty parameter map; without this the loader has nothing
+     * to apply and falls back to defaults. The complete versioned preset map is parsed through the
+     * same path as saved presets so channel-local state is not flattened by the legacy key adapter.
+     */
+    private void recordThreeDObjectRunParameters(BinConfig cfg,
+                                                 ChannelIdentities identities,
+                                                 boolean extractProcessLength,
+                                                 boolean runSpatial,
+                                                 int nuclearMarkerIndex,
+                                                 boolean[] processChannels) {
+        if (runRecordContext == null) {
+            return;
+        }
+        try {
+            Map<String, Double> capturedThresholds = new LinkedHashMap<String, Double>();
+            Map<String, Double> capturedBBThresholds = new LinkedHashMap<String, Double>();
+            for (String channelName : cfg.channelNames) {
+                Double coloc = markerThresholds.get(channelName);
+                Double bbColoc = bbThresholds.get(channelName);
+                capturedThresholds.put(channelName,
+                        Double.valueOf(coloc == null ? 30.0 : coloc.doubleValue()));
+                capturedBBThresholds.put(channelName,
+                        Double.valueOf(bbColoc == null ? 30.0 : bbColoc.doubleValue()));
+            }
+            Map<String, ThreeDObjectPreset.ChannelSetting> channelSettings =
+                    ThreeDObjectSetupConfig.captureChannelSettings(
+                            cfg, identities, capturedThresholds, capturedBBThresholds,
+                            processChannels, nuclearMarkerIndex,
+                            clusterMarkerChannel, clusterTargets);
+            ThreeDObjectPreset preset = new ThreeDObjectPreset(
+                    "GUI 3D Object run",
+                    "Captured from the 3D Object Analysis dialog",
+                    ThreeDObjectPreset.CURRENT_LIBRARY_VERSION,
+                    doVolumetric, doCpc, doIntensityColoc,
+                    extractProcessLength, runSpatial, classicalCentroidFilter,
+                    doBBOverlap, doBBCpc, doBBVol,
+                    channelSettings,
+                    doRadialProfile,
+                    doMarginalProfile,
+                    doPrincipalAxisProfile,
+                    doAngularProfile,
+                    doShellColoc,
+                    doWithinBoxCorr,
+                    oipGenerateFigures,
+                    oipRegion.name(),
+                    oipIntensityNorm.name(),
+                    oipRadialBins,
+                    oipAngularBins,
+                    oipShells,
+                    oipResampleN,
+                    oipBoxPadPct,
+                    oipRingThresholdPct);
+            runRecordContext.recordParameters(ParameterSnapshot.fromAnalysisPresetMap(
+                    "ThreeDObjectAnalysis", preset.toJsonObject()));
+        } catch (RuntimeException e) {
+            IJ.log("[FLASH] Could not capture 3D Object run parameters: " + e.getMessage());
+        }
+    }
+
+    private void refreshThreeDObjectPresetChoice(String directory,
+                                                 ThreeDObjectDialogBindings bindings,
+                                                 String selectedName) {
+        if (bindings == null || bindings.presetCombo == null) {
+            return;
+        }
+        bindings.programmaticChange = true;
+        try {
+            bindings.presetCombo.removeAllItems();
+            String[] names = listThreeDObjectPresetNames(directory);
+            for (String presetName : names) {
+                bindings.presetCombo.addItem(presetName);
+            }
+            bindings.presetCombo.setSelectedItem(selectedName == null
+                    ? OBJECT_PRESET_PLACEHOLDER
+                    : selectedName);
+        } finally {
+            bindings.programmaticChange = false;
+        }
+    }
+
+    private String[] listThreeDObjectPresetNames(String directory) {
+        List<String> labels = new ArrayList<String>();
+        labels.add(OBJECT_PRESET_PLACEHOLDER);
+        try {
+            List<ThreeDObjectPreset> presets = new ThreeDObjectPresetIO(new File(directory)).listAll();
+            for (ThreeDObjectPreset preset : presets) {
+                labels.add(preset.getName());
+            }
+        } catch (IOException e) {
+            IJ.log("WARNING: Could not list 3D Object presets: " + e.getMessage());
+        }
+        return labels.toArray(new String[labels.size()]);
+    }
+
+    boolean prepareSpatialHandoffBeforeAnalysis(String directory,
+                                                List<String> channelNames,
+                                                boolean runSpatial) {
+        if (!runSpatial) {
+            wizardSpatialConfig = null;
+            return true;
+        }
+        // The analysis-level headless flag means "hide image windows", not "skip setup UI".
+        // Only suppress the pre-run Spatial options dialog for genuinely non-interactive runs.
+        if (wizardSpatialConfig != null || !canShowGuiDecisionDialog()) {
+            return true;
+        }
+        String[] workflow = threeDObjectWorkflow(wizardExtractProcessLength, true);
+        SpatialSetupConfig.DerivedConfig spatialConfig =
+                spatialOptionsDialogLauncher.launch(
+                        directory, channelNames, markerThresholds, bbThresholds,
+                        doVolumetric, doCpc, doBBOverlap, doBBCpc, doBBVol,
+                        workflow, workflowStepIndex(workflow, "Spatial Analysis"));
+        if (spatialConfig == null) {
+            IJ.log("[FLASH] 3D Object Analysis cancelled because Spatial Analysis options were cancelled.");
+            if (canShowGuiDecisionDialog()) {
+                IJ.showMessage("3D Object Analysis",
+                        "Spatial Analysis options were cancelled.\n3D Object Analysis has not started.");
+            }
+            return false;
+        }
+        wizardSpatialConfig = spatialConfig;
+        return true;
+    }
+
+    SpatialAnalysis createSpatialAnalysisForRun() {
+        SpatialAnalysis spatialAnalysis = new SpatialAnalysis();
+        spatialAnalysis.setHeadless(headless);
+        spatialAnalysis.setSuppressDialogs(suppressDialogs || cliConfig != null);
+        spatialAnalysis.setMarkerThresholds(markerThresholds);
+        spatialAnalysis.setParallelThreads(parallelThreads);
+        spatialAnalysis.setVerboseLogging(verboseLogging);
+        spatialAnalysis.setCliConfig(cliConfig);
+        if (wizardSpatialConfig != null) {
+            spatialAnalysis.setWizardConfig(wizardSpatialConfig);
+        }
+        return spatialAnalysis;
+    }
+
+    private ThreeDObjectSetupConfig.DerivedConfig loadThreeDObjectPresetConfig(String directory,
+                                                                         BinConfig cfg,
+                                                                         ChannelIdentities identities,
+                                                                         String presetName) {
+        try {
+            ThreeDObjectPreset preset = new ThreeDObjectPresetIO(new File(directory)).load(presetName);
+            return ThreeDObjectSetupConfig.fromPreset(cfg, identities, preset);
+        } catch (IOException | IllegalArgumentException e) {
+            IJ.log("[FLASH] Could not load 3D Object preset: " + e.getMessage());
+            if (canShowGuiDecisionDialog()) {
+                IJ.showMessage("3D Object Analysis", "Could not load preset: " + e.getMessage());
+            }
+            return null;
+        }
+    }
+
+    private void applyCliObjectConfiguration(String directory, BinConfig cfg, ChannelIdentities identities) {
+        if (cliConfig == null || cliConfig.getObject() == null || !cliConfig.getObject().hasConfiguration()) {
+            return;
+        }
+        CLIConfig.ThreeDObjectConfig object = cliConfig.getObject();
+        if (object.hasSetupConfiguration()) {
+            ThreeDObjectSetupConfig.DerivedConfig derived = null;
+            boolean presetRequested =
+                    object.getPresetName() != null && !object.getPresetName().trim().isEmpty();
+            if (presetRequested) {
+                derived = loadThreeDObjectPresetConfig(directory, cfg, identities, object.getPresetName());
+                if (derived == null) {
+                    throw new IllegalArgumentException(
+                            "Requested 3D Object preset could not be applied: "
+                                    + object.getPresetName());
+                }
+            }
+            if (derived == null) {
+                derived = ThreeDObjectSetupConfig.deriveConfig(cfg, identities,
+                        Collections.<String, Object>emptyMap(), Collections.<String>emptyList());
+            }
+            if (object.getDoVolumetric() != null) {
+                derived.doVolumetric = object.getDoVolumetric().booleanValue();
+            }
+            if (object.getDoCpc() != null) {
+                derived.doCpc = object.getDoCpc().booleanValue();
+            }
+            if (object.getDoIntensityColoc() != null) {
+                derived.doIntensityColoc = object.getDoIntensityColoc().booleanValue();
+            }
+            if (object.getDoBBOverlap() != null) {
+                derived.doBBOverlap = object.getDoBBOverlap().booleanValue();
+            }
+            if (object.getDoBBCpc() != null) {
+                derived.doBBCpc = object.getDoBBCpc().booleanValue();
+            }
+            if (object.getDoBBVol() != null) {
+                derived.doBBVol = object.getDoBBVol().booleanValue();
+            }
+            if (object.getExtractProcessLength() != null) {
+                derived.extractProcessLength = object.getExtractProcessLength().booleanValue();
+            }
+            if (object.getRunSpatial() != null) {
+                derived.runSpatial = object.getRunSpatial().booleanValue();
+            }
+            if (object.getClassicalCentroidFiltering() != null) {
+                derived.classicalCentroidFiltering = object.getClassicalCentroidFiltering().booleanValue();
+            }
+            if (object.getColocThresholdPercent() != null) {
+                derived.thresholdPercent = object.getColocThresholdPercent().doubleValue();
+                derived.markerThresholds.clear();
+                for (String channelName : cfg.channelNames) {
+                    derived.markerThresholds.put(channelName, object.getColocThresholdPercent());
+                }
+            }
+            if (object.getBBColocThresholdPercent() != null) {
+                derived.bbThresholdPercent = object.getBBColocThresholdPercent().doubleValue();
+                derived.bbThresholds.clear();
+                for (String channelName : cfg.channelNames) {
+                    derived.bbThresholds.put(channelName, object.getBBColocThresholdPercent());
+                }
+            }
+            if (object.getNuclearMarkerIndex() != null) {
+                derived.nuclearMarkerIndex = object.getNuclearMarkerIndex().intValue();
+            }
+            applyThreeDObjectDerivedConfig(cfg, derived);
+        }
+        applyCliOipConfiguration(object);
+    }
+
+    private void applyCliOipConfiguration(CLIConfig.ThreeDObjectConfig object) {
+        if (object == null || !object.hasOipConfiguration()) return;
+        if (object.getDoRadialProfile() != null) {
+            doRadialProfile = object.getDoRadialProfile().booleanValue();
+        }
+        if (object.getDoMarginalProfile() != null) {
+            doMarginalProfile = object.getDoMarginalProfile().booleanValue();
+        }
+        if (object.getDoPrincipalAxisProfile() != null) {
+            doPrincipalAxisProfile = object.getDoPrincipalAxisProfile().booleanValue();
+        }
+        if (object.getDoAngularProfile() != null) {
+            doAngularProfile = object.getDoAngularProfile().booleanValue();
+        }
+        if (object.getDoShellColoc() != null) {
+            doShellColoc = object.getDoShellColoc().booleanValue();
+        }
+        if (object.getDoWithinBoxCorr() != null) {
+            doWithinBoxCorr = object.getDoWithinBoxCorr().booleanValue();
+        }
+        if (object.getOipGenerateFigures() != null) {
+            oipGenerateFigures = object.getOipGenerateFigures().booleanValue();
+        }
+        if (object.getOipRegion() != null) {
+            oipRegion = parseOipRegion(object.getOipRegion(), oipRegion);
+        }
+        if (object.getOipIntensityNorm() != null) {
+            oipIntensityNorm = parseOipIntensityNorm(object.getOipIntensityNorm(), oipIntensityNorm);
+        }
+        if (object.getOipRadialBins() != null) {
+            oipRadialBins = Math.max(1, object.getOipRadialBins().intValue());
+        }
+        if (object.getOipAngularBins() != null) {
+            oipAngularBins = Math.max(1, object.getOipAngularBins().intValue());
+        }
+        if (object.getOipShells() != null) {
+            oipShells = Math.max(1, object.getOipShells().intValue());
+        }
+        if (object.getOipResampleN() != null) {
+            oipResampleN = Math.max(2, object.getOipResampleN().intValue());
+        }
+        if (object.getOipBoxPadPct() != null) {
+            oipBoxPadPct = Math.max(0.0, object.getOipBoxPadPct().doubleValue());
+        }
+        if (object.getOipRingThresholdPct() != null) {
+            oipRingThresholdPct = Math.max(0.0, Math.min(100.0,
+                    object.getOipRingThresholdPct().doubleValue()));
+        }
+    }
+
+    private void applyThreeDObjectDerivedConfig(BinConfig cfg, ThreeDObjectSetupConfig.DerivedConfig derived) {
+        if (derived == null) return;
+        doVolumetric = derived.doVolumetric;
+        doCpc = derived.doCpc;
+        doIntensityColoc = derived.doIntensityColoc;
+        doBBOverlap = derived.doBBOverlap;
+        doBBCpc = derived.doBBCpc;
+        doBBVol = derived.doBBVol;
+        doRadialProfile = derived.doRadialProfile;
+        doMarginalProfile = derived.doMarginalProfile;
+        doPrincipalAxisProfile = derived.doPrincipalAxisProfile;
+        doAngularProfile = derived.doAngularProfile;
+        doShellColoc = derived.doShellColoc;
+        doWithinBoxCorr = derived.doWithinBoxCorr;
+        oipRegion = derived.oipRegion;
+        oipIntensityNorm = derived.oipIntensityNorm;
+        oipRadialBins = Math.max(1, derived.oipRadialBins);
+        oipAngularBins = Math.max(1, derived.oipAngularBins);
+        oipShells = Math.max(1, derived.oipShells);
+        oipResampleN = Math.max(2, derived.oipResampleN);
+        oipBoxPadPct = Math.max(0.0, derived.oipBoxPadPct);
+        oipRingThresholdPct = Math.max(0.0, Math.min(100.0, derived.oipRingThresholdPct));
+        oipGenerateFigures = derived.oipGenerateFigures;
+        classicalCentroidFilter = derived.classicalCentroidFiltering;
+        wizardExtractProcessLength = derived.extractProcessLength;
+        wizardRunSpatial = derived.runSpatial;
+        wizardNuclearMarkerIndex = derived.nuclearMarkerIndex;
+        wizardProcessChannels = Arrays.copyOf(derived.processChannels, derived.processChannels.length);
+        markerThresholds = new LinkedHashMap<String, Double>(derived.markerThresholds);
+        bbThresholds.clear();
+        bbThresholds.putAll(derived.bbThresholds);
+        clusterMarkerChannel = derived.clusterMarkerChannel == null
+                ? OVERLAP_MARKER_NONE : derived.clusterMarkerChannel;
+        clusterTargets.clear();
+        clusterTargets.putAll(derived.clusterTargets);
+    }
+
+    private static void setToggle(ToggleSwitch toggle, boolean selected) {
+        if (toggle != null) {
+            toggle.setSelected(selected);
+        }
+    }
+
+    private static OipConfig.Region parseOipRegion(String raw, OipConfig.Region fallback) {
+        String normalized = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT)
+                .replace("_", "").replace("-", "").replace(" ", "");
+        if ("objectvoxels".equals(normalized) || "objectonly".equals(normalized)
+                || "onlyobject".equals(normalized)) {
+            return OipConfig.Region.OBJECT_VOXELS;
+        }
+        if ("wholebox".equals(normalized) || "box".equals(normalized)
+                || "boundingbox".equals(normalized)) {
+            return OipConfig.Region.WHOLE_BOX;
+        }
+        return fallback == null ? OipConfig.Region.WHOLE_BOX : fallback;
+    }
+
+    private static OipConfig.IntensityNorm parseOipIntensityNorm(
+            String raw, OipConfig.IntensityNorm fallback) {
+        String normalized = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT)
+                .replace("_", "").replace("-", "").replace(" ", "");
+        if ("perobjectminmax".equals(normalized) || "minmax".equals(normalized)
+                || "perobject".equals(normalized)) {
+            return OipConfig.IntensityNorm.PER_OBJECT_MINMAX;
+        }
+        if ("dividebymean".equals(normalized) || "mean".equals(normalized)) {
+            return OipConfig.IntensityNorm.DIVIDE_BY_MEAN;
+        }
+        if ("zscore".equals(normalized) || "z".equals(normalized)) {
+            return OipConfig.IntensityNorm.ZSCORE;
+        }
+        return fallback == null ? OipConfig.IntensityNorm.PER_OBJECT_MINMAX : fallback;
+    }
+
+    private static void addRegionSelectionButtons(PipelineDialog dialog,
+                                                  final List<ToggleSwitch> regionToggles) {
+        if (dialog == null || regionToggles == null || regionToggles.isEmpty()) {
+            return;
+        }
+        JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        row.setOpaque(false);
+        JButton selectAll = new JButton("Select all");
+        FlashIcons.apply(selectAll, FlashIcons.check());
+        selectAll.setToolTipText("Select every region for this run.");
+        selectAll.addActionListener(e -> {
+            for (ToggleSwitch toggle : regionToggles) {
+                setToggle(toggle, true);
+            }
+        });
+        JButton clear = new JButton("Clear");
+        FlashIcons.apply(clear, FlashIcons.closeX());
+        clear.setToolTipText("Clear every region selection.");
+        clear.addActionListener(e -> {
+            for (ToggleSwitch toggle : regionToggles) {
+                setToggle(toggle, false);
+            }
+        });
+        row.add(selectAll);
+        row.add(clear);
+        dialog.addComponent(row);
+    }
+
+    private static boolean isSelected(ToggleSwitch toggle) {
+        return toggle != null && toggle.isSelected();
+    }
+
+    private static int countSelected(boolean[] values) {
+        int count = 0;
+        if (values == null) return count;
+        for (boolean value : values) {
+            if (value) count++;
+        }
+        return count;
+    }
+
+    private static String[] threeDObjectWorkflow(boolean processLength, boolean spatial) {
+        List<String> steps = new ArrayList<String>();
+        steps.add("Setup");
+        if (processLength) {
+            steps.add("Process Analysis");
+        }
+        if (spatial) {
+            steps.add("Spatial Analysis");
+        }
+        steps.add("Run");
+        return steps.toArray(new String[steps.size()]);
+    }
+
+    private static int workflowStepIndex(String[] workflow, String stepName) {
+        if (workflow == null || stepName == null) {
+            return 0;
+        }
+        for (int i = 0; i < workflow.length; i++) {
+            if (stepName.equals(workflow[i])) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private static double readNumericField(JTextField field, double fallback, String label) {
+        if (field == null) {
+            return fallback;
+        }
+        String text = field.getText();
+        if (text == null || text.trim().isEmpty()) {
+            return fallback;
+        }
+        try {
+            return Double.parseDouble(text.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(label + " must be a number.");
+        }
+    }
+
+    private interface ThreeDObjectConfigApplier {
+        void apply(String selectedPresetName, ThreeDObjectSetupConfig.DerivedConfig derived);
+    }
+
+    private static final class ThreeDObjectDialogBindings {
+        boolean programmaticChange;
+        JComboBox<String> presetCombo;
+        ToggleSwitch useDeconvolvedInputToggle;
+        ToggleSwitch doVolumetricToggle;
+        ToggleSwitch doCpcToggle;
+        ToggleSwitch doIntensityColocToggle;
+        ToggleSwitch doBBOverlapToggle;
+        ToggleSwitch doBBCpcToggle;
+        ToggleSwitch doBBVolToggle;
+        ToggleSwitch oipRadialToggle;
+        ToggleSwitch oipMarginalToggle;
+        ToggleSwitch oipPrincipalAxisToggle;
+        ToggleSwitch oipAngularToggle;
+        ToggleSwitch oipShellToggle;
+        ToggleSwitch oipWithinBoxToggle;
+        ToggleSwitch oipObjectOnlyToggle;
+        ToggleSwitch oipFiguresToggle;
+        ToggleSwitch extractProcessLengthToggle;
+        ToggleSwitch runSpatialToggle;
+        ToggleSwitch classicalCentroidFilterToggle;
+        List<JTextField> thresholdFields = new ArrayList<JTextField>();
+        List<JTextField> bbThresholdFields = new ArrayList<JTextField>();
+        JComboBox<String> clusterMarkerChoice;
+        List<ToggleSwitch> clusterTargetToggles = new ArrayList<ToggleSwitch>();
+        List<String> clusterTargetChannels = new ArrayList<String>();
+        Runnable primaryLabelUpdater;
+        Runnable oipEnablementUpdater;
+        Runnable clusterTargetEnablementUpdater;
+    }
+
+    private static MetadataDiagnostics.SeriesInfo firstSeriesInfoOrNull(String directory) {
+        try {
+            List<MetadataDiagnostics.SeriesInfo> infos = MetadataDiagnostics.scanDirectory(directory);
+            return infos.isEmpty() ? null : infos.get(0);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean calibrationIsAvailable(String directory) {
+        CalibrationIO.PixelCalibration cal = CalibrationIO.readFromDirectory(directory);
+        return cal != null && cal.isCalibrated();
+    }
+
+    private boolean validateRoiSets(RoiSetData[] roiSets, int totalImages) {
+        IJ.log("Validating ROI sets (identity-based, subset coverage allowed)...");
+
+        // Tokens covered by the current image set, used to warn on zero-overlap zips.
+        java.util.Set<String> currentTokens = new java.util.HashSet<String>();
+        if (imageBindTokens != null) {
+            for (String tk : imageBindTokens) {
+                if (tk != null) currentTokens.add(tk);
+            }
+        }
+
+        for (RoiSetData roiSet : roiSets) {
+            if (roiSet != null && roiSet.fullImage) {
+                IJ.log("  ROI set '" + FULL_IMAGE_ROI_SET_NAME + "': full-image analysis (no ROI pair validation)");
+                continue;
+            }
+            String roiSetName = roiSet == null ? "" : roiSet.name;
+            java.util.List<ij.gui.Roi> roiList = (roiSet == null || roiSet.rois == null)
+                    ? java.util.Collections.<ij.gui.Roi>emptyList()
+                    : java.util.Arrays.asList(roiSet.rois);
+            // Subset coverage is allowed: instead of a fixed 2-per-image count, require that
+            // every binding token in the zip has exactly one drawn + one cropped ROI, with no
+            // duplicates, orphans, or non-token names.
+            try {
+                RoiSetValidator.validateStructural(roiList);
+            } catch (Exception ve) {
+                IJ.error("3D Object Analysis",
+                        "ROI set '" + roiSetName + "' is not structurally valid: " + ve.getMessage()
+                                + "\nRedraw it with 'Draw ROIs and Orientate Images'.");
+                return false;
+            }
+            int pairs = RoiSetImageBinding.indexByToken(roiList).size();
+            IJ.log("  ROI set '" + roiSetName + "': " + roiList.size()
+                    + " ROIs covering " + pairs + " image(s).");
+
+            // Warn (non-fatal) when a zip overlaps none of the current images — a likely
+            // identity mismatch that would otherwise silently produce no measurements.
+            if (!currentTokens.isEmpty()) {
+                boolean overlaps = false;
+                for (String tk : RoiSetImageBinding.indexByToken(roiList).keySet()) {
+                    if (currentTokens.contains(tk)) { overlaps = true; break; }
+                }
+                if (!overlaps) {
+                    String message = "ROI set '" + roiSetName
+                            + "' covers none of the current images (no identity-token overlap); "
+                            + "it will produce no measurements.";
+                    IJ.log("  WARNING: " + message);
+                    recordWarn(message);
+                }
+            }
+        }
+        IJ.log("  ROI sets validated.");
+        return true;
+    }
+
+    /**
+     * Outcome of binding a ROI set to one image by durable identity token.
+     * {@link #skip} true means the (region-scoped) zip does not cover this image and the
+     * caller must skip it entirely — distinct from {@link #region} being {@code null},
+     * which means whole-image analysis (no ROI restriction).
+     */
+    private static final class RegionBinding {
+        static final RegionBinding SKIP = new RegionBinding(true, null);
+        final boolean skip;
+        final RegionMask region;
+
+        private RegionBinding(boolean skip, RegionMask region) {
+            this.skip = skip;
+            this.region = region;
+        }
+
+        static RegionBinding of(RegionMask region) {
+            return new RegionBinding(false, region);
+        }
+    }
+
+    /**
+     * Resolves the {@link RegionMask} for one image within a ROI set by matching the image's
+     * durable identity token against the drawn (uncropped) ROI names in the set. Full-image
+     * sets and a {@code null} set yield no restriction; a region-scoped set that does not
+     * contain this image's token yields {@link RegionBinding#SKIP}.
+     */
+    private RegionBinding resolveRegionForImage(RoiSetData roiSet, int imageIndex) {
+        if (roiSet == null || roiSet.fullImage) {
+            return RegionBinding.of(null); // whole-image analysis (no ROI restriction)
+        }
+        String bindToken = (imageBindTokens != null && imageIndex >= 0 && imageIndex < imageBindTokens.length)
+                ? imageBindTokens[imageIndex] : null;
+        ij.gui.Roi drawn = findDrawnRoiByToken(roiSet.rois, bindToken);
+        if (drawn == null) {
+            if (verboseLogging) {
+                IJ.log("  [DEBUG] ROI set '" + roiSet.name + "' does not cover image "
+                        + (imageIndex + 1) + " (no identity-token match); skipping this region for this image.");
+            }
+            return RegionBinding.SKIP;
+        }
+        return RegionBinding.of(RegionMask.from(drawn)); // RegionMask.from clones internally
+    }
+
+    /** Find the drawn (uncropped) ROI in a set whose binding token matches the image. */
+    private static ij.gui.Roi findDrawnRoiByToken(ij.gui.Roi[] rois, String token) {
+        if (rois == null || token == null) return null;
+        for (ij.gui.Roi r : rois) {
+            if (r == null) continue;
+            String name = r.getName();
+            if (!RoiSetImageBinding.isCropped(name)
+                    && token.equals(RoiSetImageBinding.tokenOf(name))) {
+                return r;
+            }
+        }
+        return null;
+    }
+
+    private void processRoiSetForImage(
+            String directory,
+            BinConfig cfg,
+            ImagePlus imp,
+            File outDir,
+            SegmentationImageRoot imageRoot,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int imageIndex,
+            int scnIndex,
+            String animalName,
+            NameParts parts,
+            boolean extractProcessLength,
+            int nuclearMarkerIndex,
+            boolean[] processChannels,
+            RoiSetData roiSet) {
+
+        // Bind ROIs by durable image identity (token), not positional index: region-scoped
+        // zips cover only a subset of images. Geometry is driven ONLY by the original-coordinate
+        // (drawn) ROI; the "_Cropped" ROI is a top-left-shifted presentation artifact that must
+        // never drive geometry (the historical bug this RegionMask seam prevents). See
+        // RegionMask / RegionMaskTest.
+        RegionBinding binding = resolveRegionForImage(roiSet, imageIndex);
+        if (binding.skip) {
+            return; // subset coverage: this zip does not cover this image
+        }
+        RegionMask region = binding.region;
+        String roiBase = roiSet == null ? "" : roiSet.name;
+        String hemisphere = parts == null ? "" : parts.hemisphere;
+        String seriesRegionLabel = parts == null
+                ? ""
+                : parts.csvRegion();
+        String roiLabel = parts == null
+                ? (scnIndex > 0 && !endsWithDigit(roiBase) ? roiBase + scnIndex : roiBase)
+                : parts.analysisRegionLabel(roiBase, scnIndex);
+
+        if (!compactLog) {
+            IJ.log("  > ROI set: " + roiBase);
+        }
+
+        boolean progressSuccess = false;
+        beginObjectRoiProgress(scnIndex, imageBindTokens == null ? scnIndex : imageBindTokens.length,
+                imp == null ? animalName : imp.getTitle(), roiBase, "channel segmentation");
+        try {
+            updateObjectProgress("channel segmentation");
+            boolean[] channelHasObjects =
+                    run3DObjectsCounterPerChannel(directory, cfg, imp, outDir, imageRoot, channelTables, scnIndex,
+                            animalName, parts,
+                            extractProcessLength, nuclearMarkerIndex, processChannels,
+                            region, seriesRegionLabel, roiLabel, roiBase);
+
+            IJ.log("  > Colocalization");
+            updateObjectProgress("colocalization");
+            if (doVolumetric) {
+                appendColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doCpc) {
+                appendCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBOverlap) {
+                appendBBColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBCpc) {
+                appendBBCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBVol) {
+                appendBBVolColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doIntensityColoc) {
+                appendIntensityColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (anyOipEnabled()) {
+                appendOipColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (overlapCountEnabled(cfg)) {
+                appendOverlapCountColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+
+            if (extractProcessLength && processChannels != null) {
+                updateObjectProgress("process length");
+                processLengthExtractionWithTables(cfg, channelTables, imp, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel, processChannels, nuclearMarkerIndex);
+            }
+
+            updateObjectProgress("saving object label images");
+            saveObjectsImages(cfg, imageRoot, animalName, hemisphere, roiLabel);
+            progressSuccess = true;
+        } finally {
+            if (progressSuccess) {
+                completeObjectRoiProgress("image " + scnIndex + " ROI "
+                        + (roiBase == null || roiBase.isEmpty() ? FULL_IMAGE_ROI_SET_NAME : roiBase)
+                        + " complete");
+            } else {
+                failObjectRoiProgress("image " + scnIndex + " ROI "
+                        + (roiBase == null || roiBase.isEmpty() ? FULL_IMAGE_ROI_SET_NAME : roiBase)
+                        + " failed");
+            }
+            clearRegistry();
+        }
+    }
+
+    private void processImagesSequential(
+            final DeferredImageSupplier supplier, final int totalImages,
+            String directory, BinConfig cfg,
+            File outDir, SegmentationImageRoot imageRoot,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            RoiSetData[] roiSets,
+            boolean extractProcessLength, int nuclearMarkerIndex, boolean[] processChannels,
+            long analysisStartTime) {
+
+        ExecutorService prefetcher = Executors.newSingleThreadExecutor();
+        Future<ImagePlus> nextImage = null;
+
+        for (int i = 0; i < totalImages; i++) {
+            beginObjectImageProgress(i + 1, totalImages, "image " + (i + 1), "loading");
+            IJ.showStatus("Loading image " + (i + 1) + "/" + totalImages + "...");
+            IJ.showProgress(i, totalImages);
+
+            ImagePlus imp;
+            if (nextImage != null) {
+                try {
+                    imp = nextImage.get();
+                } catch (Exception e) {
+                    String message = "ERROR: Failed to load prefetched image " + (i + 1) + ": " + e.getMessage();
+                    IJ.log(message);
+                    recordError(message, e);
+                    nextImage = null;
+                    failObjectImageProgress("image " + (i + 1) + " load failed");
+                    continue;
+                }
+                nextImage = null;
+            } else {
+                IJ.log("Loading image " + (i + 1) + "/" + totalImages + "...");
+                try {
+                    imp = supplier.openSeries(i);
+                } catch (Exception e) {
+                    String message = "ERROR: Failed to open image " + (i + 1) + ": " + e.getMessage();
+                    IJ.log(message);
+                    recordError(message, e);
+                    failObjectImageProgress("image " + (i + 1) + " open failed");
+                    continue;
+                }
+            }
+            if (imp == null) {
+                completeObjectImageProgress("image " + (i + 1) + " skipped (not loaded)");
+                continue;
+            }
+            imp = applyConfiguredZSliceSubset(cfg, i, imp, "3D Object Analysis");
+
+            // Write calibration from the first successfully-loaded image
+            if (calibrationWritten.compareAndSet(false, true)) {
+                CalibrationIO.writeFromImage(outDir, imp);
+                recordOutputIfExists(new File(outDir, "calibration.properties"), "properties");
+            }
+
+            // Start loading next image while processing this one
+            if (i + 1 < totalImages) {
+                final int nextIdx = i + 1;
+                nextImage = prefetcher.submit(new Callable<ImagePlus>() {
+                    @Override
+                    public ImagePlus call() throws Exception {
+                        return supplier.openSeries(nextIdx);
+                    }
+                });
+            }
+
+            String imgTitle = imp.getTitle();
+            updateObjectProgress("loaded " + imgTitle);
+            int scnIndex = i + 1;
+
+            ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(directory, imgTitle, i + 1);
+            NameParts parts = metadata.toNameParts();
+            String animalName = parts.animal;
+
+            // Note: whole-analysis skip is handled before image loading (see
+            // the pre-scan block above).  Per-image skip is not meaningful for
+            // 3D Object Analysis because the principal outputs are aggregate
+            // per-channel CSVs written once at the end of the run.
+
+            long imageStartTime = verboseLogging ? System.currentTimeMillis() : 0;
+
+            IJ.log("__________________________________________________________");
+            IJ.log("Image Stack " + scnIndex + "/" + totalImages + ": " + imgTitle);
+            if (i > 0) {
+                long elapsed = System.currentTimeMillis() - analysisStartTime;
+                long avgPerImage = elapsed / i;
+                long remainingMs = avgPerImage * (totalImages - i);
+                IJ.log("Estimated time to completion: " + formatDuration(remainingMs));
+            }
+
+            if (verboseLogging) {
+                IJ.log("  [DEBUG] Parsed: Animal=" + animalName + ", Hemisphere=" + parts.hemisphere
+                        + ", Region=" + parts.region);
+                IJ.log("  [DEBUG] Image dimensions: " + imp.getWidth() + "x" + imp.getHeight()
+                        + "x" + imp.getNSlices() + ", channels=" + imp.getNChannels());
+            }
+
+            logOrientationResolution(metadata);
+            updateObjectProgress("orientation");
+            OrientationOps.applyTransform(imp, metadata);
+
+            // Determine if the count-once-assign-per-ROI optimisation can be used.
+            // Requires: all channels use centroid filtering, multiple ROI sets,
+            // mcib3d available, AND enough heap headroom for the per-channel
+            // full-image clones the optimisation retains across ROI iterations.
+            boolean allCentroid = true;
+            for (int c = 0; c < cfg.numChannels(); c++) {
+                if (!cfg.usesLabelImageSegmentation(c) && !classicalCentroidFilter) {
+                    allCentroid = false;
+                    break;
+                }
+            }
+            boolean useSharedCounting = allCentroid && roiSets.length > 1
+                    && isMcib3dAvailable() && canRunCountOnce(imp);
+
+            try {
+                if (useSharedCounting) {
+                    // Count all objects on the full image once, then assign per ROI
+                    if (!compactLog) IJ.log("  Counting objects on full image (shared across " + roiSets.length + " ROI sets)...");
+                    updateObjectProgress("shared full-image counting");
+                    FullImageCountData fullData = countAllChannelsFullImage(directory, cfg, imp, outDir,
+                            animalName, parts == null ? "" : parts.hemisphere, null);
+                    completeObjectImageProgress("prepared " + imgTitle + " (shared full-image count)");
+                    try {
+                        for (RoiSetData roiSet : roiSets) {
+                            processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoot,
+                                    channelTables, i, scnIndex, animalName, parts,
+                                    extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
+                        }
+                    } finally {
+                        cleanupFullImageData(fullData);
+                    }
+                } else {
+                    // Original path: count per ROI set
+                    completeObjectImageProgress("prepared " + imgTitle);
+                    for (RoiSetData roiSet : roiSets) {
+                        processRoiSetForImage(directory, cfg, imp, outDir, imageRoot, channelTables,
+                                i, scnIndex, animalName, parts,
+                                extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
+                    }
+                }
+
+            } catch (Exception ex) {
+                IJ.handleException(ex);
+                recordError("3D Object Analysis failed while processing image " + (i + 1), ex);
+                failObjectImageProgress("image " + (i + 1) + " failed");
+            } finally {
+                imp.changes = false;
+                imp.close();
+                imp.flush();
+                closeAllNoPrompt();
+
+                long elapsed = System.currentTimeMillis() - analysisStartTime;
+                long avgPerImage = elapsed / (i + 1);
+                long remainingMs = avgPerImage * (totalImages - (i + 1));
+                IJ.showProgress(i + 1, totalImages);
+                IJ.showStatus("Processing " + (i + 1) + "/" + totalImages
+                        + " (~" + formatDuration(remainingMs) + " remaining)");
+
+                if (verboseLogging) {
+                    long imageElapsed = System.currentTimeMillis() - imageStartTime;
+                    IJ.log("  [DEBUG] Image processing time: " + formatDuration(imageElapsed));
+                }
+
+            }
+        }
+        prefetcher.shutdown();
+    }
+
+    // ── Parallel image processing ──
+
+    private void processImagesParallel(
+            final BoundedImageLoader loader,
+            final int nThreads,
+            final String directory, final BinConfig cfg,
+            final File outDir, final SegmentationImageRoot imageRoot,
+            final Map<String, ij.measure.ResultsTable> channelTables,
+            final RoiSetData[] roiSets,
+            final boolean extractProcessLength, final int nuclearMarkerIndex, final boolean[] processChannels,
+            final long analysisStartTime) {
+
+        final int total = loader.totalToLoad();
+        final AtomicInteger completed = new AtomicInteger(0);
+        final List<Throwable> failures =
+                Collections.synchronizedList(new ArrayList<Throwable>());
+        int effectiveThreads = Math.min(nThreads, total);
+
+        ExecutorService pool = Executors.newFixedThreadPool(effectiveThreads);
+        List<Future<?>> futures = new ArrayList<Future<?>>();
+
+        for (int t = 0; t < effectiveThreads; t++) {
+            final int workerNum = t + 1;
+            futures.add(pool.submit(new Runnable() {
+                @Override
+                public void run() {
+                    while (true) {
+                        BoundedImageLoader.IndexedImage indexed;
+                        try {
+                            indexed = loader.take();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                        if (indexed == null) break; // no more images
+
+                        ImagePlus imp = indexed.image;
+                        int idx = indexed.index;
+                        int scnIndex = idx + 1;
+                        String imgTitle = imp == null ? "<null image>" : imp.getTitle();
+                        String partLabel = imgTitle;
+                        beginObjectImageProgress(scnIndex, total, partLabel,
+                                "worker " + workerNum + " loaded image");
+                        imp = applyConfiguredZSliceSubset(cfg, idx, imp, "3D Object Analysis");
+                        imgTitle = imp == null ? imgTitle : imp.getTitle();
+                        updateObjectProgress("loaded " + imgTitle);
+                        if (imp == null) {
+                            completeObjectImageProgress("image " + scnIndex + " skipped (not loaded)");
+                            continue;
+                        }
+
+                        // Write calibration from the first image (thread-safe)
+                        if (calibrationWritten.compareAndSet(false, true)) {
+                            CalibrationIO.writeFromImage(outDir, imp);
+                            recordOutputIfExists(new File(outDir, "calibration.properties"), "properties");
+                        }
+
+                        ParallelContext.enterParallel();
+                        // Set up thread-local image registry
+                        Map<String, ImagePlus> localRegistry = new LinkedHashMap<String, ImagePlus>();
+                        threadLocalRegistry.set(localRegistry);
+
+                        // Per-image local channel tables (will be merged after)
+                        Map<String, ij.measure.ResultsTable> localChannelTables = new LinkedHashMap<String, ij.measure.ResultsTable>();
+                        for (String chName : cfg.channelNames) {
+                            localChannelTables.put(chName, new ij.measure.ResultsTable());
+                        }
+
+                        try {
+                            ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
+                                    directory, imgTitle, idx + 1);
+                            NameParts parts = metadata.toNameParts();
+                            String animalName = parts.animal;
+
+                            // Worker start log with short name and channels
+                            String workerTag = effectiveThreads > 1
+                                    ? "Worker " + workerNum : "Worker";
+                            partLabel = parts.displayLabel();
+                            StringBuilder chList = new StringBuilder();
+                            for (int ci = 0; ci < cfg.channelNames.size(); ci++) {
+                                if (ci > 0) chList.append(" ");
+                                chList.append(cfg.channelNames.get(ci));
+                            }
+                            IJ.log(workerTag + ": processing " + partLabel
+                                    + " | " + chList.toString());
+
+                            // Note: whole-analysis skip is handled before image loading.
+                            // Per-image skip is not meaningful for 3D because outputs
+                            // are aggregate per-channel CSVs written once at the end.
+
+                            long imageStartTime = System.currentTimeMillis();
+
+                            if (!compactLog) {
+                                IJ.log("[" + scnIndex + "/" + total + "] Processing: " + imgTitle);
+                            }
+
+                            logOrientationResolution(metadata);
+                            updateObjectProgress("orientation");
+                            OrientationOps.applyTransform(imp, metadata);
+
+                            // Check if count-once optimisation applies (incl. heap budget)
+                            boolean allCentroid = true;
+                            for (int ci2 = 0; ci2 < cfg.numChannels(); ci2++) {
+                                if (!cfg.usesLabelImageSegmentation(ci2) && !classicalCentroidFilter) {
+                                    allCentroid = false;
+                                    break;
+                                }
+                            }
+                            boolean useSharedCounting = allCentroid && roiSets.length > 1
+                                    && isMcib3dAvailable() && canRunCountOnce(imp);
+
+                            if (useSharedCounting) {
+                                if (!compactLog) IJ.log("  Counting objects on full image (shared across " + roiSets.length + " ROI sets)...");
+                                updateObjectProgress("shared full-image counting");
+                                FullImageCountData fullData = countAllChannelsFullImage(directory, cfg, imp, outDir,
+                                        animalName, parts == null ? "" : parts.hemisphere, null);
+                                completeObjectImageProgress("prepared " + partLabel + " (shared full-image count)");
+                                try {
+                                    for (RoiSetData roiSet : roiSets) {
+                                        processRoiSetFromFullCount(fullData, directory, cfg, imp, outDir, imageRoot,
+                                                localChannelTables, idx, scnIndex, animalName, parts,
+                                                extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
+                                    }
+                                } finally {
+                                    cleanupFullImageData(fullData);
+                                }
+                            } else {
+                                completeObjectImageProgress("prepared " + partLabel);
+                                for (RoiSetData roiSet : roiSets) {
+                                    processRoiSetForImage(directory, cfg, imp, outDir, imageRoot, localChannelTables,
+                                            idx, scnIndex, animalName, parts,
+                                            extractProcessLength, nuclearMarkerIndex, processChannels, roiSet);
+                                }
+                            }
+
+                            // Merge local tables into shared channelTables
+                            synchronized (channelTables) {
+                                for (String chName : cfg.channelNames) {
+                                    ij.measure.ResultsTable localT = localChannelTables.get(chName);
+                                    ij.measure.ResultsTable sharedT = channelTables.get(chName);
+                                    if (localT == null || sharedT == null) continue;
+                                    mergeResultsTable(localT, sharedT);
+                                }
+                            }
+
+                            int done = completed.incrementAndGet();
+                            long elapsed = System.currentTimeMillis() - analysisStartTime;
+                            IJ.showProgress(done, total);
+                            if (done >= nThreads && done < total) {
+                                long remainingMs = elapsed * (total - done) / done;
+                                IJ.showStatus("Processing " + done + "/" + total
+                                        + " (~" + formatDuration(remainingMs) + " remaining)");
+                            } else {
+                                IJ.showStatus("Processing " + done + "/" + total);
+                            }
+                            if (compactLog) {
+                                long imageElapsed = System.currentTimeMillis() - imageStartTime;
+                                String etaStr = "";
+                                if (done >= nThreads && done < total) {
+                                    long remainingMs = elapsed * (total - done) / done;
+                                    etaStr = " | ETA: " + formatDurationCompact(remainingMs);
+                                }
+                                IJ.log("[" + done + "/" + total + "] " + partLabel
+                                        + " Completed in " + formatDurationCompact(imageElapsed) + etaStr);
+                            } else {
+                                long rem = done > 0 ? elapsed * (total - done) / done : 0;
+                                IJ.log("[" + scnIndex + "/" + total + "] Complete (" + done + "/" + total
+                                        + " done, ~" + formatDuration(rem) + " remaining)");
+                                if (verboseLogging) {
+                                    long imageElapsed = System.currentTimeMillis() - imageStartTime;
+                                    IJ.log("[" + scnIndex + "/" + total + "] Processing time: " + formatDuration(imageElapsed));
+                                }
+                            }
+                        } catch (Exception e) {
+                            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                            RuntimeException contextual = new RuntimeException(
+                                    "3D Object Analysis failed for image " + scnIndex + "/" + total
+                                            + " title='" + imgTitle + "' label='" + partLabel + "': " + msg,
+                                    e);
+                            failures.add(contextual);
+                            IJ.log("[" + scnIndex + "/" + total + "] ERROR: " + contextual.getMessage());
+                            recordError(contextual.getMessage(), contextual);
+                            failObjectImageProgress("image " + scnIndex + " failed");
+                            int done = completed.incrementAndGet();
+                            IJ.showProgress(done, total);
+                            IJ.showStatus("Processing " + done + "/" + total + " (failed)");
+                        } finally {
+                            // Close image after processing
+                            if (imp != null) {
+                                imp.changes = false;
+                                imp.close();
+                                imp.flush();
+                            }
+
+                            ParallelContext.exitParallel();
+                            // Clear thread-local registry
+                            Map<String, ImagePlus> reg = threadLocalRegistry.get();
+                            if (reg != null) {
+                                for (ImagePlus im : reg.values()) {
+                                    if (im != null) {
+                                        im.changes = false;
+                                        im.close();
+                                        im.flush();
+                                    }
+                                }
+                                reg.clear();
+                            }
+                            threadLocalRegistry.remove();
+
+                        }
+                    }
+                }
+            }));
+        }
+
+        // Wait for all workers to complete
+        for (Future<?> f : futures) {
+            try {
+                f.get();
+            } catch (Exception e) {
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
+                Throwable cause = e.getCause() == null ? e : e.getCause();
+                failures.add(cause);
+                String msg = cause.getMessage() != null
+                        ? cause.getMessage() : cause.getClass().getSimpleName();
+                IJ.log("Parallel processing error: " + msg);
+                recordError("Parallel processing error: " + msg, cause);
+            }
+        }
+        pool.shutdown();
+        if (!failures.isEmpty()) {
+            throw buildParallelFailure("3D Object Analysis failed for "
+                    + failures.size() + " image(s)", failures);
+        }
+    }
+
+    private static RuntimeException buildParallelFailure(String message, List<Throwable> failures) {
+        RuntimeException combined = new RuntimeException(message);
+        synchronized (failures) {
+            for (Throwable failure : failures) {
+                if (failure != null) {
+                    combined.addSuppressed(failure);
+                }
+            }
+        }
+        return combined;
+    }
+
+    /** Merge all rows from source into dest ResultsTable. */
+    private void mergeResultsTable(ij.measure.ResultsTable source, ij.measure.ResultsTable dest) {
+        if (source == null || source.size() == 0) return;
+        String[] headings = source.getHeadings();
+        for (int r = 0; r < source.size(); r++) {
+            dest.incrementCounter();
+            int destRow = dest.size() - 1;
+            for (String h : headings) {
+                if (h == null) continue;
+                // Try string first (for Animal Name, Hemisphere, Region)
+                String sVal = null;
+                try {
+                    sVal = source.getStringValue(h, r);
+                } catch (Exception ignored) {
+                }
+                if (sVal != null && !sVal.isEmpty()) {
+                    // Check if it's a pure number string
+                    try {
+                        double v = Double.parseDouble(sVal);
+                        dest.setValue(h, destRow, v);
+                    } catch (NumberFormatException nfe) {
+                        dest.setValue(h, destRow, sVal);
+                    }
+                } else {
+                    try {
+                        double v = source.getValue(h, r);
+                        dest.setValue(h, destRow, v);
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
+    }
+
+    /** Process length extraction helper (uses instance channelTables reference). */
+    private void processLengthExtraction(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables,
+                                          ImagePlus imp, int scnIndex, String animalName, NameParts parts,
+                                          boolean[] processChannels, int nuclearMarkerIndex) {
+        String hemisphere = parts == null ? "" : parts.hemisphere;
+        String region = parts == null
+                ? ""
+                : parts.csvRegion();
+        processLengthExtractionWithTables(cfg, channelTables, imp, scnIndex, animalName,
+                hemisphere, region, region, processChannels, nuclearMarkerIndex);
+    }
+
+    /** Process length extraction with explicit channel tables (for parallel use). */
+    private void processLengthExtractionWithTables(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables,
+                                                    ImagePlus imp, int scnIndex, String animalName,
+                                                    String hemisphere, String region, String roiLabel,
+                                                    boolean[] processChannels, int nuclearMarkerIndex) {
+        if (!compactLog) IJ.log("  > Process Length Extraction");
+        Calibration cal = imp.getCalibration();
+        double pixelWidth = (cal != null) ? cal.pixelWidth : 1.0;
+        double pixelHeight = (cal != null) ? cal.pixelHeight : 1.0;
+        double pixelDepth = (cal != null) ? cal.pixelDepth : 1.0;
+        // Per-voxel skeleton length scale. For isotropic XY (pixelWidth==pixelHeight==pixelDepth)
+        // this is just pixelWidth. For anisotropic stacks, fall back to the geometric mean of
+        // all three calibration axes — closer to a direction-agnostic mean voxel step than any
+        // single axis would give. TODO: switch to Object3DInt.getMeasure(LIGNE3D) for true
+        // step-direction-weighted skeleton length.
+        double voxelLengthScale = pixelWidth;
+        if (pixelWidth != pixelHeight || pixelWidth != pixelDepth) {
+            voxelLengthScale = Math.cbrt(pixelWidth * pixelHeight * pixelDepth);
+        }
+
+        for (int c = 0; c < cfg.numChannels(); c++) {
+            if (!processChannels[c]) continue;
+            String channelName = cfg.channelNames.get(c);
+            String processName = "Process Channel " + channelName;
+            ImagePlus processImg = getRegisteredImage(processName);
+            ImagePlus nuclearImg = getRegisteredImage("Nuclear Marker");
+            if (processImg == null || nuclearImg == null) {
+                IJ.log("    - Skipped process length for " + channelName + " (missing skeleton images)");
+                continue;
+            }
+
+            ImagePlus subtracted = ImageCalcOps.subtractStackThreadSafe(processImg, nuclearImg);
+            if (subtracted == null) {
+                IJ.log("    - Skipped process length for " + channelName + " (subtract failed)");
+                continue;
+            }
+            registerImage(processName + " subtracted", subtracted, true);
+
+            ImagePlus filteredImg = getRegisteredImage(channelName + "_filtered");
+            if (filteredImg == null) {
+                IJ.log("    - Skipped process length for " + channelName + " (no filtered image)");
+                subtracted.changes = false;
+                subtracted.close();
+                subtracted.flush();
+                continue;
+            }
+
+            String thrToken = cfg.channelThresholds.get(c);
+            double threshold = ThresholdOps.thresholdFromTokenAtSlice(filteredImg, thrToken, 6, false);
+            if (!Double.isFinite(threshold)) {
+                subtracted.changes = false;
+                subtracted.close();
+                subtracted.flush();
+                continue;
+            }
+
+            String sizeToken = cfg.channelSizes.get(c);
+            String[] sizeParts = sizeToken.split("-");
+            int minSizeVox = ObjectsCounter3DWrapper.parseMinSizeVoxels(
+                    sizeParts.length > 0 ? sizeParts[0] : "100", 100);
+            int maxSizeVox = ObjectsCounter3DWrapper.parseMaxSizeVoxels(
+                    sizeParts.length > 1 ? sizeParts[1] : "Infinity", filteredImg);
+
+            ObjectsCounter3DWrapper ocWrapper = new ObjectsCounter3DWrapper();
+            ObjectsCounter3DWrapper.Result procRes;
+            if (isMcib3dAvailable()) {
+                procRes = ocWrapper.runNative(
+                        filteredImg,
+                        (int) Math.round(threshold),
+                        minSizeVox,
+                        maxSizeVox,
+                        false,
+                        subtracted,  // redirect image for intensity measurement
+                        false,       // no objects map needed
+                        false        // no masked image needed
+                );
+            } else {
+                COUNTER3D_LOCK.lock();
+                try {
+                    ensureInWindowManager(subtracted);
+                    procRes = ocWrapper.run(
+                            filteredImg,
+                            (int) Math.round(threshold),
+                            minSizeVox,
+                            maxSizeVox,
+                            false,
+                            true,
+                            processName + " subtracted",
+                            false,
+                            false
+                    );
+                    if (headless) hideAllImageWindows();
+                } finally {
+                    COUNTER3D_LOCK.unlock();
+                }
+            }
+
+            ResultsTable procStats = procRes.getStatistics();
+            ResultsTable channelTable = channelTables.get(channelName);
+            if (procStats != null && procStats.size() > 0 && channelTable != null) {
+                double[] lengths = new double[procStats.size()];
+                for (int r = 0; r < procStats.size(); r++) {
+                    double intDen = procStats.getValue("IntDen", r);
+                    double numVoxels = intDen / 255.0;
+                    lengths[r] = numVoxels * voxelLengthScale;
+                }
+                writeLengthValuesForThisImage(channelTable, scnIndex, animalName,
+                        hemisphere, region, roiLabel, lengths);
+                if (!compactLog) IJ.log("    - Process length for " + channelName + ": " + procStats.size() + " objects measured");
+            }
+
+            subtracted.changes = false;
+            subtracted.close();
+            subtracted.flush();
+        }
+    }
+
+    /** Save objects images (label maps) after colocalization. */
+    private void saveObjectsImages(BinConfig cfg, SegmentationImageRoot imageRoot, String animalName, String hemisphere, String region) {
+        String hemiRegion = buildFileSuffix(hemisphere, region, animalName);
+        File perAnimal = imageRoot.animalDir(animalName);
+        for (int c = 0; c < cfg.numChannels(); c++) {
+            String chName = cfg.channelNames.get(c);
+            ImagePlus objImg = getRegisteredImage(chName + "_objects");
+            if (objImg != null) {
+                String safeChName = ChannelFilenameCodec.toSafe(chName);
+                String objFileName = safeChName + "_objects" + (hemiRegion.isEmpty() ? "" : "_" + hemiRegion) + ".tif";
+                File labelOutput = new File(perAnimal, objFileName);
+                AsyncImageSaver.saveAsTiffAsync(objImg, labelOutput.getAbsolutePath());
+                recordOutput(labelOutput, "tiff");
+                retainSpatialLabelIfNeeded(chName, SectionKey.of(animalName, hemiRegion), objImg);
+            }
+        }
+    }
+
+    private void retainSpatialLabelIfNeeded(String channelName, SectionKey section, ImagePlus labelImage) {
+        if (!shouldRetainSpatialLabels() || labelImage == null || section == null) {
+            return;
+        }
+
+        ImagePlus retained = null;
+        try {
+            retained = ImageOps.duplicateThreadSafe(labelImage);
+            if (retained != null) {
+                retained.setTitle(labelImage.getTitle());
+            }
+        } catch (Exception e) {
+            IJ.log("  [Spatial] Could not retain in-memory label for "
+                    + channelName + " / " + section + ": " + e.getMessage());
+            return;
+        }
+
+        synchronized (retainedLabels) {
+            Map<String, ImagePlus> perChannel = retainedLabels.get(section);
+            if (perChannel == null) {
+                perChannel = new LinkedHashMap<String, ImagePlus>();
+                retainedLabels.put(section, perChannel);
+            }
+            ImagePlus previous = perChannel.put(channelName, retained);
+            if (previous != null && previous != retained) {
+                closeQuietly(previous);
+            }
+        }
+    }
+
+    private boolean shouldRetainSpatialLabels() {
+        return wizardRunSpatial
+                && wizardSpatialConfig != null
+                && wizardSpatialConfig.anyEarlyPhaseToggleOn();
+    }
+
+    private void clearRetainedSpatialLabels() {
+        synchronized (retainedLabels) {
+            for (Map<String, ImagePlus> perChannel : retainedLabels.values()) {
+                if (perChannel == null) {
+                    continue;
+                }
+                for (ImagePlus image : perChannel.values()) {
+                    closeQuietly(image);
+                }
+            }
+            retainedLabels.clear();
+        }
+    }
+
+    /**
+     * Build a file suffix from hemisphere/region, falling back to animalName
+     * so that non-convention filenames still produce unique output filenames.
+     */
+    private static String buildFileSuffix(String hemisphere, String region, String animalName) {
+        boolean hasH = hemisphere != null && !hemisphere.isEmpty();
+        boolean hasR = region != null && !region.isEmpty();
+        if (hasH && hasR) return hemisphere + "_" + region;
+        if (hasH) return hemisphere;
+        if (hasR) return region;
+        // Fallback: use animal name (which is the full image title for non-convention files)
+        return (animalName != null && !animalName.isEmpty()) ? animalName : "";
+    }
+
+    /** Write temporary tables (macro quirk for i > 0). */
+    private void writeTempTables(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables,
+                                  String directory, int i, boolean extractProcessLength, boolean[] processChannels) {
+        for (String ch : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(ch);
+            if (t == null) continue;
+
+            List<String> keep = buildOrderedObjectColumns(ch, t, cfg, extractProcessLength, processChannels);
+            ResultsTableCleaner.keepOnlyColumns(t, keep.toArray(new String[0]));
+
+            try {
+                CsvTableIO.writeResultsTableCsv(objectTempCsv(objectCsvWriteDir(directory), ch, i), t, keep,
+                        currentRunId());
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private List<String> buildOrderedObjectColumns(String channelName, ResultsTable table, BinConfig cfg,
+                                                   boolean extractProcessLength, boolean[] processChannels) {
+        LinkedHashSet<String> keep = new LinkedHashSet<String>();
+
+        String[] headings = table != null ? table.getHeadings() : null;
+        if (headings != null) {
+            for (String heading : headings) {
+                if (heading == null || heading.trim().isEmpty()) continue;
+                keep.add(heading);
+            }
+        }
+
+        keep.add("Region");
+        keep.addAll(AtlasRegionColumns.COLUMNS);
+        keep.add("Hemisphere");
+        keep.add("ROI");
+        keep.add("Animal Name");
+        keep.add("Label");
+        keep.add("Volume (micron^3)");
+        keep.add("Surface (micron^2)");
+        keep.add("IntDen");
+        keep.add("Mean");
+        keep.add("XM");
+        keep.add("YM");
+        keep.add("ZM");
+        keep.add("BX");
+        keep.add("BY");
+        keep.add("BZ");
+        keep.add("B-width");
+        keep.add("B-height");
+        keep.add("B-depth");
+        keep.add("B-volume (voxels)");
+        keep.add("B-volume (micron^3)");
+
+        for (String other : cfg.channelNames) {
+            if (other == null || other.equals(channelName)) continue;
+            if (doVolumetric) {
+                keep.add(colocPercentCol(other));
+                keep.add(volColocCol(channelName, other));
+            }
+            if (doCpc) {
+                keep.add(channelName + "_CPCColoc_" + other);
+                keep.add(channelName + "_CPCContains_" + other);
+            }
+            if (doBBOverlap) {
+                keep.add(bbColocPctCol(channelName, other));
+                keep.add(bbColocFlagCol(channelName, other));
+            }
+            if (doBBCpc) {
+                keep.add(bbCpcColocCol(channelName, other));
+                keep.add(bbCpcContainsCol(channelName, other));
+            }
+            if (doBBVol) {
+                keep.add(bbVolPctCol(channelName, other));
+                keep.add(bbVolTotalCol(channelName, other));
+                keep.add(bbVolFlagCol(channelName, other));
+            }
+            if (doIntensityColoc) {
+                keep.add(objPearsonCol(channelName, other));
+                keep.add(objMandersM1Col(channelName, other));
+                keep.add(objMandersM2Col(channelName, other));
+                keep.add(objCostesTaCol(channelName, other));
+                keep.add(objCostesTbCol(channelName, other));
+                keep.add(objPearsonThresholdedCol(channelName, other));
+                keep.add(objCostesPCol(channelName, other));
+                keep.add(roiCostesTaCol(channelName, other));
+                keep.add(roiCostesTbCol(channelName, other));
+                keep.add(roiCostesPCol(channelName, other));
+            }
+        }
+
+        if (doCpc) {
+            keep.add(channelName + "_CPCTargetsHit");
+            keep.add(channelName + "_CPCPattern");
+        }
+        if (doBBCpc) {
+            keep.add(channelName + "_BBCPCTargetsHit");
+            keep.add(channelName + "_BBCPCPattern");
+        }
+
+        boolean keepLength = false;
+        if (extractProcessLength && processChannels != null) {
+            int ci = cfg.channelNames.indexOf(channelName);
+            keepLength = ci >= 0 && processChannels[ci];
+        }
+        if (keepLength) {
+            keep.add("Length");
+        } else {
+            keep.remove("Length");
+        }
+
+        return ObjectCsvColumnOrder.orderedColumns(channelName, new ArrayList<String>(keep), cfg.channelNames);
+    }
+
+    /**
+     * Holds the pre-computed filter + threshold results for a single channel,
+     * produced by Phase A (parallel) and consumed by Phase B (sequential Counter3D).
+     */
+    // StarDist + Cellpose now manage concurrency in their runners via GpuConcurrency
+    // (narrow StarDist show()/TrackMate/close() lock + shared GPU semaphore).
+    // The WindowManagerLock is still used for classical 3DOC via COUNTER3D_LOCK.
+
+    private static class ChannelFilterResult {
+        final int channelIndex;
+        final String channelName;
+        final ImagePlus unfiltered;
+        final ImagePlus filtered;
+        final Double threshold;      // null means channel should be skipped
+        final int minSizeVox;
+        final int maxSizeVox;
+        final boolean skipped;       // true if threshold was unrecognised
+        final String skipReason;     // reason for skipping (logged later)
+        final boolean labelImageSegmentation;
+        final String segmentationName;
+        final ImagePlus labelImage;
+        final String segmentationSummary;
+        final ImagePlus preDetectionFiltered; // filtered+cropped image before segmentation/threshold (for saving)
+        final boolean enhancedClassical;
+        final List<MorphPredicate> morphPredicates;
+
+        ChannelFilterResult(int channelIndex, String channelName, ImagePlus unfiltered,
+                            ImagePlus filtered, Double threshold, int minSizeVox, int maxSizeVox,
+                            boolean skipped, String skipReason) {
+            this(channelIndex, channelName, unfiltered, filtered, threshold, minSizeVox, maxSizeVox,
+                    skipped, skipReason, false, "", null, "", null, false,
+                    Collections.<MorphPredicate>emptyList());
+        }
+
+        ChannelFilterResult(int channelIndex, String channelName, ImagePlus unfiltered,
+                            ImagePlus filtered, Double threshold, int minSizeVox, int maxSizeVox,
+                            boolean skipped, String skipReason,
+                            boolean labelImageSegmentation, String segmentationName, ImagePlus labelImage,
+                            String segmentationSummary,
+                            ImagePlus preDetectionFiltered) {
+            this(channelIndex, channelName, unfiltered, filtered, threshold, minSizeVox, maxSizeVox,
+                    skipped, skipReason, labelImageSegmentation, segmentationName, labelImage,
+                    segmentationSummary, preDetectionFiltered, false,
+                    Collections.<MorphPredicate>emptyList());
+        }
+
+        ChannelFilterResult(int channelIndex, String channelName, ImagePlus unfiltered,
+                            ImagePlus filtered, Double threshold, int minSizeVox, int maxSizeVox,
+                            boolean skipped, String skipReason,
+                            boolean labelImageSegmentation, String segmentationName, ImagePlus labelImage,
+                            String segmentationSummary,
+                            ImagePlus preDetectionFiltered,
+                            boolean enhancedClassical,
+                            List<MorphPredicate> morphPredicates) {
+            this.channelIndex = channelIndex;
+            this.channelName = channelName;
+            this.unfiltered = unfiltered;
+            this.filtered = filtered;
+            this.threshold = threshold;
+            this.minSizeVox = minSizeVox;
+            this.maxSizeVox = maxSizeVox;
+            this.skipped = skipped;
+            this.skipReason = skipReason;
+            this.labelImageSegmentation = labelImageSegmentation;
+            this.segmentationName = segmentationName == null ? "" : segmentationName;
+            this.labelImage = labelImage;
+            this.segmentationSummary = segmentationSummary == null ? "" : segmentationSummary;
+            this.preDetectionFiltered = preDetectionFiltered;
+            this.enhancedClassical = enhancedClassical;
+            this.morphPredicates = morphPredicates == null
+                    ? Collections.<MorphPredicate>emptyList()
+                    : Collections.unmodifiableList(new ArrayList<MorphPredicate>(morphPredicates));
+        }
+    }
+
+    /**
+     * Holds per-channel results from counting on the full uncropped image.
+     * Used by the count-once-assign-per-ROI optimisation when all channels
+     * use centroid filtering (StarDist and/or classicalCentroidFilter).
+     */
+    private static class FullImageCountData {
+        final ChannelFilterResult[] filterResults;
+        final ObjectsCounter3DWrapper.Result[] countResults;
+        final boolean[] channelHasObjects;
+        final int numChannels;
+
+        FullImageCountData(ChannelFilterResult[] filterResults,
+                           ObjectsCounter3DWrapper.Result[] countResults,
+                           boolean[] channelHasObjects,
+                           int numChannels) {
+            this.filterResults = filterResults;
+            this.countResults = countResults;
+            this.channelHasObjects = channelHasObjects;
+            this.numChannels = numChannels;
+        }
+    }
+
+    private boolean[] run3DObjectsCounterPerChannel(
+            String directory,
+            BinConfig cfg,
+            ImagePlus imp,
+            File outDir,
+            SegmentationImageRoot imageRoot,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            NameParts parts,
+            boolean extractProcessLength,
+            int nuclearMarkerIndex,
+            boolean[] processChannels,
+            RegionMask region,
+            String regionLabel,
+            String roiLabel,
+            String roiSetName
+    ) {
+        String hemisphere = parts == null ? "" : parts.hemisphere;
+        ImagePlus[] chans = ChannelSplitter.split(imp);
+        if (chans == null || chans.length == 0) {
+
+            IJ.error("No channels found in " + imp.getTitle());
+            return new boolean[0];
+        }
+
+        int n = Math.min(cfg.numChannels(), chans.length);
+        final File binDir = activeConfigurationDir(directory);
+        boolean[] channelHasObjects = new boolean[n];
+
+        // ── Phase A: Parallel filter + threshold ──
+        // Pre-compute filter and threshold for all channels concurrently.
+        // This hides filter latency behind Counter3D execution of other images.
+
+        final ChannelFilterResult[] filterResults = new ChannelFilterResult[n];
+
+        // Capture per-channel config before submitting to threads (all from cfg, which is read-only)
+        final String[] channelNames = new String[n];
+        final String[] filterFilenames = new String[n];
+        final String[] thresholdTokens = new String[n];
+        final String[] sizeTokens = new String[n];
+        final SegmentationMethod[] segmentationMethods = new SegmentationMethod[n];
+        final boolean[] isEnhancedClassical = new boolean[n];
+        @SuppressWarnings("unchecked")
+        final List<MorphPredicate>[] enhancedMorphPredicates = new List[n];
+        final boolean[] isStarDist = new boolean[n];
+        final boolean[] isCellpose = new boolean[n];
+        final double[] sdProbThresh = new double[n];
+        final double[] sdNmsThresh = new double[n];
+        final double[] sdLinkingMaxDistance = new double[n];
+        final double[] sdGapClosingMaxDistance = new double[n];
+        final int[] sdMaxFrameGap = new int[n];
+        final double[] sdAreaMin = new double[n];
+        final double[] sdAreaMax = new double[n];
+        final double[] sdQualityMin = new double[n];
+        final double[] sdIntensityMin = new double[n];
+        final String[] sdModelKey = new String[n];
+        final String[] cpModel = new String[n];
+        final double[] cpDiameter = new double[n];
+        final double[] cpFlowThreshold = new double[n];
+        final double[] cpCellprobThreshold = new double[n];
+        final boolean[] cpUseGpu = new boolean[n];
+        final int[] cpSecondChannel = new int[n];
+        for (int c = 0; c < n; c++) {
+            channelNames[c] = cfg.channelNames.get(c);
+            filterFilenames[c] = cfg.filterMacroFilenameForChannelIndex(c);
+            thresholdTokens[c] = cfg.channelThresholds.get(c);
+            sizeTokens[c] = cfg.channelSizes.get(c);
+            SegmentationMethod segmentationMethod = cfg.segmentationMethod(c);
+            segmentationMethods[c] = segmentationMethod;
+            isEnhancedClassical[c] = segmentationMethod.isEnhancedClassical();
+            enhancedMorphPredicates[c] = isEnhancedClassical[c]
+                    ? SegmentationMethod.morphPredicates(segmentationMethod)
+                    : Collections.<MorphPredicate>emptyList();
+            if (isEnhancedClassical[c]) {
+                thresholdTokens[c] = String.valueOf((int) Math.round(SegmentationMethod.threshold(segmentationMethod)));
+                int maxSize = SegmentationMethod.maxSize(segmentationMethod);
+                sizeTokens[c] = SegmentationMethod.minSize(segmentationMethod) + "-"
+                        + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
+            }
+            isStarDist[c] = cfg.isStarDist(c);
+            isCellpose[c] = cfg.isCellpose(c);
+            SegmentationMethod cellposeSettingsMethod = segmentationMethod;
+            sdProbThresh[c] = cfg.getStarDistProbThresh(c);
+            sdNmsThresh[c] = cfg.getStarDistNmsThresh(c);
+            sdLinkingMaxDistance[c] = cfg.getStarDistLinkingMaxDistance(c);
+            sdGapClosingMaxDistance[c] = cfg.getStarDistGapClosingMaxDistance(c);
+            sdMaxFrameGap[c] = cfg.getStarDistMaxFrameGap(c);
+            sdAreaMin[c] = cfg.getStarDistAreaMin(c);
+            sdAreaMax[c] = cfg.getStarDistAreaMax(c);
+            sdQualityMin[c] = cfg.getStarDistQualityMin(c);
+            sdIntensityMin[c] = cfg.getStarDistIntensityMin(c);
+            sdModelKey[c] = SegmentationMethod.starDistModelKey(cfg.segmentationMethod(c));
+            cpModel[c] = SegmentationMethod.cellposeModelKey(cellposeSettingsMethod);
+            cpDiameter[c] = SegmentationMethod.cellposeDiameter(cellposeSettingsMethod);
+            cpFlowThreshold[c] = SegmentationMethod.cellposeFlow(cellposeSettingsMethod);
+            cpCellprobThreshold[c] = SegmentationMethod.cellposeCellprob(cellposeSettingsMethod);
+            cpUseGpu[c] = SegmentationMethod.cellposeUseGpu(cellposeSettingsMethod);
+            cpSecondChannel[c] = SegmentationMethod.cellposeChan2(cellposeSettingsMethod);
+        }
+
+        // Use a thread pool for parallel filtering (cap at 4 to avoid memory pressure)
+        updateObjectProgress("filtering " + n + " channel(s)");
+        int filterThreads = Math.min(n, 4);
+        final ImagePlus[] cellposeCompanionSources = snapshotCellposeCompanionSources(chans, cpSecondChannel, channelNames);
+        if (filterThreads > 1) {
+            ExecutorService filterPool = Executors.newFixedThreadPool(filterThreads);
+            List<Future<?>> filterFutures = new ArrayList<Future<?>>();
+
+            try {
+            for (int c = 0; c < n; c++) {
+                final int ci = c;
+                final ImagePlus ch = chans[c];
+                final boolean doExtractProcessLength = extractProcessLength;
+                final int nucIdx = nuclearMarkerIndex;
+                final boolean[] procChans = processChannels;
+
+                filterFutures.add(filterPool.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        // Enter ParallelContext so any FilterExecutor calls
+                        // inside filterAndThresholdChannel serialise instead
+                        // of spawning their own slice pools (avoids
+                        // image × channel × slice CPU oversubscription).
+                        ParallelContext.enterParallel();
+                        try {
+                            filterResults[ci] = filterAndThresholdChannel(
+                                    ci, channelNames[ci], ch, binDir, filterFilenames[ci],
+                                    thresholdTokens[ci], sizeTokens[ci],
+                                    doExtractProcessLength, nucIdx, procChans, n,
+                                    segmentationMethods[ci],
+                                    isEnhancedClassical[ci], enhancedMorphPredicates[ci],
+                                    isStarDist[ci], sdProbThresh[ci], sdNmsThresh[ci],
+                                    sdLinkingMaxDistance[ci], sdGapClosingMaxDistance[ci], sdMaxFrameGap[ci],
+                                    sdAreaMin[ci], sdAreaMax[ci], sdQualityMin[ci], sdIntensityMin[ci],
+                                    sdModelKey[ci], new File(directory),
+                                    isCellpose[ci], cpModel[ci], cpDiameter[ci], cpFlowThreshold[ci],
+                                    cpCellprobThreshold[ci], cpUseGpu[ci],
+                                    cpSecondChannel[ci],
+                                    cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < cellposeCompanionSources.length ? cellposeCompanionSources[cpSecondChannel[ci]] : null,
+                                    cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < channelNames.length ? channelNames[cpSecondChannel[ci]] : null,
+                                    cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < filterFilenames.length ? filterFilenames[cpSecondChannel[ci]] : null,
+                                    region, roiSetName);
+                        } finally {
+                            ParallelContext.exitParallel();
+                        }
+                    }
+                }));
+            }
+
+            // Wait for all filter tasks to complete
+            waitForFilterFutures(filterFutures);
+            } finally {
+                filterPool.shutdown();
+            }
+        } else {
+            // Single channel — no need for thread pool overhead
+            for (int c = 0; c < n; c++) {
+                filterResults[c] = filterAndThresholdChannel(
+                        c, channelNames[c], chans[c], binDir, filterFilenames[c],
+                        thresholdTokens[c], sizeTokens[c],
+                        extractProcessLength, nuclearMarkerIndex, processChannels, n,
+                        segmentationMethods[c],
+                        isEnhancedClassical[c], enhancedMorphPredicates[c],
+                        isStarDist[c], sdProbThresh[c], sdNmsThresh[c],
+                        sdLinkingMaxDistance[c], sdGapClosingMaxDistance[c], sdMaxFrameGap[c],
+                        sdAreaMin[c], sdAreaMax[c], sdQualityMin[c], sdIntensityMin[c],
+                        sdModelKey[c], new File(directory),
+                        isCellpose[c], cpModel[c], cpDiameter[c], cpFlowThreshold[c],
+                        cpCellprobThreshold[c], cpUseGpu[c],
+                        cpSecondChannel[c],
+                        cpSecondChannel[c] >= 0 && cpSecondChannel[c] < cellposeCompanionSources.length ? cellposeCompanionSources[cpSecondChannel[c]] : null,
+                        cpSecondChannel[c] >= 0 && cpSecondChannel[c] < channelNames.length ? channelNames[cpSecondChannel[c]] : null,
+                        cpSecondChannel[c] >= 0 && cpSecondChannel[c] < filterFilenames.length ? filterFilenames[cpSecondChannel[c]] : null,
+                        region, roiSetName);
+            }
+        }
+
+        // ── Phase A.5: Capture QC images for ALL channels before counting ──
+        closeQuietly(cellposeCompanionSources);
+        // Done here so that a failure during 3D counting doesn't prevent QC capture.
+        if (qualityReport != null && qualityReport.isEnabled()) {
+            for (int c = 0; c < n; c++) {
+                ChannelFilterResult fr = filterResults[c];
+                if (fr == null || fr.skipped || fr.filtered == null) continue;
+                String lutColor = (c < cfg.channelColors.size()) ? cfg.channelColors.get(c) : "Grays";
+                String imgDisplayName = animalName + "_"
+                        + (hemisphere != null ? hemisphere : "")
+                        + (roiLabel != null ? roiLabel : "");
+                qualityReport.addChannelQC(imgDisplayName, fr.channelName, fr.unfiltered, fr.filtered, lutColor);
+            }
+        }
+
+        // ── Phase B: 3D Object Counting ──
+        // Native mcib3d path is fully thread-safe (no global state) — no lock needed.
+        // Legacy Counter3D fallback requires COUNTER3D_LOCK due to Prefs/WindowManager.
+
+        ObjectsCounter3DWrapper ocWrapper = new ObjectsCounter3DWrapper();
+        boolean useNative = isMcib3dAvailable();
+        if (!compactLog) {
+            if (useNative && verboseLogging) {
+                IJ.log("  [DEBUG] Using native mcib3d object counting (thread-safe, no lock)");
+            } else if (!useNative) {
+                IJ.log("  [INFO] mcib3d-core not available, using legacy Counter3D (sequential)");
+            }
+        }
+
+        for (int c = 0; c < n; c++) {
+            ChannelFilterResult fr = filterResults[c];
+            if (fr == null) {
+                if (!compactLog) {
+                    IJ.log("  > Channel " + (c + 1) + "/" + n + ": " + channelNames[c]);
+                    IJ.log("    - ERROR: filter phase produced no result");
+                }
+                continue;
+            }
+
+            String channelName = fr.channelName;
+            updateObjectProgress("counting " + channelName + " (" + (c + 1) + "/" + n + ")");
+            if (!compactLog) IJ.log("  > Channel " + (c + 1) + "/" + n + ": " + channelName);
+
+            if (fr.skipped) {
+                if (!compactLog) IJ.log("    - Skipped: " + fr.skipReason);
+                continue;
+            }
+
+            try {
+                // Register unfiltered image for downstream use (process length, coloc, etc.)
+                // Native path: no WindowManager needed; Legacy path: Counter3D redirect needs it
+                registerImage(channelName + "_unfiltered", fr.unfiltered, !useNative);
+
+                // Register filtered image (process length extraction uses it)
+                registerImage(channelName + "_filtered", fr.filtered, false);
+
+                // Register skeleton images created during Phase A (stored as properties on filtered image)
+                if (extractProcessLength && processChannels != null) {
+                    boolean isNuclear = (c == nuclearMarkerIndex);
+                    boolean isProcess = processChannels[c];
+                    if (isNuclear || isProcess) {
+                        String skelName = isNuclear ? "Nuclear Marker" : "Process Channel " + channelName;
+                        Object skelObj = fr.filtered.getProperty("_skeleton_" + skelName);
+                        if (skelObj instanceof ImagePlus) {
+                            registerImage(skelName, (ImagePlus) skelObj, false);
+                        }
+                    }
+                }
+
+                ObjectsCounter3DWrapper.Result res;
+
+                if (fr.labelImageSegmentation) {
+                    // ── StarDist path: use pre-computed label image directly ──
+                    // The label image preserves instance segmentation (touching nuclei
+                    // remain separate), unlike binary → 3D Objects Counter which would
+                    // merge them. We go straight to Objects3DIntPopulation from labels.
+
+                    if (useNative) {
+                        res = ocWrapper.fromLabelImage(
+                                fr.labelImage,
+                                fr.unfiltered,   // redirect for intensity measurements
+                                fr.minSizeVox,
+                                fr.maxSizeVox,
+                                true,            // wantObjectsMap
+                                true             // wantMaskedImage
+                        );
+                    } else {
+                        // Fallback: convert label image to binary and run legacy Counter3D
+                        // (loses instance segmentation but keeps pipeline running)
+                        COUNTER3D_LOCK.lock();
+                        try {
+                            ensureInWindowManager(fr.unfiltered);
+                            res = ocWrapper.run(
+                                    fr.filtered,         // binary mask
+                                    1,                   // threshold=1 (anything > 0 is foreground)
+                                    fr.minSizeVox,
+                                    fr.maxSizeVox,
+                                    false,
+                                    true,
+                                    channelName + "_unfiltered",
+                                    true,
+                                    true
+                            );
+                            if (headless) hideAllImageWindows();
+                        } finally {
+                            COUNTER3D_LOCK.unlock();
+                        }
+                    }
+
+                    int objectCount = countCountableObjectRows(res.getStatistics());
+                    if (!compactLog) {
+                        IJ.log("    - [Ch " + (c + 1) + "] " + fr.segmentationSummary
+                                + ": " + objectCount + " objects detected");
+                        if (verboseLogging) {
+                            IJ.log("    [DEBUG] Redirect target: " + channelName + "_unfiltered");
+                            IJ.log("    [DEBUG] Objects map present: " + (res.getObjectsMap() != null));
+                            IJ.log("    [DEBUG] Masked image present: " + (res.getMaskedImage() != null));
+                            IJ.log("    [DEBUG] Counter mode: " + fr.segmentationName
+                                    + " label -> " + (useNative ? "mcib3d fromLabelImage" : "legacy Counter3D (binary fallback)"));
+                        }
+                    }
+
+                    // Clean up the StarDist label image (we have what we need in the Result)
+                    if (fr.labelImage != null) {
+                        fr.labelImage.changes = false;
+                        fr.labelImage.close();
+                        fr.labelImage.flush();
+                    }
+
+                } else {
+                    // ── Classical path: filter + threshold + 3D object counting ──
+
+                    if (!compactLog) {
+                        IJ.log("    - Threshold: " + fr.threshold);
+                        if (verboseLogging) {
+                            IJ.log("    [DEBUG] Threshold token from configuration: '" + thresholdTokens[c] + "' -> resolved: " + fr.threshold);
+                        }
+                        IJ.log("    - Size range: " + fr.minSizeVox + "-" + (fr.maxSizeVox == Integer.MAX_VALUE ? "Infinity" : fr.maxSizeVox));
+                    }
+
+                    boolean excludeOnEdges = false;
+                    long counterStart = System.currentTimeMillis();
+
+                    if (fr.enhancedClassical) {
+                        ImagePlus enhancedLabels = new EnhancedClassicalRunner().run(
+                                fr.filtered,
+                                new EnhancedClassicalParameters(
+                                        (int) Math.round(fr.threshold),
+                                        fr.minSizeVox,
+                                        fr.maxSizeVox,
+                                        fr.morphPredicates,
+                                        fr.unfiltered,
+                                        new EnhancedClassicalParameters.WarningSink() {
+                                            @Override public void warn(String message) {
+                                                IJ.log(message);
+                                            }
+                                        }));
+                        ObjectsCounter3DWrapper.Result recounted = ocWrapper.fromLabelImage(
+                                enhancedLabels,
+                                fr.unfiltered,
+                                0,
+                                Integer.MAX_VALUE,
+                                true,
+                                true);
+                        ResultsTable stats = EnhancedClassicalRunner.statsProperty(enhancedLabels);
+                        if (stats == null) stats = recounted.getStatistics();
+                        ImagePlus objectMap = recounted.getObjectsMap() == null
+                                ? enhancedLabels
+                                : recounted.getObjectsMap();
+                        if (objectMap != null) {
+                            objectMap.setProperty(EnhancedClassicalRunner.OBJECT_STATS_PROPERTY, stats);
+                        }
+                        if (enhancedLabels != null && enhancedLabels != objectMap) {
+                            enhancedLabels.changes = false;
+                            enhancedLabels.close();
+                            enhancedLabels.flush();
+                        }
+                        res = new ObjectsCounter3DWrapper.Result(
+                                stats,
+                                objectMap,
+                                recounted.getMaskedImage(),
+                                hasCountableObjectRows(stats) && objectMap != null);
+                    } else if (useNative) {
+                        // Native mcib3d path — thread-safe, no lock needed
+                        res = ocWrapper.runNative(
+                                fr.filtered,
+                                (int) Math.round(fr.threshold),
+                                fr.minSizeVox,
+                                fr.maxSizeVox,
+                                excludeOnEdges,
+                                fr.unfiltered,  // redirect image passed directly (no WindowManager)
+                                true,           // wantObjectsMap
+                                true            // wantMaskedImage
+                        );
+                    } else {
+                        // Legacy Counter3D fallback — requires lock
+                        COUNTER3D_LOCK.lock();
+                        try {
+                            ensureInWindowManager(fr.unfiltered);
+                            res = ocWrapper.run(
+                                    fr.filtered,
+                                    (int) Math.round(fr.threshold),
+                                    fr.minSizeVox,
+                                    fr.maxSizeVox,
+                                    excludeOnEdges,
+                                    true,
+                                    channelName + "_unfiltered",
+                                    true,
+                                    true
+                            );
+                            if (headless) hideAllImageWindows();
+                        } finally {
+                            COUNTER3D_LOCK.unlock();
+                        }
+                    }
+
+                    int objectCount = countCountableObjectRows(res.getStatistics());
+                    long counterMs = System.currentTimeMillis() - counterStart;
+                    if (!compactLog) {
+                        IJ.log("    " + (fr.enhancedClassical ? "EnhancedClassical" : "3DObjectCounter")
+                                + " [" + channelName + "]: "
+                                + objectCount + " objects detected (" + counterMs + " ms)");
+                    }
+                    if (!compactLog && verboseLogging) {
+                        IJ.log("    [DEBUG] Size range (voxels): " + fr.minSizeVox + "-" + fr.maxSizeVox);
+                        IJ.log("    [DEBUG] Redirect target: " + channelName + "_unfiltered");
+                        IJ.log("    [DEBUG] Objects map present: " + (res.getObjectsMap() != null));
+                        IJ.log("    [DEBUG] Masked image present: " + (res.getMaskedImage() != null));
+                        IJ.log("    [DEBUG] Counter mode: " + (useNative ? "native mcib3d" : "legacy Counter3D"));
+                    }
+
+                    // ROI centroid filter (centroid mode only). Images are still uncropped
+                    // here, so the filter runs in ORIGINAL image coordinates against the
+                    // region. RegionMask is built from index 0 only; the top-left-shifted
+                    // index-1 ("cropped") ROI must never drive geometry. In crop-first mode
+                    // the image was already cropped+masked to the region in Phase A, so every
+                    // surviving object is in-region by construction and no filter is applied.
+                    if (classicalCentroidFilter && region != null && res.getObjectsMap() != null) {
+                        int beforeFilter = objectCount;
+                        int removed = region.filterByCentroid(res.getObjectsMap());
+                        int afterFilter = beforeFilter - removed;
+                        if (!compactLog) {
+                            IJ.log("    3DObjectCounter [" + channelName + "] ROI filter: "
+                                    + beforeFilter + " \u2192 " + afterFilter
+                                    + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
+                        }
+
+                        // Choice (a): keep whole objects — crop to the region bounding
+                        // box only (no shape mask). Coordinates become region-relative.
+                        region.cropToBounds(fr.filtered);
+                        region.cropToBounds(fr.unfiltered);
+                        region.cropToBounds(res.getObjectsMap());
+                        if (res.getMaskedImage() != null) {
+                            region.cropToBounds(res.getMaskedImage());
+                        }
+
+                        // Re-derive statistics from the (now-cropped) label image
+                        if (useNative) {
+                            res = ocWrapper.fromLabelImage(
+                                    res.getObjectsMap(),
+                                    fr.unfiltered,
+                                    fr.minSizeVox,
+                                    fr.maxSizeVox,
+                                    true, true);
+                            if (fr.enhancedClassical) {
+                                res = withEnhancedMorphStats(res, fr.unfiltered, fr.morphPredicates);
+                            }
+                            // QC invariant: cropping relocates objects, it must not
+                            // destroy or create them. A mismatch flags a coordinate
+                            // problem (e.g. the wrong ROI driving the geometry).
+                            int finalCount = countCountableObjectRows(res.getStatistics());
+                            logRegionCropQc(channelName, roiSetName, afterFilter, finalCount);
+                        }
+                    }
+                }
+
+                ImagePlus objects = res.getObjectsMap();
+                if (objects != null) {
+                    registerImage(channelName + "_objects", objects, false);
+                }
+
+                channelHasObjects[c] = hasCountableObjectRows(res.getStatistics()) && objects != null;
+
+                appendStatsToChannelTable(res.getStatistics(), channelTables.get(channelName), scnIndex, animalName, hemisphere, regionLabel, roiLabel);
+
+                // Save segmentation comparison images under Results/Analysis Images/Segmentation/<animal>/.
+                File segmentationAnimalDir = imageRoot.animalDir(animalName);
+                //noinspection ResultOfMethodCallIgnored
+                segmentationAnimalDir.mkdirs();
+
+                // Build suffix: hemisphere_region, or just one, or animal name for non-convention files
+                String maskedSuffix = buildFileSuffix(hemisphere, roiLabel, animalName);
+                String safeChannelName = ChannelFilenameCodec.toSafe(channelName);
+                if (res.getMaskedImage() != null) {
+                    File maskedOutput = new File(segmentationAnimalDir, safeChannelName + "_Masked"
+                            + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
+                    AsyncImageSaver.saveAsTiffAsync(res.getMaskedImage(),
+                            maskedOutput.getAbsolutePath());
+                    recordOutput(maskedOutput, "tiff");
+                }
+
+                // Save the pre-detection filtered image beside the masked and label-map outputs.
+                if (fr.preDetectionFiltered != null) {
+                    File filteredOutput = new File(segmentationAnimalDir, safeChannelName + "_Filtered"
+                            + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
+                    AsyncImageSaver.saveAsTiffAsync(fr.preDetectionFiltered,
+                            filteredOutput.getAbsolutePath());
+                    recordOutput(filteredOutput, "tiff");
+                }
+
+                // Objects image saving is deferred until after colocalization.
+
+            } catch (Throwable t) {
+                IJ.log("ERROR in channel " + channelName
+                        + " for image '" + imp.getTitle() + "'"
+                        + ", animal='" + animalName + "', region='" + regionLabel
+                        + "', ROI='" + roiLabel + "': " + t);
+                throw t;
+            }
+        }
+
+        return channelHasObjects;
+    }
+
+    /**
+     * Count-once optimisation: runs filter + threshold + 3D counting on the full
+     * uncropped image for every channel, returning results that can be filtered
+     * per-ROI via {@link #processRoiSetFromFullCount}.
+     *
+     * <p>Skeleton creation is deferred to the per-ROI step so that skeletonisation
+     * sees the correct (cropped) boundary conditions.
+     */
+    private FullImageCountData countAllChannelsFullImage(
+            String directory,
+            BinConfig cfg,
+            ImagePlus imp,
+            File outDir,
+            String animalName,
+            String hemisphere,
+            String roiLabel
+    ) {
+        ImagePlus[] chans = ChannelSplitter.split(imp);
+        if (chans == null || chans.length == 0) {
+            IJ.log("  [shared count] ERROR: No channels found in " + imp.getTitle());
+            return new FullImageCountData(new ChannelFilterResult[0],
+                    new ObjectsCounter3DWrapper.Result[0], new boolean[0], 0);
+        }
+
+        int n = Math.min(cfg.numChannels(), chans.length);
+        final File binDir = activeConfigurationDir(directory);
+
+        // ── Phase A: filter + threshold on full image (no ROI, no skeletons) ──
+        final ChannelFilterResult[] filterResults = new ChannelFilterResult[n];
+
+        final String[] channelNames = new String[n];
+        final String[] filterFilenames = new String[n];
+        final String[] thresholdTokens = new String[n];
+        final String[] sizeTokens = new String[n];
+        final SegmentationMethod[] segmentationMethods = new SegmentationMethod[n];
+        final boolean[] isEnhancedClassical = new boolean[n];
+        @SuppressWarnings("unchecked")
+        final List<MorphPredicate>[] enhancedMorphPredicates = new List[n];
+        final boolean[] isStarDist = new boolean[n];
+        final boolean[] isCellpose = new boolean[n];
+        final double[] sdProbThresh = new double[n];
+        final double[] sdNmsThresh = new double[n];
+        final double[] sdLinkingMaxDistance = new double[n];
+        final double[] sdGapClosingMaxDistance = new double[n];
+        final int[] sdMaxFrameGap = new int[n];
+        final double[] sdAreaMin = new double[n];
+        final double[] sdAreaMax = new double[n];
+        final double[] sdQualityMin = new double[n];
+        final double[] sdIntensityMin = new double[n];
+        final String[] sdModelKey = new String[n];
+        final String[] cpModel = new String[n];
+        final double[] cpDiameter = new double[n];
+        final double[] cpFlowThreshold = new double[n];
+        final double[] cpCellprobThreshold = new double[n];
+        final boolean[] cpUseGpu = new boolean[n];
+        final int[] cpSecondChannel = new int[n];
+        for (int c = 0; c < n; c++) {
+            channelNames[c] = cfg.channelNames.get(c);
+            filterFilenames[c] = cfg.filterMacroFilenameForChannelIndex(c);
+            thresholdTokens[c] = cfg.channelThresholds.get(c);
+            sizeTokens[c] = cfg.channelSizes.get(c);
+            SegmentationMethod segmentationMethod = cfg.segmentationMethod(c);
+            segmentationMethods[c] = segmentationMethod;
+            isEnhancedClassical[c] = segmentationMethod.isEnhancedClassical();
+            enhancedMorphPredicates[c] = isEnhancedClassical[c]
+                    ? SegmentationMethod.morphPredicates(segmentationMethod)
+                    : Collections.<MorphPredicate>emptyList();
+            if (isEnhancedClassical[c]) {
+                thresholdTokens[c] = String.valueOf((int) Math.round(SegmentationMethod.threshold(segmentationMethod)));
+                int maxSize = SegmentationMethod.maxSize(segmentationMethod);
+                sizeTokens[c] = SegmentationMethod.minSize(segmentationMethod) + "-"
+                        + (maxSize == Integer.MAX_VALUE ? "Infinity" : String.valueOf(maxSize));
+            }
+            isStarDist[c] = cfg.isStarDist(c);
+            isCellpose[c] = cfg.isCellpose(c);
+            SegmentationMethod cellposeSettingsMethod = segmentationMethod;
+            sdProbThresh[c] = cfg.getStarDistProbThresh(c);
+            sdNmsThresh[c] = cfg.getStarDistNmsThresh(c);
+            sdLinkingMaxDistance[c] = cfg.getStarDistLinkingMaxDistance(c);
+            sdGapClosingMaxDistance[c] = cfg.getStarDistGapClosingMaxDistance(c);
+            sdMaxFrameGap[c] = cfg.getStarDistMaxFrameGap(c);
+            sdAreaMin[c] = cfg.getStarDistAreaMin(c);
+            sdAreaMax[c] = cfg.getStarDistAreaMax(c);
+            sdQualityMin[c] = cfg.getStarDistQualityMin(c);
+            sdIntensityMin[c] = cfg.getStarDistIntensityMin(c);
+            sdModelKey[c] = SegmentationMethod.starDistModelKey(cfg.segmentationMethod(c));
+            cpModel[c] = SegmentationMethod.cellposeModelKey(cellposeSettingsMethod);
+            cpDiameter[c] = SegmentationMethod.cellposeDiameter(cellposeSettingsMethod);
+            cpFlowThreshold[c] = SegmentationMethod.cellposeFlow(cellposeSettingsMethod);
+            cpCellprobThreshold[c] = SegmentationMethod.cellposeCellprob(cellposeSettingsMethod);
+            cpUseGpu[c] = SegmentationMethod.cellposeUseGpu(cellposeSettingsMethod);
+            cpSecondChannel[c] = SegmentationMethod.cellposeChan2(cellposeSettingsMethod);
+        }
+
+        // Parallel filter (same logic as run3DObjectsCounterPerChannel Phase A)
+        updateObjectProgress("filtering " + n + " channel(s) for shared count");
+        int filterThreads = Math.min(n, 4);
+        final ImagePlus[] cellposeCompanionSources = snapshotCellposeCompanionSources(chans, cpSecondChannel, channelNames);
+        if (filterThreads > 1) {
+            ExecutorService filterPool = Executors.newFixedThreadPool(filterThreads);
+            List<Future<?>> filterFutures = new ArrayList<Future<?>>();
+            try {
+            for (int c = 0; c < n; c++) {
+                final int ci = c;
+                final ImagePlus ch = chans[c];
+                filterFutures.add(filterPool.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        // Inherit ParallelContext so nested FilterExecutor
+                        // slice pools serialise rather than oversubscribing.
+                        ParallelContext.enterParallel();
+                        try {
+                            filterResults[ci] = filterAndThresholdChannel(
+                                    ci, channelNames[ci], ch, binDir, filterFilenames[ci],
+                                    thresholdTokens[ci], sizeTokens[ci],
+                                    false, -1, null, n,  // no skeleton creation
+                                    segmentationMethods[ci],
+                                    isEnhancedClassical[ci], enhancedMorphPredicates[ci],
+                                    isStarDist[ci], sdProbThresh[ci], sdNmsThresh[ci],
+                                    sdLinkingMaxDistance[ci], sdGapClosingMaxDistance[ci], sdMaxFrameGap[ci],
+                                    sdAreaMin[ci], sdAreaMax[ci], sdQualityMin[ci], sdIntensityMin[ci],
+                                    sdModelKey[ci], new File(directory),
+                                    isCellpose[ci], cpModel[ci], cpDiameter[ci], cpFlowThreshold[ci],
+                                    cpCellprobThreshold[ci], cpUseGpu[ci],
+                                    cpSecondChannel[ci],
+                                    cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < cellposeCompanionSources.length ? cellposeCompanionSources[cpSecondChannel[ci]] : null,
+                                    cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < channelNames.length ? channelNames[cpSecondChannel[ci]] : null,
+                                    cpSecondChannel[ci] >= 0 && cpSecondChannel[ci] < filterFilenames.length ? filterFilenames[cpSecondChannel[ci]] : null,
+                                    null, null);   // null region = full image (no ROI restriction)
+                        } finally {
+                            ParallelContext.exitParallel();
+                        }
+                    }
+                }));
+            }
+            waitForFilterFutures(filterFutures);
+            } finally {
+                filterPool.shutdown();
+            }
+        } else {
+            for (int c = 0; c < n; c++) {
+                filterResults[c] = filterAndThresholdChannel(
+                        c, channelNames[c], chans[c], binDir, filterFilenames[c],
+                        thresholdTokens[c], sizeTokens[c],
+                        false, -1, null, n,
+                        segmentationMethods[c],
+                        isEnhancedClassical[c], enhancedMorphPredicates[c],
+                        isStarDist[c], sdProbThresh[c], sdNmsThresh[c],
+                        sdLinkingMaxDistance[c], sdGapClosingMaxDistance[c], sdMaxFrameGap[c],
+                        sdAreaMin[c], sdAreaMax[c], sdQualityMin[c], sdIntensityMin[c],
+                        sdModelKey[c], new File(directory),
+                        isCellpose[c], cpModel[c], cpDiameter[c], cpFlowThreshold[c],
+                        cpCellprobThreshold[c], cpUseGpu[c],
+                        cpSecondChannel[c],
+                        cpSecondChannel[c] >= 0 && cpSecondChannel[c] < cellposeCompanionSources.length ? cellposeCompanionSources[cpSecondChannel[c]] : null,
+                        cpSecondChannel[c] >= 0 && cpSecondChannel[c] < channelNames.length ? channelNames[cpSecondChannel[c]] : null,
+                        cpSecondChannel[c] >= 0 && cpSecondChannel[c] < filterFilenames.length ? filterFilenames[cpSecondChannel[c]] : null,
+                        null, null);   // null region = full image (no ROI restriction)
+            }
+        }
+
+        // ── QC capture (once, from full-image data) ──
+        if (qualityReport != null && qualityReport.isEnabled()) {
+            for (int c = 0; c < n; c++) {
+                ChannelFilterResult fr = filterResults[c];
+                if (fr == null || fr.skipped || fr.filtered == null) continue;
+                String lutColor = (c < cfg.channelColors.size()) ? cfg.channelColors.get(c) : "Grays";
+                String imgDisplayName = animalName + "_"
+                        + (hemisphere != null ? hemisphere : "")
+                        + (roiLabel != null ? roiLabel : "");
+                qualityReport.addChannelQC(imgDisplayName, fr.channelName, fr.unfiltered, fr.filtered, lutColor);
+            }
+        }
+
+        // ── Phase B: 3D counting on full image ──
+        closeQuietly(cellposeCompanionSources);
+        ObjectsCounter3DWrapper ocWrapper = new ObjectsCounter3DWrapper();
+        ObjectsCounter3DWrapper.Result[] countResults = new ObjectsCounter3DWrapper.Result[n];
+        boolean[] channelHasObjects = new boolean[n];
+
+        for (int c = 0; c < n; c++) {
+            ChannelFilterResult fr = filterResults[c];
+            if (fr == null || fr.skipped) continue;
+
+            String channelName = fr.channelName;
+            updateObjectProgress("shared count " + channelName + " (" + (c + 1) + "/" + n + ")");
+            if (!compactLog) IJ.log("  > [shared count] Channel " + (c + 1) + "/" + n + ": " + channelName);
+
+            try {
+                if (fr.labelImageSegmentation) {
+                    countResults[c] = ocWrapper.fromLabelImage(
+                            fr.labelImage, fr.unfiltered,
+                            fr.minSizeVox, fr.maxSizeVox,
+                            true, true);
+                    int objectCount = countCountableObjectRows(countResults[c].getStatistics());
+                    if (!compactLog) {
+                        IJ.log("    3DObjectCounter [" + channelName + "]: "
+                                + objectCount + " objects detected (" + fr.segmentationName + ", full image)");
+                    }
+                } else {
+                    // Classical: threshold + native counting
+                    long counterStart = System.currentTimeMillis();
+                    if (fr.enhancedClassical) {
+                        ImagePlus enhancedLabels = new EnhancedClassicalRunner().run(
+                                fr.filtered,
+                                new EnhancedClassicalParameters(
+                                        (int) Math.round(fr.threshold),
+                                        fr.minSizeVox,
+                                        fr.maxSizeVox,
+                                        fr.morphPredicates,
+                                        fr.unfiltered,
+                                        new EnhancedClassicalParameters.WarningSink() {
+                                            @Override public void warn(String message) {
+                                                IJ.log(message);
+                                            }
+                                        }));
+                        ObjectsCounter3DWrapper.Result recounted = ocWrapper.fromLabelImage(
+                                enhancedLabels, fr.unfiltered, 0, Integer.MAX_VALUE, true, true);
+                        ResultsTable stats = EnhancedClassicalRunner.statsProperty(enhancedLabels);
+                        if (stats == null) stats = recounted.getStatistics();
+                        ImagePlus objectMap = recounted.getObjectsMap() == null
+                                ? enhancedLabels
+                                : recounted.getObjectsMap();
+                        if (objectMap != null) {
+                            objectMap.setProperty(EnhancedClassicalRunner.OBJECT_STATS_PROPERTY, stats);
+                        }
+                        if (enhancedLabels != null && enhancedLabels != objectMap) {
+                            enhancedLabels.changes = false;
+                            enhancedLabels.close();
+                            enhancedLabels.flush();
+                        }
+                        countResults[c] = new ObjectsCounter3DWrapper.Result(
+                                stats,
+                                objectMap,
+                                recounted.getMaskedImage(),
+                                hasCountableObjectRows(stats) && objectMap != null);
+                    } else {
+                        countResults[c] = ocWrapper.runNative(
+                                fr.filtered,
+                                (int) Math.round(fr.threshold),
+                                fr.minSizeVox, fr.maxSizeVox,
+                                false,          // excludeOnEdges
+                                fr.unfiltered,  // redirect
+                                true, true);
+                    }
+                    int objectCount = countCountableObjectRows(countResults[c].getStatistics());
+                    long counterMs = System.currentTimeMillis() - counterStart;
+                    if (!compactLog) {
+                        IJ.log("    " + (fr.enhancedClassical ? "EnhancedClassical" : "3DObjectCounter")
+                                + " [" + channelName + "]: "
+                                + objectCount + " objects detected (" + counterMs + " ms, full image)");
+                    }
+                }
+                channelHasObjects[c] = hasCountableObjectRows(countResults[c].getStatistics())
+                        && countResults[c].getObjectsMap() != null;
+            } catch (Throwable t) {
+                IJ.log("    ERROR counting " + channelName
+                        + " on full image for animal='" + animalName
+                        + "', hemisphere='" + hemisphere + "': " + t);
+            }
+        }
+
+        return new FullImageCountData(filterResults, countResults, channelHasObjects, n);
+    }
+
+    /**
+     * Per-ROI assignment using pre-computed full-image counting results.
+     * Clones the full-image label images, filters by centroid for this ROI,
+     * crops, re-derives statistics, then runs colocalization and saves images.
+     */
+    private void processRoiSetFromFullCount(
+            FullImageCountData fullData,
+            String directory,
+            BinConfig cfg,
+            ImagePlus imp,
+            File outDir,
+            SegmentationImageRoot imageRoot,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int imageIndex,
+            int scnIndex,
+            String animalName,
+            NameParts parts,
+            boolean extractProcessLength,
+            int nuclearMarkerIndex,
+            boolean[] processChannels,
+            RoiSetData roiSet) {
+
+        // Bind by durable image identity (token), not positional index — region-scoped zips
+        // cover only a subset of images. Geometry is driven ONLY by the original-coordinate
+        // (drawn) ROI; the "_Cropped" ROI is a top-left-shifted presentation artifact. See RegionMask.
+        RegionBinding binding = resolveRegionForImage(roiSet, imageIndex);
+        if (binding.skip) {
+            return; // subset coverage: this zip does not cover this image
+        }
+        RegionMask region = binding.region;
+        String roiBase = roiSet == null ? "" : roiSet.name;
+        String hemisphere = parts == null ? "" : parts.hemisphere;
+        String seriesRegionLabel = parts == null ? "" : parts.csvRegion();
+        String roiLabel = parts == null
+                ? (scnIndex > 0 && !endsWithDigit(roiBase) ? roiBase + scnIndex : roiBase)
+                : parts.analysisRegionLabel(roiBase, scnIndex);
+
+        if (!compactLog) {
+            IJ.log("  > Assigning objects to ROI set: " + roiBase);
+        }
+
+        boolean progressSuccess = false;
+        beginObjectRoiProgress(scnIndex, imageBindTokens == null ? scnIndex : imageBindTokens.length,
+                imp == null ? animalName : imp.getTitle(), roiBase, "assigning shared-count objects");
+        try {
+            ObjectsCounter3DWrapper ocWrapper = new ObjectsCounter3DWrapper();
+            boolean[] channelHasObjects = new boolean[fullData.numChannels];
+
+            for (int c = 0; c < fullData.numChannels; c++) {
+                ChannelFilterResult fr = fullData.filterResults[c];
+                ObjectsCounter3DWrapper.Result fullRes = fullData.countResults[c];
+                if (fr == null || fr.skipped || fullRes == null) continue;
+
+                String channelName = fr.channelName;
+                updateObjectProgress("assigning " + channelName + " to ROI");
+
+                // Clone the full-image label map
+                ImagePlus roiLabels = fullRes.getObjectsMap() != null
+                        ? ImageOps.duplicateThreadSafe(fullRes.getObjectsMap()) : null;
+
+                // Clone the unfiltered channel
+                ImagePlus roiUnfiltered = fr.unfiltered != null
+                        ? ImageOps.duplicateThreadSafe(fr.unfiltered) : null;
+
+                // Centroid filter against the region (index-0 / original coords).
+                // This path is centroid-only (useSharedCounting requires allCentroid).
+                int afterFilter = -1;
+                if (region != null && roiLabels != null) {
+                    int beforeFilter = fullData.channelHasObjects[c]
+                            ? countCountableObjectRows(fullRes.getStatistics())
+                            : 0;
+                    int removed = region.filterByCentroid(roiLabels);
+                    afterFilter = beforeFilter - removed;
+                    if (!compactLog) {
+                        IJ.log("    3DObjectCounter [" + channelName + "] ROI filter: "
+                                + beforeFilter + " \u2192 " + afterFilter
+                                + " objects (" + removed + " outside " + roiBase + " ROI removed)");
+                    }
+                }
+
+                // Crop to the region bounding box ONLY (choice a — keep whole objects);
+                // coordinates become region-relative (top-left = 0,0).
+                if (region != null) {
+                    region.cropToBounds(roiLabels);
+                    region.cropToBounds(roiUnfiltered);
+                }
+
+                // Re-derive statistics from the cropped, centroid-filtered label image
+                ObjectsCounter3DWrapper.Result roiRes = (roiLabels != null && roiUnfiltered != null)
+                        ? ocWrapper.fromLabelImage(roiLabels, roiUnfiltered,
+                        fr.minSizeVox, fr.maxSizeVox, true, true)
+                        : new ObjectsCounter3DWrapper.Result(null, roiLabels, null, false);
+                if (fr.enhancedClassical) {
+                    roiRes = withEnhancedMorphStats(roiRes, roiUnfiltered, fr.morphPredicates);
+                }
+                // QC invariant: cropping relocates objects, it must not lose/create them.
+                if (afterFilter >= 0) {
+                    int finalCount = countCountableObjectRows(roiRes.getStatistics());
+                    logRegionCropQc(channelName, roiBase, afterFilter, finalCount);
+                }
+
+                // Register images for downstream use (coloc, process length, save)
+                registerImage(channelName + "_unfiltered", roiUnfiltered, false);
+
+                // Clone + crop filtered image for this ROI
+                ImagePlus roiFiltered = fr.filtered != null ? ImageOps.duplicateThreadSafe(fr.filtered) : null;
+                if (region != null) region.cropToBounds(roiFiltered);
+                registerImage(channelName + "_filtered", roiFiltered, false);
+
+                ImagePlus roiObjMap = roiRes.getObjectsMap();
+                if (roiObjMap != null) {
+                    registerImage(channelName + "_objects", roiObjMap, false);
+                }
+
+                channelHasObjects[c] = hasCountableObjectRows(roiRes.getStatistics()) && roiObjMap != null;
+
+                // Append per-ROI stats to channel table
+                appendStatsToChannelTable(roiRes.getStatistics(), channelTables.get(channelName),
+                        scnIndex, animalName, hemisphere, seriesRegionLabel, roiLabel);
+
+                // Save segmentation comparison images per-ROI under Results/Analysis Images/Segmentation/<animal>/.
+                File segmentationAnimalDir = imageRoot.animalDir(animalName);
+                //noinspection ResultOfMethodCallIgnored
+                segmentationAnimalDir.mkdirs();
+                String maskedSuffix = buildFileSuffix(hemisphere, roiLabel, animalName);
+                String safeChannelName = ChannelFilenameCodec.toSafe(channelName);
+                if (roiRes.getMaskedImage() != null) {
+                    File maskedOutput = new File(segmentationAnimalDir, safeChannelName + "_Masked"
+                            + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
+                    AsyncImageSaver.saveAsTiffAsync(roiRes.getMaskedImage(),
+                            maskedOutput.getAbsolutePath());
+                    recordOutput(maskedOutput, "tiff");
+                }
+
+                // Save pre-detection filtered image per-ROI beside the masked and label-map outputs.
+                if (fr.preDetectionFiltered != null) {
+                    ImagePlus roiPreDetection = ImageOps.duplicateThreadSafe(fr.preDetectionFiltered);
+                    if (region != null) region.cropToBounds(roiPreDetection);
+                    File filteredOutput = new File(segmentationAnimalDir, safeChannelName + "_Filtered"
+                            + (maskedSuffix.isEmpty() ? "" : "_" + maskedSuffix) + ".tif");
+                    AsyncImageSaver.saveAsTiffAsync(roiPreDetection,
+                            filteredOutput.getAbsolutePath());
+                    recordOutput(filteredOutput, "tiff");
+                }
+
+                // Create skeletons per-ROI (from cropped filtered image, matching current behaviour)
+                if (extractProcessLength && processChannels != null && roiFiltered != null) {
+                    boolean isNuclear = (c == nuclearMarkerIndex);
+                    boolean isProcess = processChannels[c];
+                    if (isNuclear || isProcess) {
+                        String skelName = isNuclear ? "Nuclear Marker" : "Process Channel " + channelName;
+                        ImagePlus skelDup = ImageOps.duplicateThreadSafe(roiFiltered);
+                        skelDup.setTitle(skelName);
+
+                        String thrToken = cfg.channelThresholds.get(c);
+                        Double skelThr = ThresholdOps.parseNumericThreshold(thrToken);
+                        if (skelThr == null
+                                && ThresholdOps.autoThresholdSpecForToken(thrToken, false) != null) {
+                            ThresholdOps.applyStackThresholdInPlace(skelDup, thrToken, false);
+                        } else if (skelThr != null) {
+                            ij.ImageStack maskStack = skelDup.getStack();
+                            int thrInt = (int) Math.round(skelThr);
+                            for (int s = 1; s <= maskStack.getSize(); s++) {
+                                ij.process.ImageProcessor ip = maskStack.getProcessor(s);
+                                for (int p = 0; p < ip.getWidth() * ip.getHeight(); p++) {
+                                    ip.set(p, ip.get(p) >= thrInt ? 255 : 0);
+                                }
+                            }
+                            skelDup.updateAndDraw();
+                            ij.plugin.filter.Binary binaryPlugin = new ij.plugin.filter.Binary();
+                            binaryPlugin.setup("skeletonize", skelDup);
+                            ij.ImageStack skelStack = skelDup.getStack();
+                            for (int s = 1; s <= skelStack.getSize(); s++) {
+                                binaryPlugin.run(skelStack.getProcessor(s));
+                            }
+                            skelDup.updateAndDraw();
+                        }
+                        registerImage(skelName, skelDup, false);
+                    }
+                }
+            }
+
+            // Colocalization (using per-ROI label images from registry)
+            IJ.log("  > Colocalization");
+            updateObjectProgress("colocalization");
+            if (doVolumetric) {
+                appendColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doCpc) {
+                appendCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBOverlap) {
+                appendBBColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBCpc) {
+                appendBBCpcColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doBBVol) {
+                appendBBVolColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (doIntensityColoc) {
+                appendIntensityColocColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (anyOipEnabled()) {
+                appendOipColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+            if (overlapCountEnabled(cfg)) {
+                appendOverlapCountColumns(cfg, channelHasObjects, channelTables, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel);
+            }
+
+            // Process length extraction
+            if (extractProcessLength && processChannels != null) {
+                updateObjectProgress("process length");
+                processLengthExtractionWithTables(cfg, channelTables, imp, scnIndex, animalName,
+                        hemisphere, seriesRegionLabel, roiLabel, processChannels, nuclearMarkerIndex);
+            }
+
+            // Save objects images
+            updateObjectProgress("saving object label images");
+            saveObjectsImages(cfg, imageRoot, animalName, hemisphere, roiLabel);
+            progressSuccess = true;
+        } finally {
+            if (progressSuccess) {
+                completeObjectRoiProgress("image " + scnIndex + " ROI "
+                        + (roiBase == null || roiBase.isEmpty() ? FULL_IMAGE_ROI_SET_NAME : roiBase)
+                        + " complete");
+            } else {
+                failObjectRoiProgress("image " + scnIndex + " ROI "
+                        + (roiBase == null || roiBase.isEmpty() ? FULL_IMAGE_ROI_SET_NAME : roiBase)
+                        + " failed");
+            }
+            clearRegistry();
+        }
+    }
+
+    /** Close all images held in FullImageCountData after all ROI sets have been processed. */
+    private static void cleanupFullImageData(FullImageCountData data) {
+        if (data == null) return;
+        for (int c = 0; c < data.numChannels; c++) {
+            // Close filter results (unfiltered, filtered, preDetection, labelImage)
+            ChannelFilterResult fr = data.filterResults[c];
+            if (fr != null) {
+                closeQuietly(fr.unfiltered);
+                closeQuietly(fr.filtered);
+                closeQuietly(fr.preDetectionFiltered);
+                closeQuietly(fr.labelImage);
+            }
+            // Close count results (objectsMap, maskedImage)
+            ObjectsCounter3DWrapper.Result res = data.countResults[c];
+            if (res != null) {
+                closeQuietly(res.getObjectsMap());
+                closeQuietly(res.getMaskedImage());
+            }
+        }
+    }
+
+    private static void closeQuietly(ImagePlus imp) {
+        if (imp == null) return;
+        imp.changes = false;
+        imp.close();
+        imp.flush();
+    }
+
+    /**
+     * Phase A helper: filter + threshold a single channel. Thread-safe — does not touch
+     * WindowManager, RoiManager, or any shared mutable state. Also creates skeleton
+     * duplicates for process length extraction if needed.
+     *
+     * <p>For StarDist channels, the per-channel filter macro is still applied, but the
+     * classical thresholding and 3D Objects Counter detection steps are skipped. StarDist
+     * 3D then runs on the filtered stack and produces a label image directly. A binary
+     * mask is derived from the label image for compatibility with the rest of the pipeline.
+     */
+    private ChannelFilterResult filterAndThresholdChannel(
+            int c, String channelName, ImagePlus ch,
+            File binDir, String filterFilename,
+            String thrToken, String sizeToken,
+            boolean extractProcessLength, int nuclearMarkerIndex, boolean[] processChannels,
+            int totalChannels,
+            SegmentationMethod segmentationMethod,
+            boolean isEnhancedClassical, List<MorphPredicate> enhancedMorphPredicates,
+            boolean isStarDist, double starDistProbThresh, double starDistNmsThresh,
+            double starDistLinkingMaxDistance, double starDistGapClosingMaxDistance, int starDistMaxFrameGap,
+            double starDistAreaMin, double starDistAreaMax,
+            double starDistQualityMin, double starDistIntensityMin,
+            String starDistModelKey, File projectRoot,
+            boolean isCellpose, String cellposeModel, double cellposeDiameter,
+            double cellposeFlowThreshold, double cellposeCellprobThreshold, boolean cellposeUseGpu,
+            int cellposeSecondChannelIndex, ImagePlus cellposeSecondChannel,
+            String cellposeSecondChannelName, String cellposeSecondChannelFilterFilename,
+            RegionMask region, String roiSetName) {
+
+        // Geometry is driven by RegionMask, built from the original-coordinate
+        // (index-0) ROI. RegionMask is thread-safe to share across the parallel
+        // filter threads: filterByCentroid clones before Roi.contains() (whose
+        // mask cache is not thread-safe) and the crop/mask paths clone internally.
+        try {
+            ch.setTitle(channelName + "_unfiltered");
+
+            // ── StarDist 3D path: apply filter first, then run StarDist ──
+            if (isStarDist) {
+                // 1. Apply filter (same as classical path)
+                ImagePlus filtered = ImageOps.duplicateThreadSafe(ch);
+                filtered.setTitle(channelName + "_stardist_input");
+                File filterMacro = new File(binDir, filterFilename);
+                if (filterMacro.exists()) {
+                    try {
+                        FilterExecutor.runIjmFileThreadSafe(filtered, filterMacro);
+                        if (!compactLog) IJ.log("    - [Ch " + (c + 1) + "] Filter applied before StarDist: " + filterFilename);
+                    } catch (Exception e) {
+                        IJ.log("    - [Ch " + (c + 1) + "] Filter error before StarDist: " + e.getMessage());
+                    }
+                } else {
+                    String defaultMacro = NamedFilterLoader.loadDefaultFilter();
+                    if (defaultMacro != null) {
+                        FilterExecutor.runThreadSafe(filtered, defaultMacro);
+                        if (!compactLog) IJ.log("    - [Ch " + (c + 1) + "] Default filter applied before StarDist (no " + filterFilename + " found)");
+                    }
+                }
+
+                // REGRESSION GUARD: StarDist MUST run BEFORE ROI crop, not after.
+                // If you move the crop before StarDist, the zeroed-out region creates a hard
+                // black edge that StarDist treats as a real boundary, producing edge artifacts.
+                // The correct order: StarDist on full image → filterLabelsByCentroid → crop.
+                IJ.log("    - [Ch " + (c + 1) + "] Pre-StarDist: filtered stackSize=" + filtered.getStackSize()
+                        + " C=" + filtered.getNChannels() + " Z=" + filtered.getNSlices()
+                        + " T=" + filtered.getNFrames() + " (" + filtered.getWidth() + "x" + filtered.getHeight() + ")"
+                        + " | input ch stackSize=" + ch.getStackSize());
+                // StarDist manages its own narrow lock + GPU semaphore internally
+                // (see GpuConcurrency / StarDist3DRunner). No outer lock needed.
+                ImagePlus labelImage;
+                try {
+                    labelImage = StarDist3DRunner.run(filtered, starDistProbThresh, starDistNmsThresh, channelName,
+                            starDistLinkingMaxDistance, starDistGapClosingMaxDistance, starDistMaxFrameGap,
+                            starDistAreaMin, starDistAreaMax, starDistQualityMin, starDistIntensityMin,
+                            starDistModelKey, projectRoot);
+                } catch (SegmentationRunFailureException e) {
+                    String failureReason = e.getMessage();
+                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
+                    filtered.changes = false;
+                    filtered.close();
+                    filtered.flush();
+                    return new ChannelFilterResult(c, channelName, ch, null,
+                            null, 0, 0, true, failureReason);
+                }
+
+                // 3. Filter labels by centroid — remove objects whose centroids
+                // fall outside the tissue ROI (before cropping to bounding box).
+                int afterFilter = -1;
+                if (labelImage != null && region != null) {
+                    int beforeFilter = StarDist3DRunner.countLabels(labelImage);
+                    int removed = region.filterByCentroid(labelImage);
+                    afterFilter = beforeFilter - removed;
+                    if (!compactLog) {
+                        IJ.log("    StarDist [" + channelName + "] ROI filter: " + beforeFilter
+                                + " → " + afterFilter + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
+                    }
+                }
+
+                // 4. Crop to the region bounding box ONLY (choice a — keep whole
+                // objects). StarDist filters by centroid, so objects are not clipped
+                // to the outline; coordinates become region-relative (top-left = 0,0).
+                if (region != null) {
+                    region.cropToBounds(filtered);
+                    region.cropToBounds(ch);
+                    if (labelImage != null) {
+                        region.cropToBounds(labelImage);
+                        if (afterFilter >= 0) {
+                            logRegionCropQc(channelName, roiSetName, afterFilter,
+                                    RegionMask.countLabels(labelImage));
+                        }
+                    }
+                }
+
+                // Snapshot the filtered+cropped image for saving
+                ImagePlus preDetection = ImageOps.duplicateThreadSafe(filtered);
+
+                // Clean up the filtered input
+                filtered.changes = false;
+                filtered.close();
+                filtered.flush();
+
+                if (labelImage == null) {
+                    String failureReason = "StarDist 3D segmentation failed";
+                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
+                    return new ChannelFilterResult(c, channelName, ch, null,
+                            null, 0, 0, true, failureReason);
+                }
+
+                // Copy calibration from the original channel
+                if (ch.getCalibration() != null) {
+                    labelImage.setCalibration(ch.getCalibration().copy());
+                }
+
+                // Convert label image to binary mask for pipeline compatibility
+                // (all pixels > 0 become 255, else 0)
+                ImagePlus binaryMask = ImageOps.duplicateThreadSafe(labelImage);
+                binaryMask.setTitle(channelName + "_filtered");
+                ij.ImageStack maskStack = binaryMask.getStack();
+                for (int s = 1; s <= maskStack.getSize(); s++) {
+                    ij.process.ImageProcessor ip = maskStack.getProcessor(s);
+                    for (int p = 0; p < ip.getPixelCount(); p++) {
+                        ip.set(p, ip.get(p) > 0 ? 255 : 0);
+                    }
+                }
+
+                int nObjects = StarDist3DRunner.countLabels(labelImage);
+                if (!compactLog) {
+                    IJ.log("    - [Ch " + (c + 1) + "] StarDist 3D segmentation (probThresh="
+                            + starDistProbThresh + ", nmsThresh=" + starDistNmsThresh
+                            + "): " + nObjects + " objects detected");
+                }
+
+                String effectiveSizeToken = sizeToken == null || sizeToken.trim().isEmpty()
+                        ? "0-Infinity"
+                        : sizeToken;
+                String[] sizeParts = effectiveSizeToken.split("-");
+                String minSize = sizeParts.length > 0 ? sizeParts[0] : "0";
+                String maxSize = sizeParts.length > 1 ? sizeParts[1] : "Infinity";
+                int minSizeVox = ObjectsCounter3DWrapper.parseMinSizeVoxels(minSize, 0);
+                int maxSizeVox = ObjectsCounter3DWrapper.parseMaxSizeVoxels(maxSize, binaryMask);
+                String maxSizeText = maxSize == null ? "" : maxSize.trim();
+                boolean maxSizeFinite = !("Infinity".equalsIgnoreCase(maxSizeText)
+                        || "inf".equalsIgnoreCase(maxSizeText)
+                        || maxSizeText.isEmpty());
+                if (!compactLog && (minSizeVox > 0 || maxSizeFinite)) {
+                    IJ.log("    - [Ch " + (c + 1) + "] StarDist final 3D voxel volume filter: "
+                            + minSizeVox + "-" + (maxSizeFinite ? String.valueOf(maxSizeVox) : "Infinity")
+                            + " voxels");
+                }
+
+                return new ChannelFilterResult(c, channelName, ch, binaryMask,
+                        null, minSizeVox, maxSizeVox, false, null,
+                        true, "StarDist 3D", labelImage,
+                        "StarDist 3D (probThresh=" + starDistProbThresh + ", nmsThresh=" + starDistNmsThresh + ")",
+                        preDetection);
+            }
+
+            // ── Classical path: filter + threshold ──
+            if (isCellpose) {
+                ImagePlus filtered = ImageOps.duplicateThreadSafe(ch);
+                filtered.setTitle(channelName + "_cellpose_input");
+                File filterMacro = new File(binDir, filterFilename);
+                if (filterMacro.exists()) {
+                    try {
+                        FilterExecutor.runIjmFileThreadSafe(filtered, filterMacro);
+                        if (!compactLog) IJ.log("    - [Ch " + (c + 1) + "] Filter applied before Cellpose: " + filterFilename);
+                    } catch (Exception e) {
+                        IJ.log("    - [Ch " + (c + 1) + "] Filter error before Cellpose: " + e.getMessage());
+                    }
+                } else {
+                    String defaultMacro = NamedFilterLoader.loadDefaultFilter();
+                    if (defaultMacro != null) {
+                        FilterExecutor.runThreadSafe(filtered, defaultMacro);
+                        if (!compactLog) IJ.log("    - [Ch " + (c + 1) + "] Default filter applied before Cellpose (no " + filterFilename + " found)");
+                    }
+                }
+
+                ImagePlus filteredCompanion = prepareCellposeSecondChannelInput(
+                        c, channelName, ch, binDir,
+                        cellposeSecondChannelIndex, cellposeSecondChannel,
+                        cellposeSecondChannelName, cellposeSecondChannelFilterFilename);
+
+                // Cellpose holds the shared GPU semaphore internally around its Python
+                // subprocess call (see GpuConcurrency). It does not touch WindowManager,
+                // so no WM lock is required here.
+                ImagePlus labelImage;
+                try {
+                    labelImage = Cellpose3DRunner.run(filtered, filteredCompanion, cellposeModel, cellposeDiameter,
+                            cellposeFlowThreshold, cellposeCellprobThreshold, cellposeUseGpu, channelName,
+                            projectRoot);
+                } catch (SegmentationRunFailureException e) {
+                    String failureReason = e.getMessage();
+                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
+                    filtered.changes = false;
+                    filtered.close();
+                    filtered.flush();
+                    if (filteredCompanion != null) {
+                        filteredCompanion.changes = false;
+                        filteredCompanion.close();
+                        filteredCompanion.flush();
+                    }
+                    return new ChannelFilterResult(c, channelName, ch, null,
+                            null, 0, 0, true, failureReason);
+                }
+
+                int afterFilter = -1;
+                if (labelImage != null && region != null) {
+                    int beforeFilter = Cellpose3DRunner.countLabels(labelImage);
+                    int removed = region.filterByCentroid(labelImage);
+                    afterFilter = beforeFilter - removed;
+                    if (!compactLog) {
+                        IJ.log("    Cellpose [" + channelName + "] ROI filter: " + beforeFilter
+                                + " -> " + afterFilter + " objects (" + removed + " outside " + roiSetName + " ROI removed)");
+                    }
+                }
+
+                // Crop to the region bounding box ONLY (choice a — keep whole objects);
+                // Cellpose filters by centroid, so objects are not clipped to the outline.
+                if (region != null) {
+                    region.cropToBounds(filtered);
+                    region.cropToBounds(ch);
+                    if (labelImage != null) {
+                        region.cropToBounds(labelImage);
+                        if (afterFilter >= 0) {
+                            logRegionCropQc(channelName, roiSetName, afterFilter,
+                                    RegionMask.countLabels(labelImage));
+                        }
+                    }
+                }
+
+                ImagePlus preDetection = ImageOps.duplicateThreadSafe(filtered);
+
+                filtered.changes = false;
+                filtered.close();
+                filtered.flush();
+                if (filteredCompanion != null) {
+                    filteredCompanion.changes = false;
+                    filteredCompanion.close();
+                    filteredCompanion.flush();
+                }
+
+                if (labelImage == null) {
+                    String failureReason = "Cellpose segmentation failed";
+                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: " + failureReason);
+                    return new ChannelFilterResult(c, channelName, ch, null,
+                            null, 0, 0, true, failureReason);
+                }
+
+                if (ch.getCalibration() != null) {
+                    labelImage.setCalibration(ch.getCalibration().copy());
+                }
+
+                ImagePlus binaryMask = ImageOps.duplicateThreadSafe(labelImage);
+                binaryMask.setTitle(channelName + "_filtered");
+                ij.ImageStack maskStack = binaryMask.getStack();
+                for (int s = 1; s <= maskStack.getSize(); s++) {
+                    ij.process.ImageProcessor ip = maskStack.getProcessor(s);
+                    for (int p = 0; p < ip.getPixelCount(); p++) {
+                        ip.set(p, ip.get(p) > 0 ? 255 : 0);
+                    }
+                }
+
+                int nObjects = Cellpose3DRunner.countLabels(labelImage);
+                if (!compactLog) {
+                    IJ.log("    - [Ch " + (c + 1) + "] Cellpose segmentation (model="
+                            + cellposeModel + ", diameter=" + cellposeDiameter
+                            + ", flowThreshold=" + cellposeFlowThreshold
+                            + ", cellprobThreshold=" + cellposeCellprobThreshold
+                            + ", useGpu=" + cellposeUseGpu
+                            + ", companionChannel="
+                            + (filteredCompanion != null ? cellposeSecondChannelName : "None")
+                            + "): " + nObjects + " objects detected");
+                }
+
+                String[] sizeParts = sizeToken.split("-");
+                String minSize = sizeParts.length > 0 ? sizeParts[0] : "100";
+                String maxSize = sizeParts.length > 1 ? sizeParts[1] : "Infinity";
+                int minSizeVox = ObjectsCounter3DWrapper.parseMinSizeVoxels(minSize, 100);
+                int maxSizeVox = ObjectsCounter3DWrapper.parseMaxSizeVoxels(maxSize, binaryMask);
+
+                return new ChannelFilterResult(c, channelName, ch, binaryMask,
+                        null, minSizeVox, maxSizeVox, false, null,
+                        true, "Cellpose", labelImage,
+                        "Cellpose (model=" + cellposeModel + ", diameter=" + cellposeDiameter
+                                + ", flowThreshold=" + cellposeFlowThreshold
+                                + ", cellprobThreshold=" + cellposeCellprobThreshold
+                                + ", useGpu=" + cellposeUseGpu
+                                + ", companionChannel="
+                                + (filteredCompanion != null ? cellposeSecondChannelName : "None") + ")",
+                        preDetection);
+            }
+
+            ImagePlus filtered = ImageOps.duplicateThreadSafe(ch);
+            filtered.setTitle(channelName + "_filtered");
+
+            // Apply per-channel filter macro from the active configuration folder or fallback to bundled default.
+            File filterMacro = new File(binDir, filterFilename);
+            if (filterMacro.exists()) {
+                try {
+                    FilterExecutor.runIjmFileThreadSafe(filtered, filterMacro);
+                    if (!compactLog) IJ.log("    - [Ch " + (c + 1) + "] Filter applied: " + filterFilename);
+                } catch (Exception e) {
+                    IJ.log("    - [Ch " + (c + 1) + "] Filter error (thread-safe): " + e.getMessage()); // always log errors
+                    // Cannot fall back to IJ.runMacroFile in parallel — it requires macro thread
+                    // The thread-safe path should handle all supported filter commands
+                }
+            } else {
+                String defaultMacro = NamedFilterLoader.loadDefaultFilter();
+                if (defaultMacro != null) {
+                    FilterExecutor.runThreadSafe(filtered, defaultMacro);
+                    if (!compactLog) IJ.log("    - [Ch " + (c + 1) + "] Filter applied: bundled default filter (no " + filterFilename + " found)");
+                } else {
+                    IJ.log("    - [Ch " + (c + 1) + "] WARNING: No filter applied (missing saved filter and bundled default)"); // always log warnings
+                }
+            }
+
+            // Crop to ROI (after filter, before threshold) — unless centroid mode
+            // defers cropping until after counting in Phase B.
+            ImagePlus croppedForSkeleton = null;
+            if (classicalCentroidFilter) {
+                // Keep filtered/ch uncropped for full-image counting in Phase B.
+                // Create a separate cropped copy for skeleton + preDetection.
+                // Choice (a): crop to the bounding box only (no shape mask).
+                if (region != null) {
+                    croppedForSkeleton = ImageOps.duplicateThreadSafe(filtered);
+                    region.cropToBounds(croppedForSkeleton);
+                }
+            } else {
+                // Crop-first mode: crop to the bounding box AND clear outside the
+                // traced shape so detection runs on tissue only.
+                if (region != null) {
+                    region.cropAndMask(filtered);
+                    region.cropAndMask(ch);
+                }
+            }
+
+            // Snapshot the filtered image (cropped region) before thresholding
+            ImagePlus preDetection = ImageOps.duplicateThreadSafe(croppedForSkeleton != null ? croppedForSkeleton : filtered);
+
+            // Create skeleton duplicates for process length extraction (before thresholding the main image)
+            if (extractProcessLength && processChannels != null) {
+                boolean isNuclear = (c == nuclearMarkerIndex);
+                boolean isProcess = processChannels[c];
+                if (isNuclear || isProcess) {
+                    String skelName = isNuclear ? "Nuclear Marker" : "Process Channel " + channelName;
+                    ImagePlus skelSource = (croppedForSkeleton != null) ? croppedForSkeleton : filtered;
+                    ImagePlus skelDup = ImageOps.duplicateThreadSafe(skelSource);
+                    skelDup.setTitle(skelName);
+
+                    Double skelThr = ThresholdOps.parseNumericThreshold(thrToken);
+                    if (skelThr == null
+                            && ThresholdOps.autoThresholdSpecForToken(thrToken, false) != null) {
+                        // Thread-safe make binary (replaces IJ.run "Make Binary")
+                        ThresholdOps.applyStackThresholdInPlace(skelDup, thrToken, false);
+                    } else if (skelThr != null) {
+                        // Thread-safe threshold + convert to mask
+                        ij.ImageStack maskStack = skelDup.getStack();
+                        int thrInt = (int) Math.round(skelThr);
+                        for (int s = 1; s <= maskStack.getSize(); s++) {
+                            ij.process.ImageProcessor ip = maskStack.getProcessor(s);
+                            for (int p = 0; p < ip.getWidth() * ip.getHeight(); p++) {
+                                ip.set(p, ip.get(p) >= thrInt ? 255 : 0);
+                            }
+                        }
+                        skelDup.updateAndDraw();
+                        // Thread-safe skeletonize (replaces IJ.run "Skeletonize")
+                        ij.plugin.filter.Binary binaryPlugin = new ij.plugin.filter.Binary();
+                        binaryPlugin.setup("skeletonize", skelDup);
+                        ij.ImageStack skelStack = skelDup.getStack();
+                        for (int s = 1; s <= skelStack.getSize(); s++) {
+                            binaryPlugin.run(skelStack.getProcessor(s));
+                        }
+                        skelDup.updateAndDraw();
+                    }
+                    // Skeleton images will be registered in Phase B (registerImage is not thread-safe)
+                    // Store on the filtered image's property for retrieval
+                    filtered.setProperty("_skeleton_" + skelName, skelDup);
+                    if (!compactLog) {
+                        if (isNuclear) {
+                            IJ.log("    - [Ch " + (c + 1) + "] Nuclear Marker skeleton created from " + channelName);
+                        } else {
+                            IJ.log("    - [Ch " + (c + 1) + "] Process skeleton created for " + channelName);
+                        }
+                    }
+                }
+            }
+
+            // Threshold
+            double threshold = ThresholdOps.thresholdFromTokenAtSlice(filtered, thrToken, 6, false);
+            if (!Double.isFinite(threshold)) {
+                return new ChannelFilterResult(c, channelName, ch, filtered,
+                        null, 0, 0, true, "unrecognised threshold '" + thrToken + "'");
+            }
+
+            // Particle Size (n Voxels)
+            String[] sizeParts = sizeToken.split("-");
+            String minSize = sizeParts.length > 0 ? sizeParts[0] : "100";
+            String maxSize = sizeParts.length > 1 ? sizeParts[1] : "Infinity";
+
+            int minSizeVox = ObjectsCounter3DWrapper.parseMinSizeVoxels(minSize, 100);
+            int maxSizeVox = ObjectsCounter3DWrapper.parseMaxSizeVoxels(maxSize, filtered);
+
+            // Clean up the temporary cropped copy (skeleton/preDetection already duplicated from it)
+            if (croppedForSkeleton != null) {
+                croppedForSkeleton.changes = false;
+                croppedForSkeleton.close();
+                croppedForSkeleton.flush();
+            }
+
+            return new ChannelFilterResult(c, channelName, ch, filtered,
+                    threshold, minSizeVox, maxSizeVox, false, null,
+                    false, "", null, "", preDetection,
+                    isEnhancedClassical, enhancedMorphPredicates);
+
+        } catch (Throwable t) {
+            String errMsg = t.getClass().getName() + ": " + t.getMessage();
+            IJ.log("    - [Ch " + (c + 1) + "] ERROR during filter phase for channel '"
+                    + channelName + "', image='" + ch.getTitle()
+                    + "', segmentation='" + (segmentationMethod == null
+                    ? "<unset>" : SegmentationTokenParser.format(segmentationMethod))
+                    + "': " + errMsg);
+            return new ChannelFilterResult(c, channelName, ch, null,
+                    null, 0, 0, true, "filter error: " + errMsg);
+        }
+    }
+
+    private static void waitForFilterFutures(List<Future<?>> filterFutures) {
+        for (Future<?> f : filterFutures) {
+            try {
+                f.get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Filter thread interrupted.", e);
+            } catch (java.util.concurrent.ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof FatalSegmentationException) {
+                    throw (FatalSegmentationException) cause;
+                }
+                IJ.log("    WARNING: Filter thread error: "
+                        + (cause == null ? e.getMessage() : cause.getMessage()));
+            }
+        }
+    }
+
+
+    private ObjectsCounter3DWrapper.Result withEnhancedMorphStats(ObjectsCounter3DWrapper.Result result,
+                                                                  ImagePlus intensityImage,
+                                                                  List<MorphPredicate> predicates) {
+        if (result == null || predicates == null || predicates.isEmpty()) {
+            return result;
+        }
+        ResultsTable stats = EnhancedClassicalRunner.appendReferencedMorphColumns(
+                result.getObjectsMap(),
+                intensityImage,
+                result.getStatistics(),
+                predicates,
+                new EnhancedClassicalParameters.WarningSink() {
+                    @Override public void warn(String message) {
+                        IJ.log(message);
+                    }
+                });
+        ImagePlus objects = result.getObjectsMap();
+        if (objects != null) {
+            objects.setProperty(EnhancedClassicalRunner.OBJECT_STATS_PROPERTY, stats);
+        }
+        return new ObjectsCounter3DWrapper.Result(
+                stats,
+                objects,
+                result.getMaskedImage(),
+                hasCountableObjectRows(stats) && objects != null);
+    }
+
+
+    private static boolean hasCountableObjectRows(ResultsTable table) {
+        return countCountableObjectRows(table) > 0;
+    }
+
+    private static int countCountableObjectRows(ResultsTable table) {
+        if (table == null || table.size() == 0) return 0;
+        String[] headings = table.getHeadings();
+        int count = 0;
+        for (int row = 0; row < table.size(); row++) {
+            if (isCountableObjectRow(table, row, headings)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static boolean isCountableObjectRow(ResultsTable table, int row, String[] headings) {
+        String volumeColumn = objectVolumeColumn(headings);
+        if (volumeColumn == null) {
+            return true;
+        }
+        double volume;
+        try {
+            volume = table.getValue(volumeColumn, row);
+        } catch (Exception e) {
+            return false;
+        }
+        return Double.isFinite(volume) && volume > 0.0;
+    }
+
+    private static String objectVolumeColumn(String[] headings) {
+        if (headings == null) return null;
+        for (String heading : headings) {
+            if ("Volume (micron^3)".equals(heading)) {
+                return heading;
+            }
+        }
+        for (String heading : headings) {
+            if (heading != null && heading.startsWith("Volume (") && heading.endsWith("^3)")) {
+                return heading;
+            }
+        }
+        return null;
+    }
+
+    private void appendStatsToChannelTable(ij.measure.ResultsTable rt, ij.measure.ResultsTable channelTable,
+                                           int scnIndex, String animalName, String hemisphere, String region, String roiLabel) {
+        if (channelTable == null) return;
+
+        // REGRESSION GUARD: zero objects must not create zero-volume object rows.
+        // Summary aggregation counts object CSV rows, so placeholders inflate object totals.
+        if (rt == null || rt.size() == 0) {
+            return;
+        }
+
+        // Ensure metadata columns exist (needed for later matching when filling coloc columns)
+        // NOTE: ResultsTable is sparse; setting a string value creates the column.
+        ensureStringColumn(channelTable, "Hemisphere");
+        ensureStringColumn(channelTable, "Region");
+        ensureStringColumn(channelTable, "ROI");
+        for (String column : AtlasRegionColumns.COLUMNS) {
+            ensureStringColumn(channelTable, column);
+        }
+
+        // Copy each row into channelTable, and add macro-style metadata columns
+        int rows = rt.size();
+        String[] headings = rt.getHeadings();
+        for (int r = 0; r < rows; r++) {
+            if (!isCountableObjectRow(rt, r, headings)) {
+                continue;
+            }
+            channelTable.incrementCounter();
+            int destRow = channelTable.size() - 1;
+
+            channelTable.setValue("Region", destRow, region == null ? "" : region);
+            channelTable.setValue("Hemisphere", destRow, hemisphere == null ? "" : hemisphere);
+            channelTable.setValue("SCN", destRow, scnIndex);
+            channelTable.setValue("ROI", destRow, roiLabel == null ? "" : roiLabel);
+            channelTable.setValue("Animal Name", destRow, animalName);
+            AtlasRegionColumns.writeTo(channelTable, destRow, region, roiLabel);
+
+            for (String h : headings) {
+                if (h == null) continue;
+                if (h.equals("SCN") || h.equals("ROI") || h.equals("Animal Name")
+                        || h.equals("Hemisphere") || h.equals("Region")
+                        || AtlasRegionColumns.isAtlasColumn(h)) continue;
+                try {
+                    double v = rt.getValue(h, r);
+                    channelTable.setValue(h, destRow, v);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        // No reset needed: rt is passed in (typically a copy made by the wrapper).
+    }
+
+
+    private void saveProducedImagesIfPresent(File outDir, String channelName, String hemisphere, String region) {
+        int[] ids = WindowManager.getIDList();
+        if (ids == null) return;
+
+        String hemiRegion = buildFileSuffix(hemisphere, region, null);
+
+        for (int id : ids) {
+            ImagePlus img = WindowManager.getImage(id);
+            if (img == null) continue;
+            String title = img.getTitle();
+            if (title == null) continue;
+
+            String t = title.toLowerCase(Locale.ROOT);
+
+            // Macro saves:
+            //  - <channel>_Masked_<hemi><region>.tif
+            //  - later: <channel>_objects.tif
+            if (t.contains("masked image")) {
+                File maskedOutput = new File(outDir, ChannelFilenameCodec.toSafe(channelName) + "_Masked_" + hemiRegion + ".tif");
+                AsyncImageSaver.saveAsTiffAsync(img, maskedOutput.getAbsolutePath());
+                recordOutput(maskedOutput, "tiff");
+            }
+            // Macro does not save the objects map here (it saves <channel>_objects.tif later).
+
+        }
+    }
+
+
+    private void appendColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        // Bidirectional colocalization: run 3D MultiColoc once per unordered pair (A,B),
+        // then write P1 into A's table and P2 into B's table.
+
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        // Per-channel log summaries
+        List<StringBuilder> logEntries = new ArrayList<StringBuilder>();
+        List<Boolean> logFirst = new ArrayList<Boolean>();
+        for (int i = 0; i < n; i++) {
+            logEntries.add(new StringBuilder());
+            logFirst.add(Boolean.TRUE);
+        }
+
+        // Zero-fill all coloc columns for channels with no objects before running pairs
+        for (int a = 0; a < n; a++) {
+            ij.measure.ResultsTable aTable = channelTables.get(cfg.channelNames.get(a));
+            boolean aHas = channelHasObjects[a]
+                    && getRegisteredImage(cfg.channelNames.get(a) + "_objects") != null
+                    && aTable != null;
+            for (int b = 0; b < n; b++) {
+                if (b == a) continue;
+                if (!aHas) {
+                    if (aTable != null) {
+                        setColocZerosForThisImage(aTable, colocPercentCol(cfg.channelNames.get(b)),
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(aTable, volColocCol(cfg.channelNames.get(a), cfg.channelNames.get(b)),
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                }
+            }
+        }
+
+        // Run 3D MultiColoc once per unique pair
+        for (int a = 0; a < n; a++) {
+            String aChannel = cfg.channelNames.get(a);
+            String aObjects = aChannel + "_objects";
+            ImagePlus aObjImg = getRegisteredImage(aObjects);
+            boolean aHas = channelHasObjects[a] && aObjImg != null;
+            ij.measure.ResultsTable aTable = channelTables.get(aChannel);
+
+            for (int b = a + 1; b < n; b++) {
+                String bChannel = cfg.channelNames.get(b);
+                String bObjects = bChannel + "_objects";
+                ImagePlus bObjImg = getRegisteredImage(bObjects);
+                boolean bHas = channelHasObjects[b] && bObjImg != null;
+                ij.measure.ResultsTable bTable = channelTables.get(bChannel);
+
+                String overlapColAB = colocPercentCol(bChannel);
+                String overlapColBA = colocPercentCol(aChannel);
+                String colocColAB = volColocCol(aChannel, bChannel);
+                String colocColBA = volColocCol(bChannel, aChannel);
+
+                if (!aHas || !bHas) {
+                    // Zero-fill both directions
+                    if (aTable != null) {
+                        setColocZerosForThisImage(aTable, overlapColAB, scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(aTable, colocColAB, scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    if (bTable != null) {
+                        setColocZerosForThisImage(bTable, overlapColBA, scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(bTable, colocColBA, scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    String emptyChannel = !aHas
+                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
+                            : bChannel;
+                    appendColocLogEntry(logEntries, logFirst, a, bChannel, "no objects in " + emptyChannel);
+                    appendColocLogEntry(logEntries, logFirst, b, aChannel, "no objects in " + emptyChannel);
+                    continue;
+                }
+
+                try {
+                    // Native mcib3d colocalization — no WindowManager or GUI dependency
+                    float[] p1 = null;
+                    float[] p2 = null;
+
+                    try {
+                        // Create populations to get the canonical iteration order
+                        // (matches the order used by buildNativeStatisticsTable).
+                        mcib3d.geom2.Objects3DIntPopulation popA =
+                                new mcib3d.geom2.Objects3DIntPopulation(mcib3d.image3d.ImageHandler.wrap(aObjImg));
+                        mcib3d.geom2.Objects3DIntPopulation popB =
+                                new mcib3d.geom2.Objects3DIntPopulation(mcib3d.image3d.ImageHandler.wrap(bObjImg));
+
+                        // Compute overlap directly from label images (pixel-by-pixel).
+                        // The mcib3d MeasurePopulationColocalisation API does not return
+                        // actual overlap voxels — getValueObject1/2 returns object sizes.
+                        float[][] bothP = computeColocFromLabelImages(aObjImg, bObjImg, popA, popB);
+                        p1 = bothP[0];
+                        p2 = bothP[1];
+
+                    } catch (NoClassDefFoundError e) {
+                        // mcib3d not available — fall back to macro-based 3D MultiColoc
+                        // Must run twice (A→B and B→A) and take P1 from each,
+                        // because P1 is the source image's perspective only.
+                        IJ.log("    - WARNING: mcib3d classes not found, falling back to macro 3D MultiColoc");
+                        COUNTER3D_LOCK.lock();
+                        try {
+                            ensureInWindowManager(aObjImg);
+                            ensureInWindowManager(bObjImg);
+
+                            // A→B: P1 gives coloc values from A's perspective
+                            String logBefore = getLogText();
+                            IJ.run("3D MultiColoc", "image_a=" + aObjects + " image_b=" + bObjects);
+                            restoreLogText(logBefore);
+
+                            Frame colocFrame = WindowManager.getFrame("Colocalisation");
+                            if (colocFrame instanceof TextWindow) {
+                                ij.measure.ResultsTable rt = ((TextWindow) colocFrame).getTextPanel().getResultsTable();
+                                if (rt != null && rt.size() > 0) {
+                                    int p1Index = rt.getColumnIndex("P1");
+                                    p1 = (p1Index >= 0) ? rt.getColumn(p1Index) : null;
+                                    if (p1 != null && p1.length > 1) p1 = Arrays.copyOf(p1, p1.length - 1);
+                                }
+                                colocFrame.dispose();
+                            }
+
+                            // B→A: P1 gives coloc values from B's perspective
+                            logBefore = getLogText();
+                            IJ.run("3D MultiColoc", "image_a=" + bObjects + " image_b=" + aObjects);
+                            restoreLogText(logBefore);
+
+                            colocFrame = WindowManager.getFrame("Colocalisation");
+                            if (colocFrame instanceof TextWindow) {
+                                ij.measure.ResultsTable rt = ((TextWindow) colocFrame).getTextPanel().getResultsTable();
+                                if (rt != null && rt.size() > 0) {
+                                    int p1Index = rt.getColumnIndex("P1");
+                                    p2 = (p1Index >= 0) ? rt.getColumn(p1Index) : null;
+                                    if (p2 != null && p2.length > 1) p2 = Arrays.copyOf(p2, p2.length - 1);
+                                }
+                                colocFrame.dispose();
+                            }
+                        } finally {
+                            COUNTER3D_LOCK.unlock();
+                        }
+                    }
+
+                    // Write continuous overlap into Colocalisation with X and thresholded flags into VolColoc.
+                    if (p1 != null && aTable != null) {
+                        writeColocValuesForThisImage(aTable, overlapColAB, scnIndex, animalName, hemisphere, region, roiLabel, p1);
+                        writeThresholdColocValuesForThisImage(aTable, colocColAB, scnIndex, animalName, hemisphere, region, roiLabel,
+                                p1, getColocThreshold(aChannel));
+                    } else if (aTable != null) {
+                        setColocZerosForThisImage(aTable, overlapColAB, scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(aTable, colocColAB, scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+
+                    if (p2 != null && bTable != null) {
+                        writeColocValuesForThisImage(bTable, overlapColBA, scnIndex, animalName, hemisphere, region, roiLabel, p2);
+                        writeThresholdColocValuesForThisImage(bTable, colocColBA, scnIndex, animalName, hemisphere, region, roiLabel,
+                                p2, getColocThreshold(bChannel));
+                    } else if (bTable != null) {
+                        setColocZerosForThisImage(bTable, overlapColBA, scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(bTable, colocColBA, scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+
+                    int interactionsAB = countNonZero(p1);
+                    int interactionsBA = countNonZero(p2);
+                    appendColocLogEntry(logEntries, logFirst, a, bChannel, interactionsAB);
+                    appendColocLogEntry(logEntries, logFirst, b, aChannel, interactionsBA);
+                } catch (Exception e) {
+                    if (aTable != null) {
+                        setColocZerosForThisImage(aTable, overlapColAB, scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(aTable, colocColAB, scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    if (bTable != null) {
+                        setColocZerosForThisImage(bTable, overlapColBA, scnIndex, animalName, hemisphere, region, roiLabel);
+                        setColocZerosForThisImage(bTable, colocColBA, scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    appendColocLogEntry(logEntries, logFirst, a, bChannel, -1);
+                    appendColocLogEntry(logEntries, logFirst, b, aChannel, -1);
+                }
+            }
+        }
+
+        // Print per-channel log summaries (always, including compact mode —
+        // these are one-line-per-channel and provide essential coloc context)
+        for (int i = 0; i < n; i++) {
+            String ch = cfg.channelNames.get(i);
+            if (logEntries.get(i).length() > 0) {
+                IJ.log("    - " + ch + " vs: " + logEntries.get(i).toString());
+            }
+        }
+    }
+
+    /**
+     * Removes labels from a label image whose 2D centroid (averaged across Z) falls
+     * outside the given ROI. Used to discard objects detected outside the tissue region
+     * when StarDist runs on the full uncropped image.
+     *
+     * @return number of labels removed
+     */
+    static int filterLabelsByCentroid(ImagePlus labelImage, ij.gui.Roi roi) {
+        // Canonical implementation lives in RegionMask (the single source of
+        // truth for region geometry). Delegated here so existing callers/tests
+        // keep working. The roi must be in the same coordinate space as the
+        // label image (original coords for a full-image map).
+        return RegionMask.filterLabelsByCentroid(labelImage, roi);
+    }
+
+    /**
+     * QC invariant for the centroid-filter then crop-to-bounds step: cropping to
+     * the region bounding box re-bases object coordinates but must NOT lose or
+     * create objects (every centroid-kept object lies within the bounding box and
+     * connected components survive the crop). A mismatch is the signature of a
+     * coordinate problem — historically the top-left-shifted index-1 ROI driving
+     * geometry — so it is logged loudly rather than silently producing wrong counts.
+     *
+     * @param channelName   channel for the log line
+     * @param roiSetName    ROI set / region name for the log line
+     * @param keptAfterFilter object count after the centroid filter (pre-crop)
+     * @param finalCount    object count re-derived from the cropped label image
+     */
+    private static void logRegionCropQc(String channelName, String roiSetName,
+            int keptAfterFilter, int finalCount) {
+        if (finalCount == keptAfterFilter) return;
+        IJ.log("    [FLASH][QC] WARNING: object count changed across region crop for "
+                + channelName + " / " + roiSetName + ": kept " + keptAfterFilter
+                + " after centroid filter but re-derived " + finalCount
+                + " after cropping. Cropping should relocate objects, not change their"
+                + " count - check that the region ROI (index 0, original coordinates)"
+                + " matches the label image coordinate space.");
+    }
+
+    private static int countNonZero(float[] arr) {
+        if (arr == null) return 0;
+        int count = 0;
+        for (float v : arr) if (v > 0) count++;
+        return count;
+    }
+
+    private void appendColocLogEntry(List<StringBuilder> logEntries, List<Boolean> logFirst, int channelIdx, String otherChannel, int interactions) {
+        StringBuilder sb = logEntries.get(channelIdx);
+        if (!logFirst.get(channelIdx)) sb.append(", ");
+        logFirst.set(channelIdx, Boolean.FALSE);
+        if (interactions < 0) {
+            sb.append(otherChannel).append(" (failed)");
+        } else {
+            sb.append(otherChannel).append(" (").append(interactions).append(" interactions)");
+        }
+    }
+
+    private void appendColocLogEntry(List<StringBuilder> logEntries, List<Boolean> logFirst, int channelIdx, String otherChannel, String reason) {
+        StringBuilder sb = logEntries.get(channelIdx);
+        if (!logFirst.get(channelIdx)) sb.append(", ");
+        logFirst.set(channelIdx, Boolean.FALSE);
+        sb.append(otherChannel).append(" (").append(reason).append(")");
+    }
+
+    /**
+     * Compute bidirectional colocalization by scanning label images pixel-by-pixel.
+     * For each A-object, finds the B-partner with maximum overlap and computes
+     * overlapVoxels / objectSize * 100. Matches 3D MultiColoc P1 column.
+     *
+     * Returns float[2][] where [0] = A→B (one value per A-object, in label order)
+     * and [1] = B→A (one value per B-object, in label order).
+     * Non-colocalising objects get 0.0. Values are always 0-100%.
+     *
+     * The label order matches Objects3DIntPopulation iteration order because both
+     * are derived from the same label image and mcib3d iterates by label discovery.
+     */
+    // REGRESSION GUARD: Do NOT use mcib3d MeasurePopulationColocalisation or PairObjects3DInt
+    // for overlap computation. getValueObject1()/getValueObject2() return object SIZES, not
+    // overlap voxels — every pair yields 100%. Pixel-by-pixel scanning is the only reliable method.
+    private static float[][] computeColocFromLabelImages(ImagePlus aObjImg, ImagePlus bObjImg,
+            mcib3d.geom2.Objects3DIntPopulation popA, mcib3d.geom2.Objects3DIntPopulation popB) {
+        ij.ImageStack stackA = aObjImg.getStack();
+        ij.ImageStack stackB = bObjImg.getStack();
+        int nSlices = stackA.getSize();
+
+        // Count voxels per label and overlap voxels per (A-label, B-label) pair.
+        // Key for overlap: pack two ints into a long.
+        // Primitive Trove maps avoid per-voxel autoboxing on dense overlap stacks.
+        gnu.trove.map.hash.TIntIntHashMap aSizes = new gnu.trove.map.hash.TIntIntHashMap();
+        gnu.trove.map.hash.TIntIntHashMap bSizes = new gnu.trove.map.hash.TIntIntHashMap();
+        gnu.trove.map.hash.TLongIntHashMap overlapCounts = new gnu.trove.map.hash.TLongIntHashMap();
+
+        for (int s = 1; s <= nSlices; s++) {
+            ij.process.ImageProcessor ipA = stackA.getProcessor(s);
+            ij.process.ImageProcessor ipB = stackB.getProcessor(s);
+            int nPixels = ipA.getPixelCount();
+            for (int i = 0; i < nPixels; i++) {
+                int a = ipA.get(i);
+                int b = ipB.get(i);
+                if (a > 0) {
+                    aSizes.adjustOrPutValue(a, 1, 1);
+                }
+                if (b > 0) {
+                    bSizes.adjustOrPutValue(b, 1, 1);
+                }
+                if (a > 0 && b > 0) {
+                    long key = ((long) a << 32) | (b & 0xFFFFFFFFL);
+                    overlapCounts.adjustOrPutValue(key, 1, 1);
+                }
+            }
+        }
+
+        // For each object, track the maximum overlap percentage with any single partner.
+        gnu.trove.map.hash.TIntFloatHashMap aMaxPct = new gnu.trove.map.hash.TIntFloatHashMap();
+        gnu.trove.map.hash.TIntFloatHashMap bMaxPct = new gnu.trove.map.hash.TIntFloatHashMap();
+        gnu.trove.iterator.TLongIntIterator it = overlapCounts.iterator();
+        while (it.hasNext()) {
+            it.advance();
+            long key = it.key();
+            int overlap = it.value();
+            int aLabel = (int) (key >>> 32);
+            int bLabel = (int) (key & 0xFFFFFFFFL);
+            int aSize = aSizes.get(aLabel);
+            if (aSize > 0) {
+                float pct = (float) ((double) overlap / aSize * 100.0);
+                if (pct > aMaxPct.get(aLabel)) aMaxPct.put(aLabel, pct);
+            }
+            int bSize = bSizes.get(bLabel);
+            if (bSize > 0) {
+                float pct = (float) ((double) overlap / bSize * 100.0);
+                if (pct > bMaxPct.get(bLabel)) bMaxPct.put(bLabel, pct);
+            }
+        }
+
+        // Build p1 in population iteration order (matches table row order from buildNativeStatisticsTable)
+        java.util.List<mcib3d.geom2.Object3DInt> objectsA = popA.getObjects3DInt();
+        float[] p1 = new float[objectsA.size()];
+        for (int i = 0; i < objectsA.size(); i++) {
+            int label = (int) objectsA.get(i).getLabel();
+            p1[i] = aMaxPct.get(label);
+        }
+
+        // Build p2 in population iteration order
+        java.util.List<mcib3d.geom2.Object3DInt> objectsB = popB.getObjects3DInt();
+        float[] p2 = new float[objectsB.size()];
+        for (int i = 0; i < objectsB.size(); i++) {
+            int label = (int) objectsB.get(i).getLabel();
+            p2[i] = bMaxPct.get(label);
+        }
+
+        return new float[][] { p1, p2 };
+    }
+
+    private ColocalizationMetrics.Result computeIntensityColocMetrics(String aChannel, String bChannel) {
+        try {
+            ImagePlus aImage = getRegisteredImage(aChannel + "_unfiltered");
+            ImagePlus bImage = getRegisteredImage(bChannel + "_unfiltered");
+            ColocalizationMetrics.Result result = ColocalizationMetrics.compute(aImage, bImage);
+            if (result.note != null && result.note.length() > 0
+                    && !"missing channel image".equals(result.note)) {
+                IJ.log("    [COLOC] " + aChannel + " vs " + bChannel + ": " + result.note);
+            }
+            return result;
+        } catch (Exception e) {
+            IJ.log("    [COLOC] intensity metrics failed for " + aChannel + " vs " + bChannel
+                    + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    private void appendIntensityColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        for (int sourceIdx = 0; sourceIdx < n; sourceIdx++) {
+            String sourceChannel = cfg.channelNames.get(sourceIdx);
+            ij.measure.ResultsTable sourceTable = channelTables.get(sourceChannel);
+            if (sourceTable == null) continue;
+
+            ImagePlus sourceLabels = getRegisteredImage(sourceChannel + "_objects");
+            ImagePlus sourceImage = getRegisteredImage(sourceChannel + "_unfiltered");
+            boolean sourceHasObjects = channelHasObjects[sourceIdx] && sourceLabels != null;
+
+            for (int partnerIdx = 0; partnerIdx < n; partnerIdx++) {
+                if (partnerIdx == sourceIdx) continue;
+                String partnerChannel = cfg.channelNames.get(partnerIdx);
+                ImagePlus partnerImage = getRegisteredImage(partnerChannel + "_unfiltered");
+
+                ColocalizationMetrics.Result roiMetrics =
+                        computeIntensityColocMetrics(sourceChannel, partnerChannel);
+                Map<Integer, ColocalizationMetrics.Result> objectMetrics = null;
+                if (sourceHasObjects && sourceImage != null && partnerImage != null) {
+                    objectMetrics = computeObjectIntensityColocMetrics(
+                            sourceLabels, sourceImage, partnerImage, sourceChannel, partnerChannel);
+                }
+                writeIntensityColocForThisImage(sourceTable, sourceChannel, partnerChannel,
+                        objectMetrics, roiMetrics, scnIndex, animalName, hemisphere, region, roiLabel);
+            }
+        }
+    }
+
+    private Map<Integer, ColocalizationMetrics.Result> computeObjectIntensityColocMetrics(
+            ImagePlus sourceLabels,
+            ImagePlus sourceImage,
+            ImagePlus partnerImage,
+            String sourceChannel,
+            String partnerChannel) {
+        Map<Integer, ColocalizationMetrics.Result> out =
+                new LinkedHashMap<Integer, ColocalizationMetrics.Result>();
+        if (!sameDimensions(sourceLabels, sourceImage) || !sameDimensions(sourceLabels, partnerImage)) {
+            IJ.log("    [COLOC] per-object intensity metrics skipped for "
+                    + sourceChannel + " vs " + partnerChannel + ": dimensions differ");
+            return out;
+        }
+
+        ij.ImageStack labelStack = sourceLabels.getStack();
+        ij.ImageStack sourceStack = sourceImage.getStack();
+        ij.ImageStack partnerStack = partnerImage.getStack();
+        int depth = Math.max(1, sourceLabels.getStackSize());
+        gnu.trove.map.hash.TIntIntHashMap sizes = new gnu.trove.map.hash.TIntIntHashMap();
+        for (int z = 1; z <= depth; z++) {
+            ij.process.ImageProcessor lp = labelStack.getProcessor(z);
+            int nPixels = lp.getPixelCount();
+            for (int i = 0; i < nPixels; i++) {
+                int label = lp.get(i);
+                if (label > 0) {
+                    sizes.adjustOrPutValue(label, 1, 1);
+                }
+            }
+        }
+
+        Map<Integer, double[]> sourceByLabel = new LinkedHashMap<Integer, double[]>();
+        Map<Integer, double[]> partnerByLabel = new LinkedHashMap<Integer, double[]>();
+        gnu.trove.map.hash.TIntIntHashMap offsets = new gnu.trove.map.hash.TIntIntHashMap();
+        gnu.trove.iterator.TIntIntIterator sizeIt = sizes.iterator();
+        while (sizeIt.hasNext()) {
+            sizeIt.advance();
+            int label = sizeIt.key();
+            int count = sizeIt.value();
+            sourceByLabel.put(Integer.valueOf(label), new double[count]);
+            partnerByLabel.put(Integer.valueOf(label), new double[count]);
+        }
+
+        int width = sourceLabels.getWidth();
+        int height = sourceLabels.getHeight();
+        for (int z = 1; z <= depth; z++) {
+            ij.process.ImageProcessor lp = labelStack.getProcessor(z);
+            ij.process.ImageProcessor sp = sourceStack.getProcessor(z);
+            ij.process.ImageProcessor pp = partnerStack.getProcessor(z);
+            int nPixels = lp.getPixelCount();
+            for (int i = 0; i < nPixels; i++) {
+                int label = lp.get(i);
+                if (label <= 0) continue;
+                int offset = offsets.get(label);
+                Integer key = Integer.valueOf(label);
+                sourceByLabel.get(key)[offset] = sp.getf(i);
+                partnerByLabel.get(key)[offset] = pp.getf(i);
+                offsets.put(label, offset + 1);
+            }
+        }
+
+        for (Map.Entry<Integer, double[]> entry : sourceByLabel.entrySet()) {
+            Integer label = entry.getKey();
+            double[] sourceValues = entry.getValue();
+            double[] partnerValues = partnerByLabel.get(label);
+            out.put(label, ColocalizationMetrics.compute(
+                    sourceValues, partnerValues, Math.max(1, sourceValues.length), 1, 1));
+        }
+        return out;
+    }
+
+    private static boolean sameDimensions(ImagePlus a, ImagePlus b) {
+        return a != null && b != null
+                && a.getWidth() == b.getWidth()
+                && a.getHeight() == b.getHeight()
+                && a.getStackSize() == b.getStackSize();
+    }
+
+    private void writeIntensityColocForThisImage(ij.measure.ResultsTable table,
+                                                 String sourceChannel,
+                                                 String partnerChannel,
+                                                 Map<Integer, ColocalizationMetrics.Result> objectMetrics,
+                                                 ColocalizationMetrics.Result roiMetrics,
+                                                 int scnIndex,
+                                                 String animalName,
+                                                 String hemisphere,
+                                                 String region,
+                                                 String roiLabel) {
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) {
+                continue;
+            }
+            int label = roundedLabel(table, r);
+            ColocalizationMetrics.Result object =
+                    objectMetrics == null ? null : objectMetrics.get(Integer.valueOf(label));
+            writeObjectIntensityMetricValues(table, r, sourceChannel, partnerChannel, object, roiMetrics);
+        }
+    }
+
+    private static int roundedLabel(ResultsTable table, int row) {
+        try {
+            return (int) Math.round(table.getValue("Label", row));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private void writeObjectIntensityMetricValues(ij.measure.ResultsTable table,
+                                                  int row,
+                                                  String sourceChannel,
+                                                  String partnerChannel,
+                                                  ColocalizationMetrics.Result object,
+                                                  ColocalizationMetrics.Result roi) {
+        setMetricValue(table, objPearsonCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.pearson);
+        setMetricValue(table, objMandersM1Col(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.mandersM1);
+        setMetricValue(table, objMandersM2Col(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.mandersM2);
+        setMetricValue(table, objCostesTaCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.costesTa);
+        setMetricValue(table, objCostesTbCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.costesTb);
+        setMetricValue(table, objPearsonThresholdedCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.pearsonThresholded);
+        setMetricValue(table, objCostesPCol(sourceChannel, partnerChannel), row,
+                object == null ? Double.NaN : object.costesP);
+        setMetricValue(table, roiCostesTaCol(sourceChannel, partnerChannel), row,
+                roi == null ? Double.NaN : roi.costesTa);
+        setMetricValue(table, roiCostesTbCol(sourceChannel, partnerChannel), row,
+                roi == null ? Double.NaN : roi.costesTb);
+        setMetricValue(table, roiCostesPCol(sourceChannel, partnerChannel), row,
+                roi == null ? Double.NaN : roi.costesP);
+    }
+
+    private void setMetricValue(ij.measure.ResultsTable table, String colName, int row, double value) {
+        if (Double.isNaN(value)) {
+            table.setValue(colName, row, "NaN");
+        } else {
+            table.setValue(colName, row, value);
+        }
+    }
+
+    private void writeColocValuesForThisImage(ij.measure.ResultsTable table, String colName, int scnIndex,
+                                              String animalName, String hemisphere, String region, String roiLabel,
+                                              float[] values) {
+        int written = 0;
+        for (int r = 0; r < table.size() && written < values.length; r++) {
+            if (matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) {
+                table.setValue(colName, r, values[written]);
+                written++;
+            }
+        }
+    }
+
+    private void writeThresholdColocValuesForThisImage(ij.measure.ResultsTable table, String colName, int scnIndex,
+                                                       String animalName, String hemisphere, String region, String roiLabel,
+                                                       float[] values, double threshold) {
+        int written = 0;
+        for (int r = 0; r < table.size() && written < values.length; r++) {
+            if (matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) {
+                table.setValue(colName, r, values[written] > threshold ? 1 : 0);
+                written++;
+            }
+        }
+    }
+
+    private void setColocZerosForThisImage(ij.measure.ResultsTable table, String colName, int scnIndex,
+                                           String animalName, String hemisphere, String region, String roiLabel) {
+        for (int r = 0; r < table.size(); r++) {
+            if (matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) {
+                table.setValue(colName, r, 0);
+            }
+        }
+    }
+
+    private void writeLengthValuesForThisImage(ResultsTable table, int scnIndex, String animalName,
+                                               String hemisphere, String region, String roiLabel, double[] lengths) {
+        int written = 0;
+        for (int r = 0; r < table.size() && written < lengths.length; r++) {
+            if (matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) {
+                table.setValue("Length", r, lengths[written]);
+                written++;
+            }
+        }
+    }
+
+    private boolean matchesRowMetadata(ResultsTable table, int row, int scnIndex, String animalName,
+                                       String hemisphere, String region, String roiLabel) {
+        double scn = table.getValue("SCN", row);
+        String an = table.getStringValue("Animal Name", row);
+        String h = table.getStringValue("Hemisphere", row);
+        String reg = table.getStringValue("Region", row);
+        String roi = "";
+        try {
+            roi = table.getStringValue("ROI", row);
+        } catch (Exception ignored) {
+        }
+
+        if ((int) scn != scnIndex) return false;
+        if (!animalName.equals(an)) return false;
+        if (!safeEq(hemisphere, h)) return false;
+        if (!safeEq(region, reg)) return false;
+        return roiLabel == null || roiLabel.isEmpty() || safeEq(roiLabel, roi);
+    }
+
+    private double getColocThreshold(String source) {
+        Double t = markerThresholds.get(source);
+        return t != null ? t : 30.0;
+    }
+
+    /** Per-channel bounding-box coloc threshold (%), defaulting to 30 when unset. */
+    private double getBBColocThreshold(String source) {
+        Double t = bbThresholds.get(source);
+        return t != null ? t : 30.0;
+    }
+
+    private String build3DObjectChannelSummary(BinConfig cfg, int channelIndex) {
+        if (cfg == null || channelIndex < 0 || channelIndex >= cfg.numChannels()) return "";
+        if (cfg.isStarDist(channelIndex)) {
+            return "Segmentation=StarDist 3D"
+                    + ", ProbThresh=" + cfg.getStarDistProbThresh(channelIndex)
+                    + ", NmsThresh=" + cfg.getStarDistNmsThresh(channelIndex)
+                    + ", LinkingMaxDistance=" + cfg.getStarDistLinkingMaxDistance(channelIndex)
+                    + ", GapClosingMaxDistance=" + cfg.getStarDistGapClosingMaxDistance(channelIndex)
+                    + ", MaxFrameGap=" + cfg.getStarDistMaxFrameGap(channelIndex)
+                    + ", Area=" + cfg.getStarDistAreaMin(channelIndex) + "-"
+                    + (Double.isInfinite(cfg.getStarDistAreaMax(channelIndex)) ? "Infinity" : cfg.getStarDistAreaMax(channelIndex))
+                    + ", QualityMin=" + cfg.getStarDistQualityMin(channelIndex)
+                    + ", IntensityMin=" + cfg.getStarDistIntensityMin(channelIndex);
+        }
+        if (cfg.isCellpose(channelIndex)) {
+            int companionIndex = cfg.getCellposeSecondChannel(channelIndex);
+            String companionSummary = companionIndex >= 0 && companionIndex < cfg.channelNames.size()
+                    ? cfg.channelNames.get(companionIndex)
+                    : "None";
+            return "Segmentation=Cellpose"
+                    + ", Model=" + cfg.getCellposeModel(channelIndex)
+                    + ", Diameter=" + cfg.getCellposeDiameter(channelIndex)
+                    + ", FlowThreshold=" + cfg.getCellposeFlowThreshold(channelIndex)
+                    + ", CellprobThreshold=" + cfg.getCellposeCellprobThreshold(channelIndex)
+                    + ", UseGpu=" + cfg.getCellposeUseGpu(channelIndex)
+                    + ", CompanionChannel=" + companionSummary;
+        }
+        if (cfg.isEnhancedClassical(channelIndex)) {
+            List<MorphPredicate> predicates = cfg.getEnhancedClassicalMorphPredicates(channelIndex);
+            StringBuilder morph = new StringBuilder();
+            for (int i = 0; i < predicates.size(); i++) {
+                if (i > 0) morph.append(",");
+                morph.append(predicates.get(i).format());
+            }
+            return "Segmentation=Enhanced Classical"
+                    + ", Threshold=" + cfg.getEnhancedClassicalThreshold(channelIndex)
+                    + ", Size=" + cfg.getEnhancedClassicalMinSize(channelIndex)
+                    + "-" + (cfg.getEnhancedClassicalMaxSize(channelIndex) == Integer.MAX_VALUE
+                    ? "Infinity" : String.valueOf(cfg.getEnhancedClassicalMaxSize(channelIndex)))
+                    + ", Morph=" + (morph.length() == 0 ? "None" : morph.toString());
+        }
+        String threshold = channelIndex < cfg.channelThresholds.size() ? cfg.channelThresholds.get(channelIndex) : "";
+        String size = channelIndex < cfg.channelSizes.size() ? cfg.channelSizes.get(channelIndex) : "";
+        return "Segmentation=Classical, Threshold=" + threshold + ", Size=" + size;
+    }
+
+    private static ModelEntry resolvedModelEntry(ModelCatalog catalog,
+                                                 SegmentationMethod method,
+                                                 ModelEntry.Engine expectedEngine) {
+        if (catalog == null || method == null || expectedEngine == null) {
+            return null;
+        }
+        String modelKey = "";
+        if (expectedEngine == ModelEntry.Engine.STARDIST && method.isStarDist()) {
+            modelKey = SegmentationMethod.starDistModelKey(method);
+        } else if (expectedEngine == ModelEntry.Engine.CELLPOSE && method.isCellpose()) {
+            modelKey = SegmentationMethod.cellposeModelKey(method);
+        }
+        if (modelKey == null || modelKey.trim().isEmpty()) {
+            return null;
+        }
+        Optional<ModelEntry> found = catalog.get(modelKey.trim());
+        if (!found.isPresent()) {
+            return null;
+        }
+        ModelEntry entry = found.get();
+        return entry.engine == expectedEngine ? entry : null;
+    }
+
+    /** Build canonical percentage overlap column name stored in each channel CSV. */
+    private String colocPercentCol(String partner) {
+        return "Colocalisation with " + partner;
+    }
+
+    private String objPearsonCol(String source, String partner) {
+        return source + "_ObjPearson_" + partner;
+    }
+
+    private String objMandersM1Col(String source, String partner) {
+        return source + "_ObjMandersM1_" + partner;
+    }
+
+    private String objMandersM2Col(String source, String partner) {
+        return source + "_ObjMandersM2_" + partner;
+    }
+
+    private String objCostesTaCol(String source, String partner) {
+        return source + "_ObjCostesTa_" + partner;
+    }
+
+    private String objCostesTbCol(String source, String partner) {
+        return source + "_ObjCostesTb_" + partner;
+    }
+
+    private String objPearsonThresholdedCol(String source, String partner) {
+        return source + "_ObjPearsonT_" + partner;
+    }
+
+    private String objCostesPCol(String source, String partner) {
+        return source + "_ObjCostesP_" + partner;
+    }
+
+    private String roiCostesTaCol(String source, String partner) {
+        return source + "_ROICostesTa_" + partner;
+    }
+
+    private String roiCostesTbCol(String source, String partner) {
+        return source + "_ROICostesTb_" + partner;
+    }
+
+    private String roiCostesPCol(String source, String partner) {
+        return source + "_ROICostesP_" + partner;
+    }
+
+    /** Build thresholded volumetric coloc flag column name: SOURCE_VolColocN_PARTNER. */
+    private String volColocCol(String source, String partner) {
+        int thr = (int) getColocThreshold(source);
+        return source + "_VolColoc" + thr + "_" + partner;
+    }
+
+    // ── Bounding-Box overlap colocalization (Family C: box-vs-box) ─────
+
+    /** Continuous bounding-box overlap %: SOURCE_BBColoc_PARTNER. */
+    private String bbColocPctCol(String source, String partner) {
+        return source + "_BBColoc_" + partner;
+    }
+
+    /** Thresholded bounding-box overlap flag: SOURCE_BBColocN_PARTNER. */
+    private String bbColocFlagCol(String source, String partner) {
+        int thr = (int) getBBColocThreshold(source);
+        return source + "_BBColoc" + thr + "_" + partner;
+    }
+
+    private void ensureAllBBColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String aChannel : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(aChannel);
+            if (t == null || t.size() == 0) continue;
+            for (String bChannel : cfg.channelNames) {
+                if (aChannel.equals(bChannel)) continue;
+                ensureCpcColumn(t, bbColocPctCol(aChannel, bChannel));
+                ensureCpcColumn(t, bbColocFlagCol(aChannel, bChannel));
+            }
+        }
+    }
+
+    /**
+     * Bounding-box overlap colocalization (Family C). For each channel pair, derive both object
+     * populations (with bounding boxes) from the saved label images and, for each source object,
+     * compute the maximum box-intersection volume with any partner object divided by the source
+     * box volume (percent). Pure geometry from {@link CpcUtils.ObjectInfo}; written into each
+     * channel table matched by Label.
+     */
+    private void appendBBColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        // Zero-fill BB overlap columns for channels with no objects.
+        for (int a = 0; a < n; a++) {
+            ij.measure.ResultsTable aTable = channelTables.get(cfg.channelNames.get(a));
+            boolean aHas = channelHasObjects[a]
+                    && getRegisteredImage(cfg.channelNames.get(a) + "_objects") != null
+                    && aTable != null;
+            if (!aHas && aTable != null) {
+                for (int b = 0; b < n; b++) {
+                    if (b == a) continue;
+                    setBBColocZerosForThisImage(aTable, cfg.channelNames.get(a), cfg.channelNames.get(b),
+                            scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        for (int a = 0; a < n; a++) {
+            String aChannel = cfg.channelNames.get(a);
+            ImagePlus aObjImg = getRegisteredImage(aChannel + "_objects");
+            boolean aHas = channelHasObjects[a] && aObjImg != null;
+            ij.measure.ResultsTable aTable = channelTables.get(aChannel);
+
+            for (int b = a + 1; b < n; b++) {
+                String bChannel = cfg.channelNames.get(b);
+                ImagePlus bObjImg = getRegisteredImage(bChannel + "_objects");
+                boolean bHas = channelHasObjects[b] && bObjImg != null;
+                ij.measure.ResultsTable bTable = channelTables.get(bChannel);
+
+                if (!aHas || !bHas) {
+                    if (aTable != null) setBBColocZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBColocZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    String emptyChannel = !aHas
+                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
+                            : bChannel;
+                    IJ.log("    - BBColoc: " + aChannel + " vs " + bChannel + " skipped (no objects in " + emptyChannel + ")");
+                    continue;
+                }
+
+                try {
+                    List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aObjImg);
+                    List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bObjImg);
+
+                    Map<Integer, Float> abPercents = computeBBOverlapPercents(objectsA, objectsB);
+                    Map<Integer, Float> baPercents = computeBBOverlapPercents(objectsB, objectsA);
+
+                    if (aTable != null) {
+                        writeBBColocValuesForThisImage(aTable, aChannel, bChannel, abPercents,
+                                getBBColocThreshold(aChannel), scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    if (bTable != null) {
+                        writeBBColocValuesForThisImage(bTable, bChannel, aChannel, baPercents,
+                                getBBColocThreshold(bChannel), scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+
+                    int hitsAB = countAtOrAbove(abPercents, getBBColocThreshold(aChannel));
+                    int hitsBA = countAtOrAbove(baPercents, getBBColocThreshold(bChannel));
+                    IJ.log("    - BBColoc: " + aChannel + " vs " + bChannel
+                            + " (" + hitsAB + "/" + objectsA.size() + " fwd, "
+                            + hitsBA + "/" + objectsB.size() + " rev)");
+                } catch (Exception e) {
+                    IJ.log("    - BBColoc: " + aChannel + " vs " + bChannel + " FAILED: " + e.getMessage());
+                    if (aTable != null) setBBColocZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBColocZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+    }
+
+    /**
+     * For each source object, the maximum box-intersection volume with any partner object divided
+     * by the source box volume, as a percentage. Result keyed by source label.
+     */
+    private static Map<Integer, Float> computeBBOverlapPercents(List<CpcUtils.ObjectInfo> sources,
+                                                                List<CpcUtils.ObjectInfo> partners) {
+        Map<Integer, Float> out = new LinkedHashMap<Integer, Float>();
+        for (CpcUtils.ObjectInfo src : sources) {
+            long srcVol = src.bbVolume();
+            float pct = 0f;
+            if (srcVol > 0) {
+                long bestInter = 0L;
+                for (CpcUtils.ObjectInfo partner : partners) {
+                    long inter = src.bbIntersectionVolume(partner);
+                    if (inter > bestInter) bestInter = inter;
+                }
+                pct = (float) ((double) bestInter / (double) srcVol * 100.0);
+            }
+            out.put(src.label, pct);
+        }
+        return out;
+    }
+
+    private static int countAtOrAbove(Map<Integer, Float> percents, double threshold) {
+        int count = 0;
+        for (Float v : percents.values()) {
+            if (v != null && v.doubleValue() >= threshold) count++;
+        }
+        return count;
+    }
+
+    /** Write BB overlap continuous % + threshold flag into a table, matched by Label. */
+    private void writeBBColocValuesForThisImage(
+            ij.measure.ResultsTable table, String sourceChannel, String partnerChannel,
+            Map<Integer, Float> percentByLabel, double threshold,
+            int scnIndex, String animalName, String hemisphere, String region, String roiLabel
+    ) {
+        String pctCol = bbColocPctCol(sourceChannel, partnerChannel);
+        String flagCol = bbColocFlagCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            int label = (int) table.getValue("Label", r);
+            Float pct = percentByLabel.get(label);
+            double value = pct != null ? pct.doubleValue() : 0.0;
+            table.setValue(pctCol, r, value);
+            table.setValue(flagCol, r, value >= threshold ? 1 : 0);
+        }
+    }
+
+    private void setBBColocZerosForThisImage(ij.measure.ResultsTable table, String sourceChannel,
+                                             String partnerChannel,
+                                             int scnIndex, String animalName, String hemisphere,
+                                             String region, String roiLabel) {
+        String pctCol = bbColocPctCol(sourceChannel, partnerChannel);
+        String flagCol = bbColocFlagCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            table.setValue(pctCol, r, 0);
+            table.setValue(flagCol, r, 0);
+        }
+    }
+
+    // ── Object Intensity Profiling (OIP) ──────────────────────────────
+
+    private boolean anyOipEnabled() {
+        return doRadialProfile || doMarginalProfile || doPrincipalAxisProfile
+                || doAngularProfile || doShellColoc || doWithinBoxCorr;
+    }
+
+    private OipConfig buildOipConfig() {
+        OipConfig c = new OipConfig();
+        c.doRadial = doRadialProfile;
+        c.doMarginal = doMarginalProfile;
+        c.doPrincipalAxis = doPrincipalAxisProfile;
+        c.doAngular = doAngularProfile;
+        c.doShell = doShellColoc;
+        c.doWithinBox = doWithinBoxCorr;
+        c.region = oipRegion;
+        c.intensityNorm = oipIntensityNorm;
+        c.radialBins = oipRadialBins;
+        c.angularBins = oipAngularBins;
+        c.shells = oipShells;
+        c.resampleN = oipResampleN;
+        c.boxPadPct = oipBoxPadPct;
+        c.ringThresholdPct = oipRingThresholdPct;
+        return c;
+    }
+
+    /** OIP per-partner scalar column: SOURCE_OIP&lt;metric&gt;_PARTNER (self-identifying, like BBColoc). */
+    private static String oipCol(String metric, String source, String partner) {
+        return source + "_OIP" + metric + "_" + partner;
+    }
+
+    /** Scalar metric stems emitted per enabled profile family (must match ObjectCsvColumnOrder). */
+    private List<String> oipMetricsForEnabled() {
+        List<String> m = new ArrayList<String>();
+        if (doRadialProfile) { m.add("RadialCoreEdge"); m.add("RadialPeakR"); m.add("RadialPolarity"); }
+        if (doAngularProfile) { m.add("RingCompleteness"); m.add("AngularUniformity"); }
+        if (doShellColoc) { m.add("ShellInner"); m.add("ShellMid"); m.add("ShellOuter"); }
+        if (doPrincipalAxisProfile) { m.add("PCMajorPolarity"); }
+        if (doWithinBoxCorr) { m.add("Pearson"); m.add("Manders"); }
+        return m;
+    }
+
+    private void ensureAllOipColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        List<String> metrics = oipMetricsForEnabled();
+        if (metrics.isEmpty()) return;
+        for (String src : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(src);
+            if (t == null || t.size() == 0) continue;
+            for (String partner : cfg.channelNames) {
+                for (String metric : metrics) {
+                    ensureOipColumn(t, oipCol(metric, src, partner));
+                }
+            }
+        }
+    }
+
+    /**
+     * Ensure an OIP scalar column exists, initialised to NaN for every row (not 0 like
+     * {@link #ensureCpcColumn}) so a column that is ensured but never written — e.g. a partner with
+     * no raw image, or an object whose profiling failed — reads as undefined, consistent with
+     * {@link #safeOip} preserving NaN.
+     */
+    private static void ensureOipColumn(ij.measure.ResultsTable t, String colName) {
+        if (t.getColumnIndex(colName) == ij.measure.ResultsTable.COLUMN_NOT_FOUND) {
+            for (int r = 0; r < t.size(); r++) {
+                t.setValue(colName, r, Double.NaN);
+            }
+        }
+    }
+
+    /**
+     * Object Intensity Profiling producer. For each source channel with objects, profiles every
+     * channel's raw intensity inside each object's bounding box (centred on the centroid) and writes
+     * the compact scalar descriptors into the source channel's table, matched by Label. The full
+     * curves are collected for {@link #writeOipOutputs()} (per-object + aggregate CSV + figures).
+     */
+    private void appendOipColumns(BinConfig cfg, boolean[] channelHasObjects,
+                                  Map<String, ij.measure.ResultsTable> channelTables, int scnIndex,
+                                  String animalName, String hemisphere, String region, String roiLabel) {
+        OipConfig oip = buildOipConfig();
+        if (!oip.anyProfileEnabled()) return;
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        Map<String, ImagePlus> raw = new LinkedHashMap<String, ImagePlus>();
+        for (String ch : cfg.channelNames) {
+            ImagePlus r = getRegisteredImage(ch + "_unfiltered");
+            if (r == null) r = getRegisteredImage(ch + "_filtered");
+            if (r != null) raw.put(ch, r);
+        }
+        if (raw.isEmpty()) return;
+
+        for (int a = 0; a < n; a++) {
+            String src = cfg.channelNames.get(a);
+            ImagePlus srcObj = getRegisteredImage(src + "_objects");
+            if (!(channelHasObjects[a] && srcObj != null)) continue;
+            ij.measure.ResultsTable t = channelTables.get(src);
+            if (t == null) continue;
+            try {
+                List<CpcUtils.ObjectInfo> objs = CpcUtils.extractObjects(srcObj);
+                Calibration cal = srcObj.getCalibration();
+                List<ObjectProfileResult> results =
+                        ObjectIntensityProfiler.profile(srcObj, raw, objs, src, cal, oip);
+                writeOipScalars(t, src, results, scnIndex, animalName, hemisphere, region, roiLabel);
+                if (!results.isEmpty()) {
+                    oipCollected.add(new ImageProfiles(animalName, hemisphere, region, roiLabel, results));
+                }
+                IJ.log("    - OIP: " + src + " profiled " + results.size() + " objects");
+            } catch (Exception e) {
+                IJ.log("    - OIP: " + src + " FAILED: " + e.getMessage());
+            }
+        }
+    }
+
+    private void writeOipScalars(ij.measure.ResultsTable table, String src,
+                                 List<ObjectProfileResult> results, int scnIndex, String animalName,
+                                 String hemisphere, String region, String roiLabel) {
+        Map<Integer, ObjectProfileResult> byLabel = new LinkedHashMap<Integer, ObjectProfileResult>();
+        for (ObjectProfileResult r : results) byLabel.put(r.label, r);
+        for (int row = 0; row < table.size(); row++) {
+            if (!matchesRowMetadata(table, row, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            int label = (int) table.getValue("Label", row);
+            ObjectProfileResult r = byLabel.get(label);
+            if (r == null) continue;
+            for (ObjectProfileResult.PartnerProfiles pf : r.byPartner.values()) {
+                String p = pf.partnerChannel;
+                if (doRadialProfile) {
+                    table.setValue(oipCol("RadialCoreEdge", src, p), row, safeOip(pf.radialCoreEdge));
+                    table.setValue(oipCol("RadialPeakR", src, p), row, safeOip(pf.radialPeakR));
+                    table.setValue(oipCol("RadialPolarity", src, p), row, safeOip(pf.radialPolarity));
+                }
+                if (doAngularProfile) {
+                    table.setValue(oipCol("RingCompleteness", src, p), row, safeOip(pf.ringCompleteness));
+                    table.setValue(oipCol("AngularUniformity", src, p), row, safeOip(pf.angularUniformity));
+                }
+                if (doShellColoc) {
+                    table.setValue(oipCol("ShellInner", src, p), row, safeOip(pf.shellInner));
+                    table.setValue(oipCol("ShellMid", src, p), row, safeOip(pf.shellMid));
+                    table.setValue(oipCol("ShellOuter", src, p), row, safeOip(pf.shellOuter));
+                }
+                if (doPrincipalAxisProfile) {
+                    table.setValue(oipCol("PCMajorPolarity", src, p), row, safeOip(pf.pcMajorPolarity));
+                }
+                if (doWithinBoxCorr) {
+                    table.setValue(oipCol("Pearson", src, p), row, safeOip(pf.withinBoxPearson));
+                    table.setValue(oipCol("Manders", src, p), row, safeOip(pf.withinBoxManders));
+                }
+            }
+        }
+    }
+
+    // Preserve NaN: an undefined scalar (e.g. core/edge ratio with an empty outer third, or a
+    // zero-variance correlation) must stay distinguishable from a true 0, matching the
+    // intensity-coloc columns.
+    private static double safeOip(double v) { return v; }
+
+    /**
+     * Write the full OIP curves once at the end of the run: per-object long CSV, then the aggregate
+     * CSV + figures rebuilt from that file on disk so they always match it. Runs even when no objects
+     * were profiled this run, so stale OIP artifacts are cleared on an overwrite run. In extend mode
+     * the per-object file is appended (kept consistent with the also-extended scalar columns).
+     */
+    private void writeOipOutputs(String directory, boolean extendExisting) {
+        try {
+            FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+            File tablesDir = layout.tablesObjectIntensityProfilingWriteDir();
+            File perObject = new File(tablesDir, ObjectProfileCsvWriter.PER_OBJECT_FILE);
+            File aggregate = new File(tablesDir, ObjectProfileCsvWriter.AGGREGATE_FILE);
+            File figuresDir = layout.analysisImagesObjectIntensityProfilingDir();
+            if (!anyOipEnabled()) {
+                // OIP disabled this run: on overwrite, clear stale OIP artifacts so they can't be
+                // consumed (e.g. by Spatial) or disagree with the OIP-free object CSVs; on extend,
+                // leave any prior OIP data intact.
+                if (!extendExisting) {
+                    perObject.delete();
+                    aggregate.delete();
+                    ObjectProfileFigureWriter.clearFigures(figuresDir);
+                }
+                return;
+            }
+            tablesDir.mkdirs();
+            if (!extendExisting) {
+                perObject.delete();
+                aggregate.delete();
+            }
+            synchronized (oipCollected) {
+                for (ImageProfiles ip : oipCollected) {
+                    ObjectProfileCsvWriter.appendPerObject(tablesDir, ip.animal, ip.hemisphere,
+                            ip.region, ip.roi, ip.results);
+                }
+            }
+            if (!perObject.isFile() || perObject.length() == 0L) {
+                aggregate.delete();
+                ObjectProfileFigureWriter.clearFigures(layout.analysisImagesObjectIntensityProfilingDir());
+                IJ.log("[FLASH] Object Intensity Profiling: no profiles produced this run.");
+                return;
+            }
+            // Rebuild aggregate + figures from the full per-object file so they always match it
+            // (covers overwrite and extend, and is the same path the Spatial consumer uses).
+            ProfileAggregator agg = ObjectProfileCsvReader.aggregateFromPerObject(perObject);
+            ObjectProfileCsvWriter.writeAggregated(tablesDir, agg);
+            if (oipGenerateFigures) {
+                ObjectProfileFigureWriter.writeFigures(figuresDir, agg, null);
+            } else {
+                // Figures turned off this run: remove any stale OIP figures from a previous run.
+                ObjectProfileFigureWriter.clearFigures(figuresDir);
+            }
+            // Persist the intent so a chained/standalone Spatial refresh honours figures-off.
+            ObjectProfileCsvWriter.writeFiguresIntent(tablesDir, oipGenerateFigures);
+            IJ.log("[FLASH] Object Intensity Profiling written to " + tablesDir.getPath());
+        } catch (Exception e) {
+            IJ.log("[FLASH] Object Intensity Profiling output failed: " + e.getMessage());
+        } finally {
+            oipCollected.clear();
+        }
+    }
+
+    private static final class ImageProfiles {
+        final String animal;
+        final String hemisphere;
+        final String region;
+        final String roi;
+        final List<ObjectProfileResult> results;
+        ImageProfiles(String animal, String hemisphere, String region, String roi,
+                      List<ObjectProfileResult> results) {
+            this.animal = animal;
+            this.hemisphere = hemisphere;
+            this.region = region;
+            this.roi = roi;
+            this.results = results;
+        }
+    }
+
+    // ── Bounding-Box centroid coincidence (Family A: BB-CPC) ──────────
+
+    /** BB-CPC coincidence flag column: SOURCE_BBCPCColoc_PARTNER. */
+    private String bbCpcColocCol(String source, String partner) {
+        return source + "_BBCPCColoc_" + partner;
+    }
+
+    /** BB-CPC contains-count column: SOURCE_BBCPCContains_PARTNER. */
+    private String bbCpcContainsCol(String source, String partner) {
+        return source + "_BBCPCContains_" + partner;
+    }
+
+    private void ensureAllBBCpcColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String src : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(src);
+            if (t == null || t.size() == 0) continue;
+            for (String tgt : cfg.channelNames) {
+                if (src.equals(tgt)) continue;
+                ensureCpcColumn(t, bbCpcColocCol(src, tgt));
+                ensureCpcColumn(t, bbCpcContainsCol(src, tgt));
+            }
+            ensureCpcColumn(t, src + "_BBCPCTargetsHit");
+            try {
+                t.getStringValue(src + "_BBCPCPattern", 0);
+            } catch (Exception e) {
+                t.setValue(src + "_BBCPCPattern", 0, "None");
+            }
+        }
+    }
+
+    /**
+     * BB-CPC colocalization (Family A). Geometric analogue of CPC: a source object's centroid inside
+     * a partner object's bounding box (BBCPCColoc), and the number of partner centroids inside this
+     * source object's box (BBCPCContains). Box ⊇ object, so BBCPCColoc is a superset of CPCColoc.
+     */
+    private void appendBBCpcColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        for (int a = 0; a < n; a++) {
+            ij.measure.ResultsTable aTable = channelTables.get(cfg.channelNames.get(a));
+            boolean aHas = channelHasObjects[a]
+                    && getRegisteredImage(cfg.channelNames.get(a) + "_objects") != null
+                    && aTable != null;
+            if (!aHas && aTable != null) {
+                for (int b = 0; b < n; b++) {
+                    if (b == a) continue;
+                    setBBCpcZerosForThisImage(aTable, cfg.channelNames.get(a), cfg.channelNames.get(b),
+                            scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        for (int a = 0; a < n; a++) {
+            String aChannel = cfg.channelNames.get(a);
+            ImagePlus aObjImg = getRegisteredImage(aChannel + "_objects");
+            boolean aHas = channelHasObjects[a] && aObjImg != null;
+            ij.measure.ResultsTable aTable = channelTables.get(aChannel);
+
+            for (int b = a + 1; b < n; b++) {
+                String bChannel = cfg.channelNames.get(b);
+                ImagePlus bObjImg = getRegisteredImage(bChannel + "_objects");
+                boolean bHas = channelHasObjects[b] && bObjImg != null;
+                ij.measure.ResultsTable bTable = channelTables.get(bChannel);
+
+                if (!aHas || !bHas) {
+                    if (aTable != null) setBBCpcZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBCpcZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    String emptyChannel = !aHas
+                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
+                            : bChannel;
+                    IJ.log("    - BB-CPC: " + aChannel + " vs " + bChannel + " skipped (no objects in " + emptyChannel + ")");
+                    continue;
+                }
+
+                try {
+                    List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aObjImg);
+                    List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bObjImg);
+
+                    // Coincidence: source centroid inside a partner box.
+                    List<CpcUtils.ObjectInfo> fwdA = CpcUtils.copyObjects(objectsA);
+                    CpcUtils.testBoundingBoxCoincidence(fwdA, objectsB);
+                    List<CpcUtils.ObjectInfo> revB = CpcUtils.copyObjects(objectsB);
+                    CpcUtils.testBoundingBoxCoincidence(revB, objectsA);
+
+                    Map<Integer, CpcUtils.ObjectInfo> fwdMapA = new LinkedHashMap<Integer, CpcUtils.ObjectInfo>();
+                    for (CpcUtils.ObjectInfo obj : fwdA) fwdMapA.put(obj.label, obj);
+                    Map<Integer, CpcUtils.ObjectInfo> revMapB = new LinkedHashMap<Integer, CpcUtils.ObjectInfo>();
+                    for (CpcUtils.ObjectInfo obj : revB) revMapB.put(obj.label, obj);
+
+                    // Contains: partner centroids inside this source's box (per source object).
+                    Map<Integer, Integer> containsCountA = CpcUtils.countCentroidsInBoxes(objectsA, objectsB);
+                    Map<Integer, Integer> containsCountB = CpcUtils.countCentroidsInBoxes(objectsB, objectsA);
+
+                    if (aTable != null) {
+                        writeBBCpcValuesForThisImage(aTable, aChannel, bChannel, fwdMapA, containsCountA,
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    if (bTable != null) {
+                        writeBBCpcValuesForThisImage(bTable, bChannel, aChannel, revMapB, containsCountB,
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+
+                    int hitAB = 0;
+                    for (CpcUtils.ObjectInfo obj : fwdA) if (obj.isColocalized()) hitAB++;
+                    int hitBA = 0;
+                    for (CpcUtils.ObjectInfo obj : revB) if (obj.isColocalized()) hitBA++;
+                    IJ.log("    - BB-CPC: " + aChannel + " vs " + bChannel
+                            + " (" + hitAB + "/" + objectsA.size() + " fwd, "
+                            + hitBA + "/" + objectsB.size() + " rev)");
+                } catch (Exception e) {
+                    IJ.log("    - BB-CPC: " + aChannel + " vs " + bChannel + " FAILED: " + e.getMessage());
+                    if (aTable != null) setBBCpcZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBCpcZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        appendBBCpcMultiTargetColumns(cfg, channelTables, scnIndex, animalName, hemisphere, region, roiLabel);
+    }
+
+    /** Write BB-CPC coloc flag + contains count into a table, matched by Label. */
+    private void writeBBCpcValuesForThisImage(
+            ij.measure.ResultsTable table, String sourceChannel, String partnerChannel,
+            Map<Integer, CpcUtils.ObjectInfo> resultsByLabel,
+            Map<Integer, Integer> containsCounts,
+            int scnIndex, String animalName, String hemisphere, String region, String roiLabel
+    ) {
+        String colocCol = bbCpcColocCol(sourceChannel, partnerChannel);
+        String containsCol = bbCpcContainsCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            int label = (int) table.getValue("Label", r);
+            CpcUtils.ObjectInfo info = resultsByLabel.get(label);
+            table.setValue(colocCol, r, info != null && info.isColocalized() ? 1 : 0);
+            Integer cc = containsCounts.get(label);
+            table.setValue(containsCol, r, cc != null ? cc : 0);
+        }
+    }
+
+    private void setBBCpcZerosForThisImage(ij.measure.ResultsTable table, String sourceChannel,
+                                           String partnerChannel,
+                                           int scnIndex, String animalName, String hemisphere,
+                                           String region, String roiLabel) {
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            table.setValue(bbCpcColocCol(sourceChannel, partnerChannel), r, 0);
+            table.setValue(bbCpcContainsCol(sourceChannel, partnerChannel), r, 0);
+        }
+    }
+
+    /**
+     * After all pairwise BB-CPC tests: BBCPCTargetsHit = # partner channels where BBCPCColoc==1;
+     * BBCPCPattern = joined partner names where BBCPCColoc==1.
+     */
+    private void appendBBCpcMultiTargetColumns(
+            BinConfig cfg,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex, String animalName, String hemisphere,
+            String region, String roiLabel
+    ) {
+        for (String aChannel : cfg.channelNames) {
+            ij.measure.ResultsTable table = channelTables.get(aChannel);
+            if (table == null) continue;
+
+            List<String> partners = new ArrayList<String>();
+            for (String other : cfg.channelNames) {
+                if (other.equals(aChannel)) continue;
+                partners.add(other);
+            }
+
+            for (int r = 0; r < table.size(); r++) {
+                if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+
+                int targetsHit = 0;
+                StringBuilder pattern = new StringBuilder();
+                for (String partner : partners) {
+                    try {
+                        int val = (int) table.getValue(bbCpcColocCol(aChannel, partner), r);
+                        if (val > 0) {
+                            targetsHit++;
+                            if (pattern.length() > 0) pattern.append(" + ");
+                            pattern.append(partner);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+                table.setValue(aChannel + "_BBCPCTargetsHit", r, targetsHit);
+                table.setValue(aChannel + "_BBCPCPattern", r, pattern.length() > 0 ? pattern.toString() : "None");
+            }
+        }
+    }
+
+    // ── Bounding-Box volume signal fill (Family B: BB-Vol) ────────────
+
+    /** Single-best partner fill %: SOURCE_BBVolColoc_PARTNER. */
+    private String bbVolPctCol(String source, String partner) {
+        return source + "_BBVolColoc_" + partner;
+    }
+
+    /** All-partner fill %: SOURCE_BBVolColocTotal_PARTNER. */
+    private String bbVolTotalCol(String source, String partner) {
+        return source + "_BBVolColocTotal_" + partner;
+    }
+
+    /** Thresholded fill flag (derives from single-best): SOURCE_BBVolColocN_PARTNER. */
+    private String bbVolFlagCol(String source, String partner) {
+        int thr = (int) getBBColocThreshold(source);
+        return source + "_BBVolColoc" + thr + "_" + partner;
+    }
+
+    private void ensureAllBBVolColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String aChannel : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(aChannel);
+            if (t == null || t.size() == 0) continue;
+            for (String bChannel : cfg.channelNames) {
+                if (aChannel.equals(bChannel)) continue;
+                ensureCpcColumn(t, bbVolPctCol(aChannel, bChannel));
+                ensureCpcColumn(t, bbVolTotalCol(aChannel, bChannel));
+                ensureCpcColumn(t, bbVolFlagCol(aChannel, bChannel));
+            }
+        }
+    }
+
+    /**
+     * BB volume signal fill (Family B). For each source object, count partner-channel object voxels
+     * inside the source bounding box: single-best partner object (BBVolColoc) and all partners
+     * (BBVolColocTotal), each as a percentage of the box volume; the flag derives from single-best.
+     * Geometry delegated to {@link BoundingBoxColoc} so Spatial can reuse it.
+     */
+    private void appendBBVolColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        for (int a = 0; a < n; a++) {
+            ij.measure.ResultsTable aTable = channelTables.get(cfg.channelNames.get(a));
+            boolean aHas = channelHasObjects[a]
+                    && getRegisteredImage(cfg.channelNames.get(a) + "_objects") != null
+                    && aTable != null;
+            if (!aHas && aTable != null) {
+                for (int b = 0; b < n; b++) {
+                    if (b == a) continue;
+                    setBBVolColocZerosForThisImage(aTable, cfg.channelNames.get(a), cfg.channelNames.get(b),
+                            scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        for (int a = 0; a < n; a++) {
+            String aChannel = cfg.channelNames.get(a);
+            ImagePlus aObjImg = getRegisteredImage(aChannel + "_objects");
+            boolean aHas = channelHasObjects[a] && aObjImg != null;
+            ij.measure.ResultsTable aTable = channelTables.get(aChannel);
+
+            for (int b = a + 1; b < n; b++) {
+                String bChannel = cfg.channelNames.get(b);
+                ImagePlus bObjImg = getRegisteredImage(bChannel + "_objects");
+                boolean bHas = channelHasObjects[b] && bObjImg != null;
+                ij.measure.ResultsTable bTable = channelTables.get(bChannel);
+
+                if (!aHas || !bHas) {
+                    if (aTable != null) setBBVolColocZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBVolColocZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    String emptyChannel = !aHas
+                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
+                            : bChannel;
+                    IJ.log("    - BBVol: " + aChannel + " vs " + bChannel + " skipped (no objects in " + emptyChannel + ")");
+                    continue;
+                }
+
+                try {
+                    List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aObjImg);
+                    List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bObjImg);
+
+                    // A boxes filled by B voxels; B boxes filled by A voxels.
+                    Map<Integer, float[]> aFill = BoundingBoxColoc.fillPercents(bObjImg, objectsA);
+                    Map<Integer, float[]> bFill = BoundingBoxColoc.fillPercents(aObjImg, objectsB);
+
+                    if (aTable != null) {
+                        writeBBVolColocValuesForThisImage(aTable, aChannel, bChannel, aFill,
+                                getBBColocThreshold(aChannel), scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    if (bTable != null) {
+                        writeBBVolColocValuesForThisImage(bTable, bChannel, aChannel, bFill,
+                                getBBColocThreshold(bChannel), scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+                    IJ.log("    - BBVol: " + aChannel + " vs " + bChannel
+                            + " (" + objectsA.size() + " / " + objectsB.size() + " objects)");
+                } catch (Exception e) {
+                    IJ.log("    - BBVol: " + aChannel + " vs " + bChannel + " FAILED: " + e.getMessage());
+                    if (aTable != null) setBBVolColocZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setBBVolColocZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+    }
+
+    /** Write BBVol single-best %, total %, and threshold flag into a table, matched by Label. */
+    private void writeBBVolColocValuesForThisImage(
+            ij.measure.ResultsTable table, String sourceChannel, String partnerChannel,
+            Map<Integer, float[]> fillByLabel, double threshold,
+            int scnIndex, String animalName, String hemisphere, String region, String roiLabel
+    ) {
+        String pctCol = bbVolPctCol(sourceChannel, partnerChannel);
+        String totalCol = bbVolTotalCol(sourceChannel, partnerChannel);
+        String flagCol = bbVolFlagCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            int label = (int) table.getValue("Label", r);
+            float[] fill = fillByLabel.get(label);
+            double best = fill != null ? fill[0] : 0.0;
+            double total = fill != null ? fill[1] : 0.0;
+            table.setValue(pctCol, r, best);
+            table.setValue(totalCol, r, total);
+            table.setValue(flagCol, r, best >= threshold ? 1 : 0);
+        }
+    }
+
+    private void setBBVolColocZerosForThisImage(ij.measure.ResultsTable table, String sourceChannel,
+                                                String partnerChannel,
+                                                int scnIndex, String animalName, String hemisphere,
+                                                String region, String roiLabel) {
+        String pctCol = bbVolPctCol(sourceChannel, partnerChannel);
+        String totalCol = bbVolTotalCol(sourceChannel, partnerChannel);
+        String flagCol = bbVolFlagCol(sourceChannel, partnerChannel);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            table.setValue(pctCol, r, 0);
+            table.setValue(totalCol, r, 0);
+            table.setValue(flagCol, r, 0);
+        }
+    }
+
+    private void ensureAllColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String aChannel : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(aChannel);
+            if (t == null) continue;
+
+            for (String bChannel : cfg.channelNames) {
+                if (aChannel.equals(bChannel)) continue;
+                String overlapCol = colocPercentCol(bChannel);
+                String colocCol = volColocCol(aChannel, bChannel);
+
+                // Ensure column exists by setting a value in row 0 if present
+                if (t.size() > 0) {
+                    try {
+                        t.setValue(overlapCol, 0, t.getValue(overlapCol, 0));
+                    } catch (Exception e) {
+                        t.setValue(overlapCol, 0, 0);
+                    }
+                    try {
+                        t.setValue(colocCol, 0, t.getValue(colocCol, 0));
+                    } catch (Exception e) {
+                        t.setValue(colocCol, 0, 0);
+                    }
+                } else {
+                    // IMPORTANT: Do not create a dummy row here.
+                    // Zero-object channels must stay rowless; otherwise summary aggregation
+                    // treats the placeholder as a real object.
+                }
+            }
+        }
+    }
+
+    // ── CPC (Centre-Particle Coincidence) colocalization ──────────────
+
+    private void ensureAllIntensityColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String source : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(source);
+            if (t == null || t.size() == 0) continue;
+
+            for (String partner : cfg.channelNames) {
+                if (source.equals(partner)) continue;
+                ensureIntensityColocColumn(t, objPearsonCol(source, partner));
+                ensureIntensityColocColumn(t, objMandersM1Col(source, partner));
+                ensureIntensityColocColumn(t, objMandersM2Col(source, partner));
+                ensureIntensityColocColumn(t, objCostesTaCol(source, partner));
+                ensureIntensityColocColumn(t, objCostesTbCol(source, partner));
+                ensureIntensityColocColumn(t, objPearsonThresholdedCol(source, partner));
+                ensureIntensityColocColumn(t, objCostesPCol(source, partner));
+                ensureIntensityColocColumn(t, roiCostesTaCol(source, partner));
+                ensureIntensityColocColumn(t, roiCostesTbCol(source, partner));
+                ensureIntensityColocColumn(t, roiCostesPCol(source, partner));
+            }
+        }
+    }
+
+    private void ensureIntensityColocColumn(ij.measure.ResultsTable table, String colName) {
+        if (table == null || table.size() == 0) return;
+        if (table.getColumnIndex(colName) < 0) {
+            table.setValue(colName, 0, "NaN");
+        }
+    }
+
+    private void ensureAllCpcColocColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        for (String src : cfg.channelNames) {
+            ij.measure.ResultsTable t = channelTables.get(src);
+            if (t == null || t.size() == 0) continue;
+
+            for (String tgt : cfg.channelNames) {
+                if (src.equals(tgt)) continue;
+                ensureCpcColumn(t, src + "_CPCColoc_" + tgt);
+
+                ensureCpcColumn(t, src + "_CPCContains_" + tgt);
+            }
+            ensureCpcColumn(t, src + "_CPCTargetsHit");
+
+            try {
+                t.getStringValue(src + "_CPCPattern", 0);
+            } catch (Exception e) {
+                t.setValue(src + "_CPCPattern", 0, "None");
+            }
+        }
+    }
+
+    private static void ensureCpcColumn(ij.measure.ResultsTable t, String colName) {
+        try {
+            t.setValue(colName, 0, t.getValue(colName, 0));
+        } catch (Exception e) {
+            t.setValue(colName, 0, 0);
+        }
+    }
+
+    /**
+     * CPC colocalization: for each channel pair, extract objects from label images,
+     * test whether each object's centroid falls inside a partner object, and write
+     * CPC Coloc/Partner/Contains columns to the channel tables.
+     */
+    private void appendCpcColocColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        if (n == 0) return;
+
+        // Zero-fill CPC columns for channels with no objects
+        for (int a = 0; a < n; a++) {
+            ij.measure.ResultsTable aTable = channelTables.get(cfg.channelNames.get(a));
+            boolean aHas = channelHasObjects[a]
+                    && getRegisteredImage(cfg.channelNames.get(a) + "_objects") != null
+                    && aTable != null;
+            if (!aHas && aTable != null) {
+                for (int b = 0; b < n; b++) {
+                    if (b == a) continue;
+                    setCpcZerosForThisImage(aTable, cfg.channelNames.get(a), cfg.channelNames.get(b), scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        // Run CPC once per unique pair
+        for (int a = 0; a < n; a++) {
+            String aChannel = cfg.channelNames.get(a);
+            ImagePlus aObjImg = getRegisteredImage(aChannel + "_objects");
+            boolean aHas = channelHasObjects[a] && aObjImg != null;
+            ij.measure.ResultsTable aTable = channelTables.get(aChannel);
+
+            for (int b = a + 1; b < n; b++) {
+                String bChannel = cfg.channelNames.get(b);
+                ImagePlus bObjImg = getRegisteredImage(bChannel + "_objects");
+                boolean bHas = channelHasObjects[b] && bObjImg != null;
+                ij.measure.ResultsTable bTable = channelTables.get(bChannel);
+
+                if (!aHas || !bHas) {
+                    if (aTable != null) setCpcZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setCpcZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    String emptyChannel = !aHas
+                            ? (!bHas ? aChannel + "+" + bChannel : aChannel)
+                            : bChannel;
+                    IJ.log("    - CPC: " + aChannel + " vs " + bChannel + " skipped (no objects in " + emptyChannel + ")");
+                    continue;
+                }
+
+                try {
+                    // Extract objects from label images (geometric centroids in pixel coords)
+                    List<CpcUtils.ObjectInfo> objectsA = CpcUtils.extractObjects(aObjImg);
+                    List<CpcUtils.ObjectInfo> objectsB = CpcUtils.extractObjects(bObjImg);
+
+                    // Forward test: A centroids in B label image
+                    List<CpcUtils.ObjectInfo> fwdA = CpcUtils.copyObjects(objectsA);
+                    CpcUtils.testCoincidence(fwdA, bObjImg);
+
+                    // Reverse test: B centroids in A label image
+                    List<CpcUtils.ObjectInfo> revB = CpcUtils.copyObjects(objectsB);
+                    CpcUtils.testCoincidence(revB, aObjImg);
+
+                    // Build label → result maps
+                    Map<Integer, CpcUtils.ObjectInfo> fwdMapA = new LinkedHashMap<Integer, CpcUtils.ObjectInfo>();
+                    for (CpcUtils.ObjectInfo obj : fwdA) fwdMapA.put(obj.label, obj);
+
+                    Map<Integer, CpcUtils.ObjectInfo> revMapB = new LinkedHashMap<Integer, CpcUtils.ObjectInfo>();
+                    for (CpcUtils.ObjectInfo obj : revB) revMapB.put(obj.label, obj);
+
+                    // Containment: count how many B centroids fell inside each A object
+                    Map<Integer, Integer> containsCountA = new LinkedHashMap<Integer, Integer>();
+                    for (CpcUtils.ObjectInfo obj : revB) {
+                        if (obj.partnerLabel > 0) {
+                            Integer prev = containsCountA.get(obj.partnerLabel);
+                            containsCountA.put(obj.partnerLabel, (prev != null ? prev : 0) + 1);
+                        }
+                    }
+
+                    // Containment: count how many A centroids fell inside each B object
+                    Map<Integer, Integer> containsCountB = new LinkedHashMap<Integer, Integer>();
+                    for (CpcUtils.ObjectInfo obj : fwdA) {
+                        if (obj.partnerLabel > 0) {
+                            Integer prev = containsCountB.get(obj.partnerLabel);
+                            containsCountB.put(obj.partnerLabel, (prev != null ? prev : 0) + 1);
+                        }
+                    }
+
+                    // Write to A's table
+                    if (aTable != null) {
+                        writeCpcValuesForThisImage(aTable, aChannel, bChannel, fwdMapA, containsCountA,
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+
+                    // Write to B's table
+                    if (bTable != null) {
+                        writeCpcValuesForThisImage(bTable, bChannel, aChannel, revMapB, containsCountB,
+                                scnIndex, animalName, hemisphere, region, roiLabel);
+                    }
+
+                    int cpcCountAB = 0;
+                    for (CpcUtils.ObjectInfo obj : fwdA) if (obj.isColocalized()) cpcCountAB++;
+                    int cpcCountBA = 0;
+                    for (CpcUtils.ObjectInfo obj : revB) if (obj.isColocalized()) cpcCountBA++;
+                    IJ.log("    - CPC: " + aChannel + " vs " + bChannel
+                            + " (" + cpcCountAB + "/" + objectsA.size() + " fwd, "
+                            + cpcCountBA + "/" + objectsB.size() + " rev)");
+
+                } catch (Exception e) {
+                    IJ.log("    - CPC: " + aChannel + " vs " + bChannel + " FAILED: " + e.getMessage());
+                    if (aTable != null) setCpcZerosForThisImage(aTable, aChannel, bChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                    if (bTable != null) setCpcZerosForThisImage(bTable, bChannel, aChannel, scnIndex, animalName, hemisphere, region, roiLabel);
+                }
+            }
+        }
+
+        // Multi-target columns (after all pairwise tests complete)
+        appendCpcMultiTargetColumns(cfg, channelTables, scnIndex, animalName, hemisphere, region, roiLabel);
+    }
+
+    /**
+     * Write CPC results for one channel direction into the table, matched by Label column.
+     */
+    private void writeCpcValuesForThisImage(
+            ij.measure.ResultsTable table, String sourceChannel, String partnerChannel,
+            Map<Integer, CpcUtils.ObjectInfo> resultsByLabel,
+            Map<Integer, Integer> containsCounts,
+            int scnIndex, String animalName, String hemisphere,
+            String region, String roiLabel
+    ) {
+        String colocCol = sourceChannel + "_CPCColoc_" + partnerChannel;
+        String containsCol = sourceChannel + "_CPCContains_" + partnerChannel;
+
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+
+            int label = (int) table.getValue("Label", r);
+            CpcUtils.ObjectInfo info = resultsByLabel.get(label);
+            table.setValue(colocCol, r, info != null && info.isColocalized() ? 1 : 0);
+
+            Integer cc = containsCounts.get(label);
+            table.setValue(containsCol, r, cc != null ? cc : 0);
+        }
+    }
+
+    /**
+     * Zero-fill CPC columns for a source/partner channel pair.
+     */
+    private void setCpcZerosForThisImage(ij.measure.ResultsTable table, String sourceChannel,
+                                         String partnerChannel,
+                                         int scnIndex, String animalName, String hemisphere,
+                                         String region, String roiLabel) {
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            table.setValue(sourceChannel + "_CPCColoc_" + partnerChannel, r, 0);
+            table.setValue(sourceChannel + "_CPCContains_" + partnerChannel, r, 0);
+        }
+    }
+
+    /**
+     * After all pairwise CPC tests, compute multi-target columns:
+     * CPC Targets Hit = count of partner channels where CPC Coloc = 1
+     * CPC Pattern = joined channel names where CPC Coloc = 1 (e.g. "GFAP + NeuN")
+     */
+    private void appendCpcMultiTargetColumns(
+            BinConfig cfg,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex, String animalName, String hemisphere,
+            String region, String roiLabel
+    ) {
+        for (String aChannel : cfg.channelNames) {
+            ij.measure.ResultsTable table = channelTables.get(aChannel);
+            if (table == null) continue;
+
+            // Collect partner channel names for this channel
+            List<String> partners = new ArrayList<String>();
+            for (String other : cfg.channelNames) {
+                if (other.equals(aChannel)) continue;
+                partners.add(other);
+            }
+
+            for (int r = 0; r < table.size(); r++) {
+                if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+
+                int targetsHit = 0;
+                StringBuilder pattern = new StringBuilder();
+
+                for (String partner : partners) {
+                    try {
+                        int val = (int) table.getValue(aChannel + "_CPCColoc_" + partner, r);
+                        if (val > 0) {
+                            targetsHit++;
+                            if (pattern.length() > 0) pattern.append(" + ");
+                            pattern.append(partner);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+
+                table.setValue(aChannel + "_CPCTargetsHit", r, targetsHit);
+                table.setValue(aChannel + "_CPCPattern", r, pattern.length() > 0 ? pattern.toString() : "None");
+            }
+        }
+    }
+
+    // ── Marker-centroid object counting ("resolve fused objects") ────────────
+
+    private String overlapCountCol(String target, String marker) { return target + "_OverlapCount_" + marker; }
+    private String hasMarkerCol(String target, String marker) { return target + "_HasMarker_" + marker; }
+    private String isClusterCol(String target, String marker) { return target + "_IsCluster_" + marker; }
+
+    /** Resolved marker channel name if the feature is on (non-empty, non-None, present in config), else null. */
+    private String resolveClusterMarker(BinConfig cfg) {
+        if (clusterMarkerChannel == null) return null;
+        String m = clusterMarkerChannel.trim();
+        if (m.isEmpty() || OVERLAP_MARKER_NONE.equals(m)) return null;
+        if (cfg != null && !cfg.channelNames.contains(m)) return null;
+        return m;
+    }
+
+    /** True when {@code channel} is an enabled cluster-resolution target for {@code marker} (never the marker itself). */
+    private boolean isClusterTarget(String channel, String marker) {
+        if (channel == null || channel.equals(marker)) return false;
+        Boolean on = clusterTargets.get(channel);
+        return on != null && on.booleanValue();
+    }
+
+    /** True when a valid marker is chosen and at least one channel is enabled as a target. */
+    private boolean overlapCountEnabled(BinConfig cfg) {
+        String marker = resolveClusterMarker(cfg);
+        if (marker == null || cfg == null) return false;
+        for (String ch : cfg.channelNames) {
+            if (isClusterTarget(ch, marker)) return true;
+        }
+        return false;
+    }
+
+    private void ensureAllOverlapCountColumns(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables) {
+        String marker = resolveClusterMarker(cfg);
+        if (marker == null) return;
+        for (String tgt : cfg.channelNames) {
+            if (!isClusterTarget(tgt, marker)) continue;
+            ij.measure.ResultsTable t = channelTables.get(tgt);
+            if (t == null || t.size() == 0) continue;
+            ensureCpcColumn(t, overlapCountCol(tgt, marker));
+            ensureCpcColumn(t, hasMarkerCol(tgt, marker));
+            ensureCpcColumn(t, isClusterCol(tgt, marker));
+        }
+    }
+
+    /**
+     * Marker-centroid object counting ("resolve fused objects"). For each enabled target channel,
+     * count how many {@link #clusterMarkerChannel} centroids land on each target object's voxels
+     * (voxel-precise, no tolerance) and write the count plus two derived flags, matched by Label:
+     * <ul>
+     *   <li>{@code TARGET_OverlapCount_MARKER} — # marker centroids inside the object (0 allowed),</li>
+     *   <li>{@code TARGET_HasMarker_MARKER} — 1 if &ge;1 marker inside (lets users drop marker-free objects),</li>
+     *   <li>{@code TARGET_IsCluster_MARKER} — 1 if &ge;2 markers inside (the object is a fused cluster).</li>
+     * </ul>
+     * One direction only (marker &rarr; targets); the marker is never its own target. Geometry is
+     * delegated to {@link CpcUtils#countCentroidsInLabels} so Spatial reuses the identical logic, and
+     * the count equals the existing voxel-level {@code _CPCContains_} value. Stateless per target, so
+     * it is safe inside the parallel per-image workers.
+     */
+    private void appendOverlapCountColumns(
+            BinConfig cfg,
+            boolean[] channelHasObjects,
+            Map<String, ij.measure.ResultsTable> channelTables,
+            int scnIndex,
+            String animalName,
+            String hemisphere,
+            String region,
+            String roiLabel
+    ) {
+        String marker = resolveClusterMarker(cfg);
+        if (marker == null) return;
+
+        int markerIdx = cfg.channelNames.indexOf(marker);
+        ImagePlus markerImg = getRegisteredImage(marker + "_objects");
+        boolean markerHas = markerIdx >= 0
+                && channelHasObjects != null && markerIdx < channelHasObjects.length
+                && channelHasObjects[markerIdx] && markerImg != null;
+        List<CpcUtils.ObjectInfo> markerObjs = markerHas ? CpcUtils.extractObjects(markerImg) : null;
+
+        int n = Math.min(cfg.numChannels(), channelHasObjects != null ? channelHasObjects.length : 0);
+        for (int t = 0; t < n; t++) {
+            String target = cfg.channelNames.get(t);
+            if (!isClusterTarget(target, marker)) continue;
+            ij.measure.ResultsTable table = channelTables.get(target);
+            if (table == null) continue;
+
+            ImagePlus targetImg = getRegisteredImage(target + "_objects");
+            boolean targetHas = channelHasObjects[t] && targetImg != null;
+
+            if (!markerHas || !targetHas || markerObjs == null) {
+                setOverlapZerosForThisImage(table, target, marker, scnIndex, animalName, hemisphere, region, roiLabel);
+                IJ.log("    - Overlap count: " + target + " vs marker " + marker
+                        + " skipped (no objects in " + (!markerHas ? marker : target) + ")");
+                continue;
+            }
+
+            try {
+                Map<Integer, Integer> counts = CpcUtils.countCentroidsInLabels(markerObjs, targetImg);
+                writeOverlapValuesForThisImage(table, target, marker, counts,
+                        scnIndex, animalName, hemisphere, region, roiLabel);
+                int total = 0, fused = 0;
+                for (Integer c : counts.values()) { total += c; if (c >= 2) fused++; }
+                IJ.log("    - Overlap count: " + target + " vs marker " + marker
+                        + " (" + total + " " + marker + " centroids in " + counts.size()
+                        + " objects, " + fused + " fused)");
+            } catch (Exception e) {
+                IJ.log("    - Overlap count: " + target + " vs marker " + marker + " FAILED: " + e.getMessage());
+                setOverlapZerosForThisImage(table, target, marker, scnIndex, animalName, hemisphere, region, roiLabel);
+            }
+        }
+    }
+
+    /** Write OverlapCount + HasMarker + IsCluster into a target table, matched by Label. */
+    private void writeOverlapValuesForThisImage(
+            ij.measure.ResultsTable table, String target, String marker,
+            Map<Integer, Integer> counts,
+            int scnIndex, String animalName, String hemisphere, String region, String roiLabel
+    ) {
+        String countCol = overlapCountCol(target, marker);
+        String hasCol = hasMarkerCol(target, marker);
+        String clusterCol = isClusterCol(target, marker);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            int label = (int) table.getValue("Label", r);
+            Integer cc = counts.get(label);
+            int c = cc != null ? cc.intValue() : 0;
+            table.setValue(countCol, r, c);
+            table.setValue(hasCol, r, c >= 1 ? 1 : 0);
+            table.setValue(clusterCol, r, c >= 2 ? 1 : 0);
+        }
+    }
+
+    private void setOverlapZerosForThisImage(
+            ij.measure.ResultsTable table, String target, String marker,
+            int scnIndex, String animalName, String hemisphere, String region, String roiLabel
+    ) {
+        String countCol = overlapCountCol(target, marker);
+        String hasCol = hasMarkerCol(target, marker);
+        String clusterCol = isClusterCol(target, marker);
+        for (int r = 0; r < table.size(); r++) {
+            if (!matchesRowMetadata(table, r, scnIndex, animalName, hemisphere, region, roiLabel)) continue;
+            table.setValue(countCol, r, 0);
+            table.setValue(hasCol, r, 0);
+            table.setValue(clusterCol, r, 0);
+        }
+    }
+
+    private static String getLogText() {
+        Frame logFrame = WindowManager.getFrame("Log");
+        if (logFrame instanceof TextWindow) {
+            return ((TextWindow) logFrame).getTextPanel().getText();
+        }
+        return null;
+    }
+
+    private static void restoreLogText(String savedText) {
+        if (savedText == null) {
+            IJ.log("\\Clear");
+            return;
+        }
+        IJ.log("\\Clear");
+        for (String line : savedText.split("\n")) {
+            IJ.log(line);
+        }
+    }
+
+    private static int parseInteractionCount(String logBefore, String logAfter) {
+        if (logAfter == null) return 0;
+        // Find lines added by 3D MultiColoc
+        String added = logBefore == null ? logAfter : logAfter.substring(logBefore.length());
+        // Look for pattern like "X convergent convergences" or "X interactions" in the added text
+        for (String line : added.split("\n")) {
+            String trimmed = line.trim().toLowerCase(Locale.ROOT);
+            // 3D MultiColoc typically logs "N convergent convergences found"
+            java.util.regex.Matcher m = MULTICOLOC_INTERACTION_COUNT_PATTERN.matcher(trimmed);
+            if (m.find()) {
+                try {
+                    return Integer.parseInt(m.group(1));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static boolean endsWithDigit(String value) {
+        return value != null
+                && !value.isEmpty()
+                && Character.isDigit(value.charAt(value.length() - 1));
+    }
+
+    private AnalysisProgressReporter createProgressReporter(String analysisName, int totalUnits) {
+        return AnalysisProgressReporter.create(analysisName, totalUnits,
+                AnalysisProgressReporter.imageJSink(),
+                new AnalysisProgressReporter.Recorder() {
+                    @Override public void recordProgressSnapshot(Map<String, Object> snapshot) {
+                        if (runRecordContext != null) {
+                            runRecordContext.recordProgressSnapshot(snapshot);
+                        }
+                    }
+                });
+    }
+
+    private int countPlannedObjectRoiTasks(int totalImages, RoiSetData[] roiSets) {
+        if (totalImages <= 0 || roiSets == null || roiSets.length == 0) {
+            return 0;
+        }
+        int count = 0;
+        boolean previousVerbose = verboseLogging;
+        try {
+            verboseLogging = false;
+            for (int imageIndex = 0; imageIndex < totalImages; imageIndex++) {
+                for (RoiSetData roiSet : roiSets) {
+                    RegionBinding binding = resolveRegionForImage(roiSet, imageIndex);
+                    if (binding == null || !binding.skip) {
+                        count++;
+                    }
+                }
+            }
+        } finally {
+            verboseLogging = previousVerbose;
+        }
+        return count;
+    }
+
+    private AnalysisProgressReporter.WorkHandle beginObjectImageProgress(int scnIndex,
+                                                                         int totalImages,
+                                                                         String label,
+                                                                         String detail) {
+        String safeLabel = label == null || label.trim().isEmpty()
+                ? "image " + scnIndex + "/" + totalImages
+                : label;
+        AnalysisProgressReporter.WorkHandle handle = objectProgressReporter.begin(
+                "image " + scnIndex + "/" + totalImages + ": " + safeLabel,
+                detail);
+        objectImageProgress.set(handle);
+        return handle;
+    }
+
+    private void completeObjectImageProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = objectImageProgress.get();
+        if (handle != null) {
+            objectProgressReporter.complete(handle, summary);
+            objectImageProgress.remove();
+        }
+    }
+
+    private void failObjectImageProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = objectImageProgress.get();
+        if (handle != null) {
+            objectProgressReporter.fail(handle, summary);
+            objectImageProgress.remove();
+        }
+    }
+
+    private AnalysisProgressReporter.WorkHandle beginObjectRoiProgress(int scnIndex,
+                                                                       int totalImages,
+                                                                       String imageLabel,
+                                                                       String roiLabel,
+                                                                       String detail) {
+        StringBuilder label = new StringBuilder();
+        label.append("image ").append(scnIndex).append("/").append(totalImages);
+        if (imageLabel != null && !imageLabel.trim().isEmpty()) {
+            label.append(": ").append(imageLabel.trim());
+        }
+        if (roiLabel != null && !roiLabel.trim().isEmpty()) {
+            label.append(" | ROI ").append(roiLabel.trim());
+        }
+        AnalysisProgressReporter.WorkHandle handle =
+                objectProgressReporter.begin(label.toString(), detail);
+        objectRoiProgress.set(handle);
+        return handle;
+    }
+
+    private void completeObjectRoiProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = objectRoiProgress.get();
+        if (handle != null) {
+            objectProgressReporter.complete(handle, summary);
+            objectRoiProgress.remove();
+        }
+    }
+
+    private void failObjectRoiProgress(String summary) {
+        AnalysisProgressReporter.WorkHandle handle = objectRoiProgress.get();
+        if (handle != null) {
+            objectProgressReporter.fail(handle, summary);
+            objectRoiProgress.remove();
+        }
+    }
+
+    private void updateObjectProgress(String detail) {
+        AnalysisProgressReporter.WorkHandle handle = objectRoiProgress.get();
+        if (handle == null) {
+            handle = objectImageProgress.get();
+        }
+        if (handle != null) {
+            objectProgressReporter.update(handle, detail);
+        }
+    }
+
+    private AnalysisRunContext.InputHandle recordInputStart(File source, int seriesIndex) {
+        if (runRecordContext == null) {
+            return null;
+        }
+        return runRecordContext.recordInputStart(source, seriesIndex, null);
+    }
+
+    private void recordInputEnd(AnalysisRunContext.InputHandle inputHandle,
+                                String status,
+                                long startedMillis) {
+        if (runRecordContext != null && inputHandle != null) {
+            runRecordContext.recordInputEnd(inputHandle, status,
+                    Math.max(0L, System.currentTimeMillis() - startedMillis));
+        }
+    }
+
+    private void recordOutput(File file, String kind) {
+        if (runRecordContext != null && file != null) {
+            runRecordContext.recordOutput(file, kind);
+        }
+    }
+
+    private void recordOutputIfExists(File file, String kind) {
+        if (file != null && file.isFile()) {
+            recordOutput(file, kind);
+        }
+    }
+
+    private void recordWarn(String message) {
+        if (runRecordContext != null) {
+            runRecordContext.warn(message);
+        }
+    }
+
+    private void recordError(String message, Throwable t) {
+        if (runRecordContext != null) {
+            runRecordContext.error(message, t);
+        }
+    }
+
+    private DeferredImageSupplier wrapInputSupplier(String directory, final DeferredImageSupplier rawSupplier) throws Exception {
+        if (rawSupplier == null) return null;
+
+        final DeconvRouting routing = this.deconvRouting;
+        final ExpectedDeconvParams expectedParams = this.expectedDeconvParams;
+        final DeconvRoutingGroup group = DeconvRoutingGroup.ANALYSIS;
+        final File rootDir = new File(directory);
+        return new DeferredImageSupplier(rawSupplier) {
+            @Override
+            public ImagePlus openSeries(int seriesIndex) throws Exception {
+                return openResolved(seriesIndex, false);
+            }
+
+            @Override
+            public ImagePlus openSeriesMaterialized(int seriesIndex) throws Exception {
+                return openResolved(seriesIndex, true);
+            }
+
+            private ImagePlus openRaw(int seriesIndex, boolean materialized) throws Exception {
+                return materialized
+                        ? rawSupplier.openSeriesMaterialized(seriesIndex)
+                        : rawSupplier.openSeries(seriesIndex);
+            }
+
+            private ImagePlus openResolved(int seriesIndex, boolean materialized) throws Exception {
+                File source = null;
+                try {
+                    source = rawSupplier.getContainerFileForSeries(seriesIndex);
+                } catch (Exception ignored) {
+                    source = rawSupplier.getContainerFile();
+                }
+                AnalysisRunContext.InputHandle input = recordInputStart(source, seriesIndex + 1);
+                long started = System.currentTimeMillis();
+                try {
+                    File container = rawSupplier.getContainerFileForSeries(seriesIndex);
+                    String seriesName = rawSupplier.getSeriesName(seriesIndex);
+                    String baseName = baseNameForSeries(seriesName, seriesIndex);
+
+                    // Fully-raw group: exact native raw path (preserves bit depth and the
+                    // virtual/materialized choice; byte-identical to today).
+                    if (routing == null || !routing.groupUsesDeconv(group)) {
+                        ImagePlus imp = openRaw(seriesIndex, materialized);
+                        recordInputEnd(input, imp == null ? "skipped" : "processed", started);
+                        return imp;
+                    }
+
+                    // The group reads deconvolution for at least one channel: compose per channel via
+                    // the Stage 14 layer (merged fast path for default routing, per-channel compose on
+                    // divergence). The consumer applies its own Z-subset downstream, so request full
+                    // depth (zStart=0,zEnd=0) here and do NOT double-crop.
+                    ImagePlus composed = null;
+                    try {
+                        composed = DeconvolvedInputResolver.resolveRoutedInput(
+                                rootDir, rawSupplier, container, baseName, seriesIndex,
+                                routing, group, expectedParams, /*zStart*/ 0, /*zEnd*/ 0);
+                    } catch (Exception e) {
+                        String msg = "3D Object Analysis: routed input composition failed for series "
+                                + (seriesIndex + 1) + " - using raw. " + e.getMessage();
+                        IJ.log("[Deconv] " + msg);
+                        recordWarn(msg);
+                    }
+                    if (composed != null) {
+                        composed.setTitle(expectedSeriesTitle(rawSupplier, container, seriesName, seriesIndex));
+                        recordInputEnd(input, "processed", started);
+                        return composed;
+                    }
+
+                    // Missing/failed mirror: never crash — fall back to the native raw open.
+                    ImagePlus imp = openRaw(seriesIndex, materialized);
+                    recordInputEnd(input, imp == null ? "skipped" : "processed", started);
+                    return imp;
+                } catch (Exception e) {
+                    recordInputEnd(input, "failed", started);
+                    recordError("Failed to open input series " + (seriesIndex + 1), e);
+                    throw e;
+                }
+            }
+        };
+    }
+
+    private static String baseNameForSeries(String seriesName, int seriesIndex) {
+        String baseName = ImageNameParser.extractBioFormatsSeriesName(seriesName);
+        if (baseName == null || baseName.trim().isEmpty()) {
+            return "Series_" + (seriesIndex + 1);
+        }
+        return baseName.trim();
+    }
+
+    private static String expectedSeriesTitle(DeferredImageSupplier supplier,
+                                              File lifFile,
+                                              String seriesName,
+                                              int seriesIndex) {
+        if (supplier != null && supplier.getMode() == DeferredImageSupplier.Mode.TIFF_FOLDER
+                && seriesName != null && !seriesName.trim().isEmpty()) {
+            return seriesName.trim();
+        }
+        return expectedSeriesTitle(lifFile, seriesName, seriesIndex);
+    }
+
+    private static String expectedSeriesTitle(File lifFile, String seriesName, int seriesIndex) {
+        String normalized = ImageNameParser.extractBioFormatsSeriesName(seriesName);
+        if (normalized == null || normalized.trim().isEmpty()) {
+            normalized = "Series_" + (seriesIndex + 1);
+        }
+        String container = lifFile == null ? "" : lifFile.getName();
+        return container.isEmpty() ? normalized : container + " - " + normalized;
+    }
+
+    private ImagePlus applyConfiguredZSliceSubset(BinConfig cfg, int seriesIndex, ImagePlus imp, String contextLabel) {
+        if (imp == null || cfg == null || !cfg.usesZSliceSubset()) return imp;
+        ImagePlus subset = ZSliceOps.applyConfiguredRange(imp, cfg, seriesIndex, contextLabel);
+        if (subset != null && subset != imp) {
+            imp.changes = false;
+            imp.close();
+            imp.flush();
+        }
+        return subset;
+    }
+
+    /**
+     * Returns {@code true} when every expected per-channel output CSV
+     * already exists in the output directory.  Used by the whole-analysis
+     * pre-scan to skip the entire run before loading any pixel data.
+     */
+    static boolean allOutputCsvsExist(File outDir, List<String> channelNames) {
+        for (String chName : channelNames) {
+            if (!objectOutputCsv(outDir, chName).exists()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean allObjectOutputCsvsExist(String directory, List<String> channelNames) {
+        if (channelNames == null) {
+            return false;
+        }
+        for (String chName : channelNames) {
+            if (existingObjectOutputCsv(directory, chName) == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static List<File> existingObjectOutputCsvs(String directory, List<String> channelNames) {
+        List<File> existing = new ArrayList<File>();
+        Set<String> seenPaths = new LinkedHashSet<String>();
+        if (channelNames == null) {
+            return existing;
+        }
+        for (String chName : channelNames) {
+            File csv = existingObjectOutputCsv(directory, chName);
+            if (csv == null) continue;
+            String path = csv.getAbsolutePath();
+            if (seenPaths.add(path)) {
+                existing.add(csv);
+            }
+        }
+        return existing;
+    }
+
+    static File existingObjectOutputCsv(String directory, String channelName) {
+        for (File dir : objectCsvReadDirs(directory)) {
+            File csv = objectOutputCsv(dir, channelName);
+            if (csv.isFile()) {
+                return csv;
+            }
+        }
+        return null;
+    }
+
+    static void writeObjectResultsCsv(String directory, File outFile, String channelName,
+                                      ResultsTable table, List<String> orderedColumns,
+                                      boolean extendExistingData) {
+        writeObjectResultsCsv(directory, outFile, channelName, table, orderedColumns,
+                extendExistingData, "");
+    }
+
+    static void writeObjectResultsCsv(String directory, File outFile, String channelName,
+                                      ResultsTable table, List<String> orderedColumns,
+                                      boolean extendExistingData, String runId) {
+        if (extendExistingData) {
+            File existing = existingObjectOutputCsv(directory, channelName);
+            if (CsvTableIO.appendResultsTableCsv(outFile, existing, channelName,
+                    table, orderedColumns, runId)) {
+                return;
+            }
+        }
+        CsvTableIO.writeResultsTableCsv(outFile, table, orderedColumns, runId);
+    }
+
+    private String currentRunId() {
+        return RunIdCsv.runId(runRecordContext);
+    }
+
+    static File objectCsvWriteDir(String directory) {
+        return FlashProjectLayout.forDirectory(directory).tablesObjectsWriteDir();
+    }
+
+    static List<File> objectCsvReadDirs(String directory) {
+        return Collections.singletonList(objectCsvWriteDir(directory));
+    }
+
+    static File objectImageOutputsRoot(String directory) {
+        return FlashProjectLayout.forDirectory(directory).analysisImagesSegmentationDir();
+    }
+
+    static File objectOutputCsv(File outDir, String channelName) {
+        return new File(outDir, ChannelFilenameCodec.toSafe(channelName) + ".csv");
+    }
+
+    private static File objectTempCsv(File outDir, String channelName, int imageIndex) {
+        return new File(outDir, ChannelFilenameCodec.toSafe(channelName) + "temp_" + imageIndex + ".csv");
+    }
+
+    private static File activeConfigurationDir(String directory) {
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        File existing = layout.existingConfigurationDir();
+        return existing == null ? layout.configurationWriteDir() : existing;
+    }
+
+    private static String formatDuration(long ms) {
+        long seconds = ms / 1000;
+        if (seconds < 60) return seconds + " Seconds";
+        long minutes = seconds / 60;
+        if (minutes < 60) return minutes + " Minutes";
+        long hours = minutes / 60;
+        return hours + " Hours";
+    }
+
+    private static void logOrientationResolution(ResolvedImageMetadata metadata) {
+        IJ.log("  Orientation source: " + metadata.sourceLabel());
+        IJ.log(metadata.hasTransform()
+                ? "  Orientation transform applied."
+                : "  Orientation transform skipped.");
+    }
+
+    private static String formatDurationCompact(long ms) {
+        long seconds = ms / 1000;
+        if (seconds < 60) return seconds + "s";
+        long minutes = seconds / 60;
+        long remSec = seconds % 60;
+        if (minutes < 60) return minutes + "m " + remSec + "s";
+        long hours = minutes / 60;
+        long remMin = minutes % 60;
+        return hours + "h " + remMin + "m";
+    }
+
+    private boolean safeEq(String a, String b) {
+        String aa = a == null ? "" : a;
+        String bb = b == null ? "" : b;
+        return aa.equals(bb);
+    }
+
+    // Name parsing is handled by ImageNameParser (strict macro port).
+
+
+    private ImagePlus findOpenImageByExactTitle(String title) {
+
+        int[] ids = WindowManager.getIDList();
+        if (ids == null) return null;
+        for (int id : ids) {
+            ImagePlus imp = WindowManager.getImage(id);
+            if (imp != null && title.equals(imp.getTitle())) return imp;
+        }
+        return null;
+    }
+
+    private List<File> listImageFiles(File dir) {
+        List<File> out = new ArrayList<>();
+        if (dir == null || !dir.isDirectory()) return out;
+        File[] files = JunkFileFilter.listCleanFiles(dir);
+        for (File f : files) {
+            String n = f.getName().toLowerCase(Locale.ROOT);
+            if (n.endsWith(".tif") || n.endsWith(".tiff")) out.add(f);
+        }
+        return out;
+    }
+
+    private Double tryParseDouble(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        if (t.isEmpty()) return null;
+        try {
+            return Double.parseDouble(t);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private void closeAllNoPrompt() {
+        int[] ids = WindowManager.getIDList();
+        if (ids != null) {
+            for (int id : ids) {
+                ImagePlus imp = WindowManager.getImage(id);
+                if (imp != null) imp.changes = false;
+            }
+        }
+        IJ.run("Close All");
+    }
+
+    /** Closes all image windows and non-Log text windows, leaving the Log window visible. */
+    private void closeAllImagesOnly() {
+        int[] ids = WindowManager.getIDList();
+        if (ids != null) {
+            for (int id : ids) {
+                ImagePlus imp = WindowManager.getImage(id);
+                if (imp != null) {
+                    imp.changes = false;
+                    imp.close();
+                    imp.flush();
+                }
+            }
+        }
+        // Close non-image windows (Results, etc.) but keep the Log
+        Frame[] frames = WindowManager.getNonImageWindows();
+        if (frames != null) {
+            for (Frame f : frames) {
+                if (f != null && !"Log".equals(f.getTitle())) {
+                    f.dispose();
+                }
+            }
+        }
+    }
+}

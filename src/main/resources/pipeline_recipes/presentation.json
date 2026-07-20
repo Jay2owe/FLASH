@@ -1,0 +1,7 @@
+{
+  "name": "Presentation",
+  "description": "Create presentation-ready images and representative figures.",
+  "flashVersion": "0.x",
+  "analyses": ["SplitMerge", "RepresentativeFigure"],
+  "modulePresets": {}
+}

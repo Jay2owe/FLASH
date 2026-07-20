@@ -1,0 +1,14 @@
+{
+  "name": "Collaborator handoff (raw, no stats)",
+  "description": "Per-metric raw values plus data summary, no statistics sheet. Share raw numbers without implying any conclusions.",
+  "libraryVersion": "1",
+  "includeExperimentalConditionsSheet": true,
+  "includeDataSummarySheet": true,
+  "includePerMetricSheets": true,
+  "includeStatisticsSheet": false,
+  "metricSheetDetail": "raw_values",
+  "includeMethodsAppendix": false,
+  "significanceHighlight": "off",
+  "headerStyle": "standard",
+  "significanceStars": false
+}

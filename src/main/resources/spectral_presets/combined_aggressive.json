@@ -1,0 +1,19 @@
+{
+  "name": "Combined correction (aggressive forward model)",
+  "description": "Expert forward model for combined bleed-through and autofluorescence.",
+  "libraryVersion": "1",
+  "contaminationType": "both",
+  "calibration": "manual",
+  "strength": "aggressive",
+  "goal": "create_cleaned_image",
+  "targetChannelIndex": 0,
+  "bleedThroughChannelIndexes": [],
+  "autofluorescenceChannelIndexes": [],
+  "excludedChannelIndexes": [],
+  "controlConditionNames": [],
+  "experimentalConditionNames": [],
+  "correctionPresetId": "expert",
+  "expertMode": true,
+  "correctionFeatureIds": ["saturation_exclusion", "full_forward_model", "threshold_corrected_target", "size_filter"],
+  "featureSettings": {"size_filter": {"min_size_voxels": "50", "max_size_voxels": "0"}}
+}

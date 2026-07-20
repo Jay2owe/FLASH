@@ -1,0 +1,47 @@
+{
+  "name": "DAPI + Synaptophysin + PSD95 (synaptic puncta)",
+  "description": "Nuclear counterstain with pre- and post-synaptic puncta markers.",
+  "libraryVersion": "1",
+  "zSliceMode": "FULL",
+  "channels": [
+    {
+      "name": "DAPI",
+      "color": "Blue",
+      "objectThreshold": "5",
+      "particleSize": "20-5000",
+      "displayRange": "250-65535",
+      "intensityThreshold": "20",
+      "segmentationMethod": "classical",
+      "filterPreset": "Clustered Small",
+      "markerId": "nuclei_dapi",
+      "shape": "round",
+      "crowdingSensitive": true
+    },
+    {
+      "name": "Synaptophysin",
+      "color": "Green",
+      "objectThreshold": "3",
+      "particleSize": "5-500",
+      "displayRange": "100-65535",
+      "intensityThreshold": "10",
+      "segmentationMethod": "classical",
+      "filterPreset": "Puncta Resolve",
+      "markerId": "synapse_syp",
+      "shape": "puncta_like",
+      "crowdingSensitive": false
+    },
+    {
+      "name": "PSD95",
+      "color": "Red",
+      "objectThreshold": "3",
+      "particleSize": "5-500",
+      "displayRange": "100-65535",
+      "intensityThreshold": "10",
+      "segmentationMethod": "classical",
+      "filterPreset": "Puncta Resolve",
+      "markerId": "synapse_psd95",
+      "shape": "puncta_like",
+      "crowdingSensitive": false
+    }
+  ]
+}

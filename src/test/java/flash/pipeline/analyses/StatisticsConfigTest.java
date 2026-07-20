@@ -1,0 +1,151 @@
+package flash.pipeline.analyses;
+
+import flash.pipeline.analyses.StatisticsConfig.DistributionMode;
+import flash.pipeline.analyses.StatisticsConfig.MetricAggregation;
+import flash.pipeline.analyses.StatisticsConfig.PairedMode;
+import flash.pipeline.analyses.StatisticsConfig.PostHocMethod;
+import org.junit.Test;
+
+import static org.junit.Assert.*;
+
+/**
+ * Defaults + enum parsing for {@link StatisticsConfig}.
+ * Also ensures CLI-style aliases (case-insensitive, hyphen/underscore agnostic)
+ * round-trip to the right enum.
+ */
+public class StatisticsConfigTest {
+
+    @Test
+    public void defaultsReproduceLegacyEngineBehaviour() {
+        StatisticsConfig cfg = new StatisticsConfig();
+        assertEquals(PairedMode.OFF, cfg.pairedMode);
+        assertEquals(DistributionMode.AUTO, cfg.distributionMode);
+        assertEquals(PostHocMethod.BONFERRONI, cfg.postHocMethod);
+        assertNull(cfg.metricFilter);
+        assertNull(cfg.metricAggregationOverrides);
+    }
+
+    @Test
+    public void pairedMode_parsesCanonicalNames() {
+        assertEquals(PairedMode.OFF,           PairedMode.parse("off",           PairedMode.WITHIN_ANIMAL));
+        assertEquals(PairedMode.WITHIN_ANIMAL, PairedMode.parse("WITHIN_ANIMAL", PairedMode.OFF));
+        assertEquals(PairedMode.WITHIN_ANIMAL, PairedMode.parse("within",        PairedMode.OFF));
+    }
+
+    @Test
+    public void pairedMode_aliasesAndPunctuationNormalised() {
+        assertEquals(PairedMode.WITHIN_ANIMAL, PairedMode.parse("within-animal", PairedMode.OFF));
+        assertEquals(PairedMode.WITHIN_ANIMAL, PairedMode.parse("region",        PairedMode.OFF));
+        assertEquals(PairedMode.WITHIN_ANIMAL, PairedMode.parse(" session ",     PairedMode.OFF));
+        assertEquals(PairedMode.OFF,           PairedMode.parse("unpaired",      PairedMode.WITHIN_ANIMAL));
+        assertEquals(PairedMode.OFF,           PairedMode.parse("none",          PairedMode.WITHIN_ANIMAL));
+    }
+
+    @Test
+    public void pairedMode_legacyHemisphereNoLongerRecognised() {
+        // The LH/RH paired option was removed; "hemisphere"/"hemi" are no longer
+        // accepted and fall back to whatever the caller defaults to.
+        assertEquals(PairedMode.OFF, PairedMode.parse("hemisphere", PairedMode.OFF));
+        assertEquals(PairedMode.OFF, PairedMode.parse("hemi",       PairedMode.OFF));
+    }
+
+    @Test
+    public void pairedMode_unknownReturnsFallback() {
+        assertEquals(PairedMode.WITHIN_ANIMAL, PairedMode.parse("",       PairedMode.WITHIN_ANIMAL));
+        assertEquals(PairedMode.WITHIN_ANIMAL, PairedMode.parse(null,     PairedMode.WITHIN_ANIMAL));
+        assertEquals(PairedMode.WITHIN_ANIMAL, PairedMode.parse("garbage", PairedMode.WITHIN_ANIMAL));
+    }
+
+    @Test
+    public void distributionMode_parsesCanonicalNames() {
+        assertEquals(DistributionMode.AUTO,            DistributionMode.parse("auto", DistributionMode.AUTO));
+        assertEquals(DistributionMode.ASSUME_NORMAL,   DistributionMode.parse("ASSUME_NORMAL", DistributionMode.AUTO));
+        assertEquals(DistributionMode.ASSUME_SKEWED,   DistributionMode.parse("assume-skewed", DistributionMode.AUTO));
+    }
+
+    @Test
+    public void distributionMode_aliasesNormalised() {
+        assertEquals(DistributionMode.ASSUME_NORMAL, DistributionMode.parse("normal",         DistributionMode.AUTO));
+        assertEquals(DistributionMode.ASSUME_NORMAL, DistributionMode.parse("Parametric",     DistributionMode.AUTO));
+        assertEquals(DistributionMode.ASSUME_SKEWED, DistributionMode.parse("skewed",         DistributionMode.AUTO));
+        assertEquals(DistributionMode.ASSUME_SKEWED, DistributionMode.parse("non-parametric", DistributionMode.AUTO));
+        assertEquals(DistributionMode.ASSUME_SKEWED, DistributionMode.parse("nonparametric",  DistributionMode.AUTO));
+    }
+
+    @Test
+    public void distributionMode_unknownReturnsFallback() {
+        assertEquals(DistributionMode.AUTO, DistributionMode.parse("",       DistributionMode.AUTO));
+        assertEquals(DistributionMode.AUTO, DistributionMode.parse(null,     DistributionMode.AUTO));
+        assertEquals(DistributionMode.AUTO, DistributionMode.parse("rubbish", DistributionMode.AUTO));
+    }
+
+    @Test
+    public void postHocMethod_parsesCanonicalNames() {
+        assertEquals(PostHocMethod.BONFERRONI, PostHocMethod.parse("bonferroni", PostHocMethod.NONE));
+        assertEquals(PostHocMethod.TUKEY,      PostHocMethod.parse("TUKEY",      PostHocMethod.NONE));
+        assertEquals(PostHocMethod.DUNNS,      PostHocMethod.parse("dunns",      PostHocMethod.NONE));
+        assertEquals(PostHocMethod.NONE,       PostHocMethod.parse("none",       PostHocMethod.BONFERRONI));
+    }
+
+    @Test
+    public void postHocMethod_aliasesNormalised() {
+        assertEquals(PostHocMethod.TUKEY, PostHocMethod.parse("Tukey HSD",  PostHocMethod.NONE));
+        assertEquals(PostHocMethod.TUKEY, PostHocMethod.parse("hsd",        PostHocMethod.NONE));
+        assertEquals(PostHocMethod.TUKEY, PostHocMethod.parse("tukey-hsd",  PostHocMethod.NONE));
+        assertEquals(PostHocMethod.DUNNS, PostHocMethod.parse("Dunn's",     PostHocMethod.NONE));
+        assertEquals(PostHocMethod.DUNNS, PostHocMethod.parse("Dunn",       PostHocMethod.NONE));
+        assertEquals(PostHocMethod.DUNNS, PostHocMethod.parse("dunns_test", PostHocMethod.NONE));
+    }
+
+    @Test
+    public void postHocMethod_unknownReturnsFallback() {
+        assertEquals(PostHocMethod.BONFERRONI, PostHocMethod.parse("",       PostHocMethod.BONFERRONI));
+        assertEquals(PostHocMethod.BONFERRONI, PostHocMethod.parse(null,     PostHocMethod.BONFERRONI));
+        assertEquals(PostHocMethod.BONFERRONI, PostHocMethod.parse("scheffe", PostHocMethod.BONFERRONI));
+    }
+
+    @Test
+    public void metricAggregation_aliasesNormalised() {
+        assertEquals(MetricAggregation.SUM, MetricAggregation.parse("sum", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.SUM, MetricAggregation.parse("count", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.SUM, MetricAggregation.parse("total", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.MEAN, MetricAggregation.parse("avg", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.MEAN, MetricAggregation.parse("average", MetricAggregation.AUTO));
+        assertEquals(MetricAggregation.AUTO, MetricAggregation.parse("heuristic", MetricAggregation.SUM));
+    }
+
+    @Test
+    public void metricAggregationOverride_lookupIsCaseInsensitive() {
+        StatisticsConfig cfg = new StatisticsConfig();
+        cfg.putMetricAggregationOverride("ObjectsDetected", MetricAggregation.SUM);
+
+        assertEquals(MetricAggregation.SUM, cfg.metricAggregationFor("objectsdetected"));
+        assertEquals(MetricAggregation.AUTO, cfg.metricAggregationFor("OtherMetric"));
+    }
+
+    @Test
+    public void metricAggregationOverride_laterCaseVariantReplacesEarlierValue() {
+        StatisticsConfig cfg = new StatisticsConfig();
+        cfg.putMetricAggregationOverride("CellCount", MetricAggregation.SUM);
+        cfg.putMetricAggregationOverride("cellcount", MetricAggregation.MEAN);
+
+        assertEquals(MetricAggregation.MEAN, cfg.metricAggregationFor("CellCount"));
+        assertEquals(1, cfg.metricAggregationOverrides.size());
+    }
+
+    @Test
+    public void allEnumsRoundTripThroughName() {
+        for (PairedMode m : PairedMode.values()) {
+            assertEquals(m, PairedMode.parse(m.name(), PairedMode.OFF));
+        }
+        for (DistributionMode m : DistributionMode.values()) {
+            assertEquals(m, DistributionMode.parse(m.name(), DistributionMode.AUTO));
+        }
+        for (PostHocMethod m : PostHocMethod.values()) {
+            assertEquals(m, PostHocMethod.parse(m.name(), PostHocMethod.BONFERRONI));
+        }
+        for (MetricAggregation m : MetricAggregation.values()) {
+            assertEquals(m, MetricAggregation.parse(m.name(), MetricAggregation.AUTO));
+        }
+    }
+}

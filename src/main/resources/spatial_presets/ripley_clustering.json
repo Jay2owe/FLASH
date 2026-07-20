@@ -1,0 +1,21 @@
+{
+  "name": "Ripley clustering analysis",
+  "description": "Nearest-neighbour distances plus Ripley's K/L/G spatial statistics.",
+  "libraryVersion": "1",
+  "doDistances": true,
+  "doSpatialStats": true,
+  "doVolColoc": false,
+  "doCpc": false,
+  "doVoronoi": false,
+  "doHeatmaps": false,
+  "doPhenotyping": false,
+  "do2DMorphology": false,
+  "do3DMorphology": false,
+  "doCompositeIndices": false,
+  "doPopMorphometrics": false,
+  "doSpatialMorphometrics": false,
+  "kdeBandwidth": 0,
+  "heatmapLut": "Fire",
+  "clusterK": 0,
+  "colocThresholdPercent": 30
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Widefield Morphology — DL2 RL 10",
+  "description": "Shape-preserving widefield preset with fewer iterations and a Born-Wolf PSF.",
+  "engineKey": "DL2",
+  "algorithm": "RL",
+  "psfModel": "BORN_WOLF",
+  "iterations": 10,
+  "regularization": 0.005,
+  "scopeModality": "WIDEFIELD",
+  "sampleRI": 1.33
+}

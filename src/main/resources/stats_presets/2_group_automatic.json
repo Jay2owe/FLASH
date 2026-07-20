@@ -1,0 +1,9 @@
+{
+  "name": "2-group automatic",
+  "description": "Two independent groups. Automatic D'Agostino-Pearson normality gate with Bonferroni post-hoc. Recommended starting point for most experiments.",
+  "libraryVersion": "1",
+  "pairedMode": "OFF",
+  "distributionMode": "AUTO",
+  "postHocMethod": "BONFERRONI",
+  "metricFilter": null
+}

@@ -1,0 +1,1308 @@
+package flash.pipeline.ui.preview;
+
+import flash.pipeline.click.ClickStore;
+import flash.pipeline.testutil.TestWait;
+import flash.pipeline.testutil.UiTestAssumptions;
+import ij.ImagePlus;
+import ij.ImageStack;
+import ij.WindowManager;
+import ij.measure.ResultsTable;
+import ij.process.ByteProcessor;
+import ij.process.ImageProcessor;
+import ij.process.ShortProcessor;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import java.awt.Dimension;
+import java.awt.Frame;
+import java.awt.GraphicsEnvironment;
+import java.awt.GridLayout;
+import java.awt.event.MouseEvent;
+import java.awt.image.IndexColorModel;
+import java.io.File;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.JPanel;
+import javax.swing.JSlider;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeFalse;
+
+public class PreviewPairPanelTest {
+    @Rule
+    public TemporaryFolder temp = new TemporaryFolder();
+
+    private TestWait.ResourceSnapshot resources;
+
+    @Before
+    public void snapshotResources() {
+        resources = UiTestAssumptions.snapshotOwnedResources();
+    }
+
+    @After
+    public void assertResourcesReleased() throws Exception {
+        PreviewPairPanel.drainPendingClickWritesForTest();
+        resources.assertNoLeaks("PreviewPairPanelTest", 2000L);
+    }
+
+    @Test
+    public void uiEnvironmentContractIsExplicit() {
+        assertEquals(!GraphicsEnvironment.isHeadless(),
+                UiTestAssumptions.isDisplayAvailable());
+        assertEquals(Boolean.getBoolean(UiTestAssumptions.INTERACTIVE_UI_PROPERTY)
+                        && !GraphicsEnvironment.isHeadless(),
+                UiTestAssumptions.areInteractiveUiTestsEnabled());
+    }
+
+    @Test
+    public void resourceSnapshotIdentifiesLeakedImage() throws Exception {
+        TestWait.ResourceSnapshot baseline = TestWait.snapshotResources();
+        ImagePlus leaked = singleSlice("deliberately leaked preview image", 0, 1);
+        WindowManager.setTempCurrentImage(leaked);
+        try {
+            try {
+                baseline.assertNoLeaks("synthetic preview owner", 25L);
+            } catch (AssertionError expected) {
+                assertTrue(expected.getMessage().contains(
+                        "deliberately leaked preview image"));
+                return;
+            }
+            throw new AssertionError("Expected ImageJ image leak detection to fail");
+        } finally {
+            WindowManager.setTempCurrentImage((ImagePlus) null);
+            leaked.close();
+        }
+    }
+
+    @Test
+    public void horizontalSlim_arrangesPreviewsOneByTwo_andHidesPerPanelChrome() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+
+        assertTrue(pair.previewPairContainerForTest().getLayout() instanceof GridLayout);
+        GridLayout layout = (GridLayout) pair.previewPairContainerForTest().getLayout();
+        assertEquals(1, layout.getRows());
+        assertEquals(2, layout.getColumns());
+        assertFalse(pair.originalPreviewForTest().metadataHeaderVisibleForTest());
+        assertFalse(pair.adjustedPreviewForTest().metadataHeaderVisibleForTest());
+        assertFalse(pair.originalPreviewForTest().zRowVisibleForTest());
+        assertFalse(pair.adjustedPreviewForTest().zRowVisibleForTest());
+        assertNotNull(pair.originalPreviewForTest().slimTitleLabelForTest());
+        assertNotNull(pair.adjustedPreviewForTest().slimTitleLabelForTest());
+        assertEquals(new Dimension(280, 280),
+                pair.originalPreviewForTest().canvasPreferredSizeForTest());
+        assertEquals(new Dimension(280, 280),
+                pair.adjustedPreviewForTest().canvasPreferredSizeForTest());
+        assertEquals(2, pair.originalPreviewForTest().layoutVerticalGapForTest());
+        assertEquals(2, pair.adjustedPreviewForTest().layoutVerticalGapForTest());
+    }
+
+    @Test
+    public void horizontalSlimStartsWithEmptyPreviewStateAndDisabledSharedZ() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+
+        assertFalse(pair.originalPreviewForTest().hasImageForTest());
+        assertFalse(pair.adjustedPreviewForTest().hasImageForTest());
+        assertEquals("No image selected.", pair.originalPreviewForTest().titleTextForTest());
+        assertEquals("No image selected.", pair.adjustedPreviewForTest().titleTextForTest());
+        assertEquals(1, pair.getCurrentZ());
+        assertEquals(1, pair.originalZForTest());
+        assertEquals(1, pair.adjustedZForTest());
+        assertNull(pair.originalPreviewForTest().renderedProcessorForTest());
+        assertNull(pair.adjustedPreviewForTest().renderedProcessorForTest());
+
+        JSlider slider = pair.sharedZSliderForTest();
+        assertEquals(1, slider.getMinimum());
+        assertEquals(1, slider.getMaximum());
+        assertEquals(1, slider.getValue());
+        assertFalse(slider.isEnabled());
+        assertEquals("1 / 1", pair.sharedZTextForTest());
+    }
+
+    @Test
+    public void sharedZRowSlider_drivesBothPreviews_andLargePreview() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+        pair.setOriginal(stack("original", 5));
+        pair.setAdjusted(stack("adjusted", 5));
+
+        JSlider slider = pair.sharedZSliderForTest();
+        slider.setValue(4);
+
+        assertEquals(4, pair.getCurrentZ());
+        assertEquals(4, pair.originalZForTest());
+        assertEquals(4, pair.adjustedZForTest());
+        assertEquals("4 / 5", pair.sharedZTextForTest());
+
+        if (!GraphicsEnvironment.isHeadless()) {
+            LargePreviewDialog dialog = new LargePreviewDialog(null);
+            try {
+                pair.setLargePreviewDialogForTest(dialog);
+                slider.setValue(2);
+
+                assertEquals(2, dialog.getCurrentZForTest());
+            } finally {
+                dialog.dispose();
+            }
+        }
+    }
+
+    @Test
+    public void sharedZRow_updatesRangeWhenAdjustedImageSliceCountChanges() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+        pair.setOriginal(stack("original", 6));
+        pair.setAdjusted(stack("first", 6));
+
+        JSlider slider = pair.sharedZSliderForTest();
+        pair.setCurrentZ(5);
+        assertEquals(6, slider.getMaximum());
+        assertEquals("5 / 6", pair.sharedZTextForTest());
+
+        pair.setAdjusted(stack("second", 3));
+
+        assertEquals(3, pair.getCurrentZ());
+        assertEquals(3, slider.getMaximum());
+        assertEquals(3, slider.getValue());
+        assertEquals("3 / 3", pair.sharedZTextForTest());
+    }
+
+    @Test
+    public void previewToolstrip_containsLargeBcAndLutButtons() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+
+        JPanel toolstrip = pair.previewToolstrip();
+
+        assertTrue(toolstrip.isAncestorOf(pair.largeViewButton()));
+        assertTrue(toolstrip.isAncestorOf(pair.comparePreviewButton()));
+        assertTrue(toolstrip.isAncestorOf(pair.displayControlsButton()));
+        assertTrue(toolstrip.isAncestorOf(pair.lutToggleButton()));
+        assertTrue(toolstrip.isAncestorOf(pair.otsuOverlayCheckBox()));
+        assertFalse(pair.otsuOverlayCheckBox().isVisible());
+    }
+
+    @Test
+    public void comparisonButtonIsOnlyEnabledWithCurrentAndPreviousObjectPreviews() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+        pair.previewToolstrip();
+
+        assertFalse(pair.comparisonPreviewVisibleForTest());
+
+        pair.setComparisonPreviewVisible(true);
+
+        assertTrue(pair.comparisonPreviewVisibleForTest());
+        assertFalse(pair.comparisonPreviewEnabledForTest());
+
+        ImagePlus raw = stack("raw", 2);
+        ImagePlus filtered = stack("filtered", 2);
+        ImagePlus current = stack("current objects", 2);
+        ImagePlus previous = stack("previous objects", 2);
+
+        pair.setLargePreviewImages(raw, filtered, current);
+
+        assertFalse(pair.comparisonPreviewEnabledForTest());
+
+        pair.setPreviousComparisonPreview(previous, "Previous preview ready.");
+
+        assertTrue(pair.comparisonPreviewEnabledForTest());
+        assertSame(previous, pair.comparisonPreviousImageForTest());
+
+        pair.clearComparisonPreview();
+
+        assertFalse(pair.comparisonPreviewVisibleForTest());
+        assertFalse(pair.comparisonPreviewEnabledForTest());
+        assertNull(pair.comparisonPreviousImageForTest());
+    }
+
+    @Test
+    public void lutToggleButtonSwitchesBetweenGreyAndChannelLut() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setChannelLutName("Red");
+        pair.setOriginal(singleSlice("original", 0, 100));
+
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.displaySettingsForTest().getLutMode());
+        assertEquals("Grey LUT", pair.lutToggleButton().getText());
+        IndexColorModel channelModel = (IndexColorModel) pair.originalPreviewForTest()
+                .renderedProcessorForTest().getColorModel();
+        assertEquals(255, channelModel.getRed(255));
+        assertEquals(0, channelModel.getGreen(255));
+
+        pair.lutToggleButton().doClick();
+
+        assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                pair.displaySettingsForTest().getLutMode());
+        assertEquals("Red LUT", pair.lutToggleButton().getText());
+        IndexColorModel greyModel = (IndexColorModel) pair.originalPreviewForTest()
+                .renderedProcessorForTest().getColorModel();
+        assertEquals(greyModel.getRed(255), greyModel.getGreen(255));
+        assertEquals(greyModel.getGreen(255), greyModel.getBlue(255));
+
+        pair.lutToggleButton().doClick();
+
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.displaySettingsForTest().getLutMode());
+        assertEquals("Grey LUT", pair.lutToggleButton().getText());
+    }
+
+    @Test
+    public void lutToggleCanRemainVisibleWhenBrightnessButtonIsHidden() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setChannelLutName("Red");
+        pair.setOriginal(singleSlice("original", 0, 100));
+
+        pair.setDisplayControlsAvailable(false, true);
+
+        assertFalse(pair.displayControlsButton().isVisible());
+        assertTrue(pair.lutToggleButton().isVisible());
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.getDisplaySettings().getLutMode());
+        assertEquals("Red", pair.getDisplaySettings().getChannelLutName());
+
+        pair.lutToggleButton().doClick();
+
+        assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                pair.getDisplaySettings().getLutMode());
+        assertEquals("Red LUT", pair.lutToggleButton().getText());
+    }
+
+    @Test
+    public void resetStageToolstripSynchronizesVisibleLutToggleAfterPreviousGreyMode() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setChannelLutName("Red");
+        pair.setOriginal(singleSlice("original", 0, 100));
+
+        pair.lutToggleButton().doClick();
+        assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                pair.getDisplaySettings().getLutMode());
+
+        pair.setDisplayControlsAvailable(false, true);
+        pair.resetStageToolstripState();
+
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.getDisplaySettings().getLutMode());
+        assertEquals("Grey LUT", pair.lutToggleButton().getText());
+
+        pair.lutToggleButton().doClick();
+
+        assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                pair.getDisplaySettings().getLutMode());
+        assertEquals("Red LUT", pair.lutToggleButton().getText());
+    }
+
+    @Test
+    public void otsuOverlayCheckboxRendersRedTintedAdjustedPreview() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setOriginal(otsuOverlayImage("source"));
+        pair.setAdjusted(otsuOverlayImage("filtered"));
+
+        pair.setOtsuOverlayAvailable(true);
+
+        assertTrue(pair.otsuOverlayCheckBox().isVisible());
+
+        pair.otsuOverlayCheckBox().doClick();
+
+        ImageProcessor overlay = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertTrue(redTinted(overlay.getPixel(16, 16)));
+        assertFalse(redTinted(overlay.getPixel(1, 1)));
+
+        pair.otsuOverlayCheckBox().doClick();
+
+        ImageProcessor filtered = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertFalse(redTinted(filtered.getPixel(16, 16)));
+    }
+
+    @Test
+    public void comparisonRawOverlaySourceUsesGlobalGreyLutToggle() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        pair.setChannelLutName("Red");
+        ImagePlus raw = uniformSingleSlice("raw", 255);
+        ImagePlus filtered = uniformSingleSlice("filtered", 255);
+        ImagePlus labels = labelThenBackground("objects");
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+
+        ImageProcessor channelOverlay = ObjectOverlayRenderer.renderOverlay(
+                raw, labels, pair.displaySettingsForImageForTest(raw)).getProcessor();
+        assertEquals(PreviewDisplaySettings.LutMode.CHANNEL,
+                pair.displaySettingsForImageForTest(raw).getLutMode());
+        assertEquals(0xff0000, channelOverlay.getPixel(1, 0) & 0xffffff);
+
+        pair.lutToggleButton().doClick();
+
+        PreviewDisplaySettings rawSettings = pair.displaySettingsForImageForTest(raw);
+        ImageProcessor greyOverlay = ObjectOverlayRenderer.renderOverlay(
+                raw, labels, rawSettings).getProcessor();
+        assertEquals(PreviewDisplaySettings.LutMode.GREY, rawSettings.getLutMode());
+        assertEquals(0xffffff, greyOverlay.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void sourceToggle_notVisibleByDefault_andNotifiesListenerWhenEnabled() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+        pair.previewToolstrip();
+        final AtomicReference<PreviewPairPanel.SourceMode> changed =
+                new AtomicReference<PreviewPairPanel.SourceMode>();
+
+        assertFalse(pair.sourceToggleVisibleForTest());
+
+        pair.setSourceToggleVisible(true);
+        pair.setSourceModeChangeListener(new PreviewPairPanel.SourceModeChangeListener() {
+            @Override public void sourceModeChanged(PreviewPairPanel.SourceMode mode) {
+                changed.set(mode);
+            }
+        });
+        pair.sourceRawRadioForTest().doClick();
+
+        assertTrue(pair.sourceToggleVisibleForTest());
+        assertEquals(PreviewPairPanel.SourceMode.RAW, pair.sourceModeForTest());
+        assertEquals(PreviewPairPanel.SourceMode.RAW, changed.get());
+
+        pair.resetStageToolstripState();
+
+        assertFalse(pair.sourceToggleVisibleForTest());
+        assertTrue(pair.sourceModeEnabledForTest());
+        assertEquals(PreviewPairPanel.SourceMode.FILTERED, pair.sourceModeForTest());
+    }
+
+    @Test
+    public void mainPreviewClampsToSharedSliceRange() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setOriginal(stack("original", 5));
+        pair.setAdjusted(stack("adjusted", 3));
+
+        pair.setCurrentZ(5);
+
+        assertEquals(3, pair.getCurrentZ());
+        assertEquals(3, pair.originalZForTest());
+        assertEquals(3, pair.adjustedZForTest());
+    }
+
+    @Test
+    public void settingAdjustedImagePreservesCurrentZWhenPossible() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setOriginal(stack("original", 5));
+        pair.setAdjusted(stack("first", 5));
+        pair.setCurrentZ(4);
+
+        pair.setAdjusted(stack("second", 5));
+
+        assertEquals(4, pair.getCurrentZ());
+        assertEquals(4, pair.originalZForTest());
+        assertEquals(4, pair.adjustedZForTest());
+    }
+
+    @Test
+    public void settingAdjustedImageClampsCurrentZWhenNeeded() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setOriginal(stack("original", 6));
+        pair.setAdjusted(stack("first", 6));
+        pair.setCurrentZ(5);
+
+        pair.setAdjusted(stack("second", 2));
+
+        assertEquals(2, pair.getCurrentZ());
+        assertEquals(2, pair.originalZForTest());
+        assertEquals(2, pair.adjustedZForTest());
+    }
+
+    @Test
+    public void settingAdjustedImagePreservesTransientDisplayRange() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setOriginal(singleSlice("original", 0, 100));
+        pair.setDisplayRangeForTest(10.0, 80.0);
+
+        pair.setAdjusted(singleSlice("adjusted", 0, 2));
+
+        assertEquals(10.0, pair.displaySettingsForTest().getDisplayMin(), 0.0001);
+        assertEquals(80.0, pair.displaySettingsForTest().getDisplayMax(), 0.0001);
+        ImageProcessor originalRendered = pair.originalPreviewForTest().renderedProcessorForTest();
+        assertEquals(10.0, originalRendered.getMin(), 0.0001);
+        assertEquals(80.0, originalRendered.getMax(), 0.0001);
+    }
+
+    @Test
+    public void objectPreviewKeepsNativeLabelDisplayWhileSourceUsesDisplaySettings() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus raw = singleSlice("raw", 0, 100);
+        ImagePlus filtered = singleSlice("filtered", 0, 100);
+        ImagePlus labels = singleSlice("objects", 0, 5);
+        LabelMapStyler.apply(labels, 5);
+
+        pair.setChannelLutName("Red");
+        pair.setOriginal(filtered);
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setAdjusted(labels);
+        pair.setDisplayRangeForTest(10.0, 80.0);
+
+        ImageProcessor sourceRendered = pair.originalPreviewForTest().renderedProcessorForTest();
+        ImageProcessor objectRendered = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertEquals(10.0, sourceRendered.getMin(), 0.0001);
+        assertEquals(80.0, sourceRendered.getMax(), 0.0001);
+        IndexColorModel sourceModel = (IndexColorModel) sourceRendered.getColorModel();
+        assertEquals(255, sourceModel.getRed(255));
+        assertEquals(0, sourceModel.getGreen(255));
+        assertEquals(0, sourceModel.getBlue(255));
+
+        assertEquals(0.0, objectRendered.getMin(), 0.0001);
+        assertEquals(5.0, objectRendered.getMax(), 0.0001);
+        IndexColorModel objectModel = (IndexColorModel) objectRendered.getColorModel();
+        int expected = LabelMapStyler.rgbForLabel(5);
+        assertEquals((expected >> 16) & 0xff, objectModel.getRed(5));
+        assertEquals((expected >> 8) & 0xff, objectModel.getGreen(5));
+        assertEquals(expected & 0xff, objectModel.getBlue(5));
+    }
+
+    @Test
+    public void objectPreviewKeepsSeparateRawAndFilteredDisplayRanges() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus raw = shortSingleSlice("raw 16-bit", 0, 4096);
+        ImagePlus filtered = singleSlice("filtered 8-bit", 0, 255);
+        ImagePlus labels = singleSlice("objects", 0, 3);
+        LabelMapStyler.apply(labels, 3);
+
+        pair.setOriginal(filtered);
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setAdjusted(labels);
+        pair.setDisplayRangeForTest(0.0, 255.0);
+
+        assertEquals(255.0, pair.displaySettingsForImageForTest(filtered).getDisplayMax(), 0.0001);
+        assertFalse(pair.displaySettingsForImageForTest(raw).hasDisplayRange());
+
+        pair.setOriginal(raw);
+
+        assertEquals(4096.0, pair.displaySettingsForTest().getDisplayMax(), 0.0001);
+        ImageProcessor rawRendered = pair.originalPreviewForTest().renderedProcessorForTest();
+        assertEquals(4096.0, rawRendered.getMax(), 0.0001);
+    }
+
+    @Test
+    public void displayControlsResetWhenSourceBitDepthChanges() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ImagePlus filtered = singleSlice("filtered 8-bit", 0, 255);
+        ImagePlus raw = shortSingleSlice("raw 16-bit", 0, 4096);
+
+        pair.setOriginal(filtered);
+        pair.setDisplayRangeForTest(0.0, 255.0);
+
+        pair.setOriginal(raw);
+
+        assertEquals(4096.0, pair.displaySettingsForTest().getDisplayMax(), 0.0001);
+    }
+
+    @Test
+    public void normalObjectPreviewCanShowRawOrFilteredOverlay() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus raw = singleSlice("raw", 0, 100);
+        ImagePlus filtered = singleSlice("filtered", 0, 100);
+        ImagePlus labels = singleSlice("Object labels", 0, 1);
+        LabelMapStyler.apply(labels, 1);
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setAdjusted(labels);
+
+        assertTrue(pair.objectOverlayControlsVisibleForTest());
+        assertEquals("Object labels", pair.adjustedImageTitleForTest());
+
+        pair.setObjectOverlaySelectedForTest(true);
+
+        assertEquals("Object overlay | filtered", pair.adjustedImageTitleForTest());
+
+        pair.setObjectOverlaySourceForTest("Raw image");
+
+        assertEquals("Object overlay | raw", pair.adjustedImageTitleForTest());
+    }
+
+    @Test
+    public void normalObjectOverlayRerendersBackgroundWithDisplayRange() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ByteProcessor sourceProcessor = new ByteProcessor(3, 1);
+        sourceProcessor.set(0, 0, 100);
+        sourceProcessor.set(1, 0, 100);
+        sourceProcessor.set(2, 0, 200);
+        ImagePlus raw = new ImagePlus("raw", sourceProcessor.duplicate());
+        ImagePlus filtered = new ImagePlus("filtered", sourceProcessor);
+
+        ByteProcessor labelProcessor = new ByteProcessor(3, 1);
+        labelProcessor.set(0, 0, 1);
+        labelProcessor.set(1, 0, 0);
+        labelProcessor.set(2, 0, 0);
+        ImagePlus labels = new ImagePlus("Object labels", labelProcessor);
+        LabelMapStyler.apply(labels, 1);
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setOriginal(filtered);
+        pair.setAdjusted(labels);
+        pair.setObjectOverlaySelectedForTest(true);
+        pair.setDisplayRangeForTest(100.0, 200.0);
+
+        ImageProcessor rendered = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertEquals(blend(0x000000, LabelMapStyler.rgbForLabel(1), 0.35),
+                rendered.getPixel(0, 0) & 0xffffff);
+        assertEquals(0x000000, rendered.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectFilterPreviewHidesRemovedLabelsAndColorsKeptLabels() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+
+        ImagePlus renderedImage = pair.renderObjectPreviewNowForTest();
+        ImageProcessor rendered = renderedImage.getProcessor();
+
+        assertEquals(LabelMapStyler.rgbForLabel(1), rendered.getPixel(0, 0) & 0xffffff);
+        assertEquals(0x000000, rendered.getPixel(1, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(3), rendered.getPixel(2, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectFilterPreviewShowsRemovedLabelsAsGreyGhosts() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+        pair.setShowRemovedObjects(true);
+
+        ImageProcessor rendered = pair.renderObjectPreviewNowForTest().getProcessor();
+
+        assertTrue(pair.showRemovedObjects());
+        assertEquals(0x808080, rendered.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectFilterPreviewLiveUpdatesRemovedSetAndShowRemovedState() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+        ImageProcessor first = pair.renderObjectPreviewNowForTest().getProcessor();
+        assertEquals(0x000000, first.getPixel(1, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(1), first.getPixel(0, 0) & 0xffffff);
+
+        pair.setObjectFilterPreview(labels, removedLabels(1), null, 3);
+        ImageProcessor second = pair.renderObjectPreviewNowForTest().getProcessor();
+        assertEquals(0x000000, second.getPixel(0, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(2), second.getPixel(1, 0) & 0xffffff);
+
+        pair.setShowRemovedObjects(true);
+        ImageProcessor ghosts = pair.renderObjectPreviewNowForTest().getProcessor();
+        assertEquals(0x808080, ghosts.getPixel(0, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(2), ghosts.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectFilterPreviewHidesRemovedLabelsAsSourceBackgroundWhenOverlayed() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ByteProcessor sourceProcessor = new ByteProcessor(3, 1);
+        sourceProcessor.set(0, 0, 0);
+        sourceProcessor.set(1, 0, 200);
+        sourceProcessor.set(2, 0, 0);
+        ImagePlus raw = new ImagePlus("raw", sourceProcessor.duplicate());
+        ImagePlus filtered = new ImagePlus("filtered", sourceProcessor);
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setOriginal(filtered);
+        pair.setObjectOverlaySelectedForTest(true);
+        pair.setDisplayRangeForTest(0.0, 200.0);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+
+        ImageProcessor rendered = pair.renderObjectPreviewNowForTest().getProcessor();
+
+        assertEquals(0xffffff, rendered.getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void objectFilterInlineClicksUseTrueLabelMapAfterRgbRender() throws Exception {
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setClickCapture(newClickBinFolder(), store, "Mouse1_LH_SCN", 2);
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+        pair.renderObjectPreviewNowForTest();
+
+        pair.adjustedPreviewForTest().firePixelClickForTest(
+                2.0, 0.0, 1, MouseEvent.BUTTON1, 0);
+
+        List<ClickStore.Click> clicks = store.all();
+        assertEquals(1, clicks.size());
+        assertEquals(3, clicks.get(0).label);
+    }
+
+    @Test
+    public void objectFilterLargeViewClicksUseTrueLabelMapAfterRgbRender() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        try {
+            ImagePlus labels = objectFilterLabels("Object labels");
+            pair.setClickCapture(newClickBinFolder(), store, "Mouse1_LH_SCN", 2);
+            pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                    singleSlice("filtered", 0, 100), labels);
+            pair.setLargePreviewDialogForTest(dialog);
+            pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+            pair.renderObjectPreviewNowForTest();
+
+            dialog.fireExtraPreviewClickForTest(2.0, 0.0, 1, MouseEvent.BUTTON1, 0);
+
+            List<ClickStore.Click> clicks = store.all();
+            assertEquals(1, clicks.size());
+            assertEquals(3, clicks.get(0).label);
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void objectFilterLargeViewOverlayControlsAreLiveAndDriveRenderer() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        try {
+            ImagePlus labels = objectFilterLabels("Object labels");
+            pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                    singleSlice("filtered", 0, 100), labels);
+            pair.setLargePreviewDialogForTest(dialog);
+            pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+            pair.renderObjectPreviewNowForTest();
+
+            // Regression: the large-view overlay controls used to be greyed out because the
+            // dialog received a pre-rendered object map distinct from the raw label map.
+            assertTrue(dialog.overlayControlsVisibleForTest());
+            assertTrue(dialog.overlayCheckEnabledForTest());
+            assertFalse(dialog.overlayCheckSelectedForTest());
+
+            // Toggling the overlay in the large view drives this panel's renderer.
+            dialog.clickOverlayCheckForTest();
+
+            assertTrue(pair.objectOverlaySelected());
+            assertTrue(dialog.overlayCheckSelectedForTest());
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void duplicateCurrentObjectPreviewForComparisonUsesRenderedDisplay() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ImagePlus labels = objectFilterLabels("Object labels");
+
+        pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                singleSlice("filtered", 0, 100), labels);
+        pair.setObjectFilterPreview(labels, removedLabels(2), null, 3);
+        pair.renderObjectPreviewNowForTest();
+
+        ImagePlus snapshot = pair.duplicateCurrentObjectPreviewForComparison("snapshot");
+
+        assertNotNull(snapshot);
+        assertEquals("snapshot", snapshot.getTitle());
+        assertEquals(0x000000, snapshot.getProcessor().getPixel(1, 0) & 0xffffff);
+        assertEquals(LabelMapStyler.rgbForLabel(3),
+                snapshot.getProcessor().getPixel(2, 0) & 0xffffff);
+    }
+
+    @Test
+    public void inlineClickFiresHandlerWhenLabelPresent() throws Exception {
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = clickCapturePair(store);
+
+        assertTrue(pair.originalPreviewForTest().hasPixelClickListenerForTest());
+        assertTrue(pair.adjustedPreviewForTest().hasPixelClickListenerForTest());
+
+        pair.adjustedPreviewForTest().firePixelClickForTest(
+                0.0, 0.0, 1, MouseEvent.BUTTON1, 0);
+
+        List<ClickStore.Click> clicks = store.all();
+        assertEquals(1, clicks.size());
+        assertEquals(7, clicks.get(0).label);
+        assertEquals(ClickStore.Verdict.NEGATIVE, clicks.get(0).verdict);
+    }
+
+    @Test
+    public void inlineClickIgnoredWhenNoLabel() throws Exception {
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = clickCapturePair(store);
+
+        pair.adjustedPreviewForTest().firePixelClickForTest(
+                1.0, 0.0, 1, MouseEvent.BUTTON1, 0);
+
+        assertTrue(store.all().isEmpty());
+    }
+
+    @Test
+    public void inlineClickWritesToClickStore() throws Exception {
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = clickCapturePair(store);
+
+        pair.originalPreviewForTest().firePixelClickForTest(
+                2.0, 1.0, 2, MouseEvent.BUTTON1, MouseEvent.SHIFT_DOWN_MASK);
+
+        List<ClickStore.Click> clicks = store.all();
+        assertEquals(1, clicks.size());
+        ClickStore.Click click = clicks.get(0);
+        assertEquals("Mouse1_LH_SCN", click.imageName);
+        assertEquals(2, click.channelOneBased);
+        assertEquals(11, click.label);
+        assertEquals(2, click.z);
+        assertEquals(2.0, click.x, 0.0001);
+        assertEquals(1.0, click.y, 0.0001);
+        assertEquals(ClickStore.Verdict.POSITIVE, click.verdict);
+
+        pair.originalPreviewForTest().firePixelClickForTest(
+                2.0, 1.0, 2, MouseEvent.BUTTON3, 0);
+
+        assertTrue(store.all().isEmpty());
+    }
+
+    @Test
+    public void inlineClickUsesEmbeddedObjectPreviewWhenLargeViewModelIsAbsent() throws Exception {
+        ClickStore store = new ClickStore();
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects",
+                PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
+        pair.setClickCapture(newClickBinFolder(), store, "Mouse1_LH_SCN", 2);
+        pair.setOriginal(clickSource("filtered"));
+        pair.setAdjusted(clickLabels("Object labels"));
+
+        pair.adjustedPreviewForTest().firePixelClickForTest(
+                2.0, 1.0, 2, MouseEvent.BUTTON1, 0);
+
+        List<ClickStore.Click> clicks = store.all();
+        assertEquals(1, clicks.size());
+        assertEquals(11, clicks.get(0).label);
+        assertEquals(ClickStore.Verdict.NEGATIVE, clicks.get(0).verdict);
+    }
+
+    @Test
+    public void clearClickCaptureClearsInlineListeners() throws Exception {
+        PreviewPairPanel pair = clickCapturePair(new ClickStore());
+
+        pair.clearClickCapture();
+
+        assertFalse(pair.originalPreviewForTest().hasPixelClickListenerForTest());
+        assertFalse(pair.adjustedPreviewForTest().hasPixelClickListenerForTest());
+    }
+
+    @Test
+    public void objectOverlayDefersRerenderWhileDisplayRangeSliderIsAdjusting() {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        ByteProcessor sourceProcessor = new ByteProcessor(4, 1);
+        sourceProcessor.set(0, 0, 100);
+        sourceProcessor.set(1, 0, 100);
+        sourceProcessor.set(2, 0, 200);
+        sourceProcessor.set(3, 0, 0);
+        ImagePlus raw = new ImagePlus("raw", sourceProcessor.duplicate());
+        ImagePlus filtered = new ImagePlus("filtered", sourceProcessor);
+
+        ByteProcessor labelProcessor = new ByteProcessor(4, 1);
+        labelProcessor.set(0, 0, 1);
+        ImagePlus labels = new ImagePlus("Object labels", labelProcessor);
+        LabelMapStyler.apply(labels, 1);
+
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setOriginal(filtered);
+        pair.setAdjusted(labels);
+        pair.setObjectOverlaySelectedForTest(true);
+        pair.setDisplayRangeForTest(100.0, 200.0);
+        assertEquals(0x000000,
+                pair.adjustedPreviewForTest().renderedProcessorForTest().getPixel(1, 0) & 0xffffff);
+
+        pair.setDisplayRangeForTest(0.0, 200.0, true);
+
+        ImageProcessor sourceDuringDrag = pair.originalPreviewForTest().renderedProcessorForTest();
+        assertEquals(0.0, sourceDuringDrag.getMin(), 0.0001);
+        assertEquals(200.0, sourceDuringDrag.getMax(), 0.0001);
+        assertEquals(0x000000,
+                pair.adjustedPreviewForTest().renderedProcessorForTest().getPixel(1, 0) & 0xffffff);
+
+        pair.setDisplayRangeForTest(0.0, 200.0, false);
+
+        assertEquals(0x808080,
+                pair.adjustedPreviewForTest().renderedProcessorForTest().getPixel(1, 0) & 0xffffff);
+    }
+
+    @Test
+    public void hiddenDisplayControlsPreserveSeparateImageDisplayRanges() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ImagePlus original = stack("original", 1);
+        ImagePlus adjusted = stack("adjusted", 1);
+        original.setDisplayRange(0.0, 100.0);
+        adjusted.setDisplayRange(20.0, 80.0);
+
+        pair.setOriginal(original);
+        pair.setDisplayRangeForTest(5.0, 50.0);
+        pair.setDisplayControlsAvailable(false);
+        pair.setAdjusted(adjusted);
+
+        assertFalse(pair.displayControlsButton().isVisible());
+        assertFalse(pair.lutToggleButton().isVisible());
+        assertFalse(pair.displaySettingsForTest().hasDisplayRange());
+        ImageProcessor originalRendered = pair.originalPreviewForTest().renderedProcessorForTest();
+        ImageProcessor adjustedRendered = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertEquals(0.0, originalRendered.getMin(), 0.0001);
+        assertEquals(100.0, originalRendered.getMax(), 0.0001);
+        assertEquals(20.0, adjustedRendered.getMin(), 0.0001);
+        assertEquals(80.0, adjustedRendered.getMax(), 0.0001);
+    }
+
+    @Test
+    public void lutOnlyPreviewUsesAdjustedImageDisplayRangeInsteadOfHiddenControls() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ImagePlus original = singleSlice("original", 0, 100);
+        ImagePlus adjusted = singleSlice("adjusted", 0, 255);
+        adjusted.setDisplayRange(20.0, 80.0);
+
+        pair.setDisplayControlsAvailable(false, true);
+        pair.setOriginal(original);
+        pair.setAdjusted(adjusted);
+
+        assertFalse(pair.displayControlsButton().isVisible());
+        assertTrue(pair.lutToggleButton().isVisible());
+        assertFalse(pair.displaySettingsForTest().hasDisplayRange());
+        ImageProcessor rendered = pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertEquals(20.0, rendered.getMin(), 0.0001);
+        assertEquals(80.0, rendered.getMax(), 0.0001);
+
+        adjusted.setDisplayRange(30.0, 70.0);
+        pair.setAdjusted(adjusted);
+        pair.lutToggleButton().doClick();
+
+        assertFalse(pair.displaySettingsForTest().hasDisplayRange());
+        ImageProcessor renderedAfterLutToggle =
+                pair.adjustedPreviewForTest().renderedProcessorForTest();
+        assertEquals(30.0, renderedAfterLutToggle.getMin(), 0.0001);
+        assertEquals(70.0, renderedAfterLutToggle.getMax(), 0.0001);
+    }
+
+    @Test
+    public void largePreviewLutButtonWorksWhenBrightnessHidden() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        LargePreviewDialog dialog = new LargePreviewDialog(null);
+        try {
+            pair.setChannelLutName("Red");
+            pair.setOriginal(singleSlice("original", 0, 100));
+            pair.setDisplayControlsAvailable(false, true);
+            pair.setLargePreviewDialogForTest(dialog);
+
+            assertFalse(pair.displayControlsButton().isVisible());
+            assertTrue(pair.lutToggleButton().isVisible());
+            assertFalse(dialog.displayControlsButtonForTest().isVisible());
+            assertFalse(dialog.displayControlsButtonForTest().isEnabled());
+            assertTrue(dialog.lutToggleButtonForTest().isVisible());
+
+            dialog.lutToggleButtonForTest().doClick();
+
+            assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                    pair.displaySettingsForTest().getLutMode());
+
+            dialog.displayControlsButtonForTest().doClick();
+
+            assertNull(pair.displayControlsOwnerForTest());
+        } finally {
+            pair.disposeDisplayControlsDialogForTest();
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void comparisonPreviewLutButtonWorksWhenBrightnessHidden() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ComparisonPreviewDialog dialog = new ComparisonPreviewDialog(null);
+        try {
+            pair.setChannelLutName("Red");
+            ImagePlus raw = singleSlice("raw", 0, 100);
+            ImagePlus filtered = singleSlice("filtered", 0, 100);
+            pair.setLargePreviewImages(raw, filtered, singleSlice("current", 0, 1));
+            pair.setPreviousComparisonPreview(singleSlice("previous", 0, 1),
+                    "Previous preview ready.");
+            pair.setComparisonPreviewVisible(true);
+            pair.setDisplayControlsAvailable(false, true);
+            pair.setComparisonPreviewDialogForTest(dialog);
+
+            assertFalse(pair.displayControlsButton().isVisible());
+            assertTrue(pair.lutToggleButton().isVisible());
+            assertFalse(dialog.displayControlsButtonForTest().isVisible());
+            assertFalse(dialog.displayControlsButtonForTest().isEnabled());
+            assertTrue(dialog.lutToggleButtonForTest().isVisible());
+
+            dialog.lutToggleButtonForTest().doClick();
+
+            assertEquals(PreviewDisplaySettings.LutMode.GREY,
+                    pair.displaySettingsForTest().getLutMode());
+
+            dialog.displayControlsButtonForTest().doClick();
+
+            assertNull(pair.displayControlsOwnerForTest());
+        } finally {
+            pair.disposeDisplayControlsDialogForTest();
+            pair.disposeComparisonPreviewForTest();
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void comparisonPreviewRestoreButtonRunsConfiguredAction() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ComparisonPreviewDialog dialog = new ComparisonPreviewDialog(null);
+        final int[] restoreRequests = {0};
+        try {
+            pair.setLargePreviewImages(singleSlice("raw", 0, 100),
+                    singleSlice("filtered", 0, 100),
+                    singleSlice("current", 0, 1));
+            pair.setPreviousComparisonPreview(singleSlice("previous", 0, 1),
+                    "Previous preview ready.");
+            pair.setComparisonRestoreAction(new Runnable() {
+                @Override public void run() {
+                    restoreRequests[0]++;
+                }
+            });
+            pair.setComparisonPreviewVisible(true);
+            pair.setComparisonPreviewDialogForTest(dialog);
+
+            assertTrue(dialog.restorePreviousButtonForTest().isVisible());
+            assertTrue(dialog.restorePreviousButtonForTest().isEnabled());
+
+            dialog.restorePreviousButtonForTest().doClick();
+
+            assertEquals(1, restoreRequests[0]);
+        } finally {
+            pair.disposeComparisonPreviewForTest();
+            dialog.dispose();
+        }
+    }
+
+    @Test
+    public void resetZReturnsAllPreviewsToFirstSlice() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        pair.setOriginal(stack("original", 5));
+        pair.setAdjusted(stack("adjusted", 5));
+        pair.setCurrentZ(4);
+
+        pair.resetZ();
+
+        assertEquals(1, pair.getCurrentZ());
+        assertEquals(1, pair.originalZForTest());
+        assertEquals(1, pair.adjustedZForTest());
+    }
+
+    @Test
+    public void adjustedStateMapsToUserFacingStatusText() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+
+        pair.setAdjustedState(PreviewPairPanel.PreviewState.STALE, null);
+        assertEquals(PreviewPairPanel.PreviewState.STALE, pair.adjustedStateForTest());
+        assertEquals("Preview is out of date. Press the preview button to update.",
+                pair.adjustedStatusTextForTest());
+
+        pair.setAdjustedState(PreviewPairPanel.PreviewState.RUNNING, "Rendering labels...");
+        assertEquals("Rendering labels...", pair.adjustedStatusTextForTest());
+
+        pair.setAdjustedState(PreviewPairPanel.PreviewState.ERROR, "Filter failed");
+        assertEquals("Preview failed: Filter failed", pair.adjustedStatusTextForTest());
+    }
+
+    @Test
+    public void adjustedPreviewRequestTokenRejectsStaleResults() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        long first = pair.beginAdjustedPreviewRequest("Rendering first preview...");
+        long second = pair.beginAdjustedPreviewRequest("Rendering second preview...");
+
+        boolean staleApplied = pair.applyAdjustedPreviewResult(
+                first,
+                stack("stale", 1),
+                PreviewPairPanel.PreviewState.READY,
+                "Stale preview ready.");
+        boolean currentApplied = pair.applyAdjustedPreviewResult(
+                second,
+                stack("current", 1),
+                PreviewPairPanel.PreviewState.READY,
+                "Current preview ready.");
+
+        assertFalse(staleApplied);
+        assertTrue(currentApplied);
+        assertEquals("current", pair.adjustedImageTitleForTest());
+        assertEquals("Current preview ready.", pair.adjustedStatusTextForTest());
+    }
+
+    @Test
+    public void sharedClampUsesMinimumAvailableSliceCount() {
+        assertEquals(1, PreviewPairPanel.clampSharedZ(0, 5, 3));
+        assertEquals(2, PreviewPairPanel.clampSharedZ(2, 5, 3));
+        assertEquals(3, PreviewPairPanel.clampSharedZ(5, 5, 3));
+    }
+
+    @Test
+    public void customLargePreviewModelCanUseThreeImages() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+
+        pair.setLargePreviewImages(
+                stack("raw", 4),
+                stack("filtered", 4),
+                stack("objects", 4));
+
+        assertEquals(3, pair.largePreviewImageCountForTest());
+
+        pair.clearLargePreviewImages();
+
+        assertEquals(2, pair.largePreviewImageCountForTest());
+    }
+
+    @Test
+    public void objectSizeGuideAppliesToBothNormalPreviewPanes() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ImagePlus source = stack("source", 1);
+        ResultsTable stats = new ResultsTable();
+        stats.incrementCounter();
+        stats.setValue("Label", 0, 1);
+        stats.setValue("Volume (pixel^3)", 0, 20);
+        ObjectSizeFilterPreview.Summary summary =
+                ObjectSizeFilterPreview.summarize(stats, source, 5, 30, true);
+
+        pair.setOriginal(source);
+        pair.setAdjusted(stack("preview", 1));
+        pair.setObjectSizeGuide(summary);
+
+        assertSame(summary, pair.objectSizeGuideForTest());
+        assertSame(summary, pair.originalPreviewForTest().objectSizeGuideForTest());
+        assertSame(summary, pair.adjustedPreviewForTest().objectSizeGuideForTest());
+
+        pair.setObjectSizeGuide(null);
+
+        assertNull(pair.originalPreviewForTest().objectSizeGuideForTest());
+        assertNull(pair.adjustedPreviewForTest().objectSizeGuideForTest());
+    }
+
+    @Test
+    public void customLargePreviewSourceChoiceSwitchesFirstPaneOnlyForLargeView() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+        ImagePlus original = stack("original source", 4);
+        ImagePlus filtered = stack("filtered source", 4);
+        ImagePlus threshold = stack("threshold preview", 4);
+        ImagePlus labels = stack("objects", 4);
+
+        pair.setOriginal(threshold);
+        pair.setAdjusted(labels);
+        pair.setLargePreviewSourceChoices(original, filtered);
+        pair.setLargePreviewImages(original, threshold, labels);
+
+        assertFalse(pair.sourceToggleVisibleForTest());
+        assertEquals("original source", pair.largePreviewFirstImageForTest().getTitle());
+        assertEquals(PreviewPairPanel.SourceMode.RAW, pair.largePreviewSourceModeForTest());
+        assertEquals("threshold preview", pair.originalPreviewForTest().titleTextForTest());
+
+        pair.setLargePreviewSourceMode(PreviewPairPanel.SourceMode.FILTERED);
+
+        assertFalse(pair.sourceToggleVisibleForTest());
+        assertEquals("filtered source", pair.largePreviewFirstImageForTest().getTitle());
+        assertEquals(PreviewPairPanel.SourceMode.FILTERED, pair.largePreviewSourceModeForTest());
+        assertEquals("threshold preview", pair.originalPreviewForTest().titleTextForTest());
+    }
+
+    @Test
+    public void compactHeadersHidePerImageMetadataRowsAndUsePanelTitles() {
+        PreviewPairPanel pair = new PreviewPairPanel("Original", "Adjusted");
+
+        pair.setCompactPreviewHeaders(true);
+        pair.setOriginalPreviewTitle("Original Image - Mouse1_LH_SCN");
+        pair.setAdjustedPreviewTitle("Adjusted / output preview");
+
+        assertFalse(pair.originalPreviewMetadataHeaderVisibleForTest());
+        assertEquals("Original Image - Mouse1_LH_SCN", pair.originalPreviewTitleForTest());
+        assertEquals("Adjusted / output preview", pair.adjustedPreviewTitleForTest());
+    }
+
+    @Test(timeout = 5000)
+    public void largePreviewUsesCurrentWindowAsOwnerWhenAvailable() {
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
+
+        Frame owner = new Frame("Owner");
+        PreviewPairPanel pair = new PreviewPairPanel(null, "Original", "Adjusted");
+        try {
+            owner.add(pair);
+
+            pair.largeViewButton().doClick();
+
+            assertSame(owner, pair.largePreviewOwnerForTest());
+        } finally {
+            pair.disposeLargePreviewForTest();
+            owner.dispose();
+        }
+    }
+
+    @Test(timeout = 5000)
+    public void displayControlsButtonUsesCurrentWindowAsOwnerWhenAvailable() {
+        UiTestAssumptions.assumeInteractiveUiTestsEnabled();
+
+        Frame owner = new Frame("Owner");
+        PreviewPairPanel pair = new PreviewPairPanel(null, "Original", "Adjusted");
+        try {
+            owner.add(pair);
+            owner.pack();
+            owner.setVisible(true);
+
+            pair.displayControlsButton().doClick();
+
+            assertSame(owner, pair.displayControlsOwnerForTest());
+        } finally {
+            pair.disposeDisplayControlsDialogForTest();
+            owner.dispose();
+        }
+    }
+
+    private static ImagePlus stack(String title, int slices) {
+        ImageStack stack = new ImageStack(3, 3);
+        for (int i = 0; i < slices; i++) {
+            ByteProcessor processor = new ByteProcessor(3, 3);
+            processor.set(1, 1, i + 1);
+            stack.addSlice(processor);
+        }
+        return new ImagePlus(title, stack);
+    }
+
+    private static ImagePlus singleSlice(String title, int lowValue, int highValue) {
+        ByteProcessor processor = new ByteProcessor(2, 1);
+        processor.set(0, 0, lowValue);
+        processor.set(1, 0, highValue);
+        return new ImagePlus(title, processor);
+    }
+
+    private static ImagePlus uniformSingleSlice(String title, int value) {
+        ByteProcessor processor = new ByteProcessor(2, 1);
+        processor.set(0, 0, value);
+        processor.set(1, 0, value);
+        return new ImagePlus(title, processor);
+    }
+
+    private static ImagePlus otsuOverlayImage(String title) {
+        ByteProcessor processor = new ByteProcessor(32, 32);
+        for (int y = 0; y < 32; y++) {
+            for (int x = 0; x < 32; x++) {
+                processor.set(x, y,
+                        x >= 10 && x < 24 && y >= 10 && y < 24 ? 220 : 20);
+            }
+        }
+        return new ImagePlus(title, processor);
+    }
+
+    private static boolean redTinted(int rgb) {
+        int r = (rgb >> 16) & 0xff;
+        int g = (rgb >> 8) & 0xff;
+        int b = rgb & 0xff;
+        return r > g && r > b && r > 160;
+    }
+
+    private static ImagePlus labelThenBackground(String title) {
+        ByteProcessor processor = new ByteProcessor(2, 1);
+        processor.set(0, 0, 1);
+        processor.set(1, 0, 0);
+        ImagePlus image = new ImagePlus(title, processor);
+        LabelMapStyler.apply(image, 1);
+        return image;
+    }
+
+    private static ImagePlus objectFilterLabels(String title) {
+        ByteProcessor processor = new ByteProcessor(3, 1);
+        processor.set(0, 0, 1);
+        processor.set(1, 0, 2);
+        processor.set(2, 0, 3);
+        return new ImagePlus(title, processor);
+    }
+
+    private static Set<Integer> removedLabels(int label) {
+        Set<Integer> removed = new HashSet<Integer>();
+        removed.add(Integer.valueOf(label));
+        return removed;
+    }
+
+    private static ImagePlus shortSingleSlice(String title, int lowValue, int highValue) {
+        ShortProcessor processor = new ShortProcessor(2, 1);
+        processor.set(0, 0, lowValue);
+        processor.set(1, 0, highValue);
+        return new ImagePlus(title, processor);
+    }
+
+    private PreviewPairPanel clickCapturePair(ClickStore store) throws Exception {
+        PreviewPairPanel pair = new PreviewPairPanel("Filtered", "Objects");
+        pair.setClickCapture(newClickBinFolder(), store, "Mouse1_LH_SCN", 2);
+        ImagePlus raw = clickSource("raw");
+        ImagePlus filtered = clickSource("filtered");
+        ImagePlus labels = clickLabels("Object labels");
+        pair.setOriginal(filtered);
+        pair.setLargePreviewImages(raw, filtered, labels);
+        pair.setAdjusted(labels);
+        return pair;
+    }
+
+    private File newClickBinFolder() throws Exception {
+        return temp.newFolder("click-capture-" + System.nanoTime());
+    }
+
+    private static ImagePlus clickSource(String title) {
+        ImageStack stack = new ImageStack(3, 2);
+        for (int i = 0; i < 2; i++) {
+            ByteProcessor processor = new ByteProcessor(3, 2);
+            processor.set(0, 0, 50);
+            processor.set(2, 1, 100);
+            stack.addSlice(processor);
+        }
+        return new ImagePlus(title, stack);
+    }
+
+    private static ImagePlus clickLabels(String title) {
+        ImageStack stack = new ImageStack(3, 2);
+        ByteProcessor first = new ByteProcessor(3, 2);
+        first.set(0, 0, 7);
+        first.set(1, 0, 0);
+        stack.addSlice(first);
+        ByteProcessor second = new ByteProcessor(3, 2);
+        second.set(2, 1, 11);
+        stack.addSlice(second);
+        return new ImagePlus(title, stack);
+    }
+
+    private static int blend(int base, int overlay, double alpha) {
+        int br = (base >> 16) & 0xff;
+        int bg = (base >> 8) & 0xff;
+        int bb = base & 0xff;
+        int or = (overlay >> 16) & 0xff;
+        int og = (overlay >> 8) & 0xff;
+        int ob = overlay & 0xff;
+        int r = (int) Math.round(br * (1.0 - alpha) + or * alpha);
+        int g = (int) Math.round(bg * (1.0 - alpha) + og * alpha);
+        int b = (int) Math.round(bb * (1.0 - alpha) + ob * alpha);
+        return (r << 16) | (g << 8) | b;
+    }
+}

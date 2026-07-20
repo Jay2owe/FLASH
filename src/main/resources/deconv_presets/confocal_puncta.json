@@ -1,0 +1,12 @@
+{
+  "name": "Confocal Puncta — CLIJ2 RL-TV 20",
+  "description": "Confocal puncta density preset with stronger RL-TV deblurring on the GPU.",
+  "engineKey": "CLIJ2",
+  "algorithm": "RL_TV",
+  "psfModel": "GIBSON_LANNI",
+  "iterations": 20,
+  "regularization": 0.02,
+  "scopeModality": "CONFOCAL",
+  "pinholeAU": 1.0,
+  "sampleRI": 1.33
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Small-N cautious (non-parametric)",
+  "description": "Small sample sizes where the normality gate is unreliable. Forces non-parametric tests (Mann-Whitney / Kruskal-Wallis) with Bonferroni post-hoc.",
+  "libraryVersion": "1",
+  "pairedMode": "OFF",
+  "distributionMode": "ASSUME_SKEWED",
+  "postHocMethod": "BONFERRONI",
+  "metricFilter": null
+}

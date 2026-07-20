@@ -1,0 +1,19 @@
+{
+  "name": "Score existing 3D objects",
+  "description": "Score existing 3D Object Analysis label maps for spectral contamination.",
+  "libraryVersion": "1",
+  "contaminationType": "score_existing",
+  "calibration": "manual",
+  "strength": "standard",
+  "goal": "score_existing_objects",
+  "targetChannelIndex": 0,
+  "bleedThroughChannelIndexes": [],
+  "autofluorescenceChannelIndexes": [],
+  "excludedChannelIndexes": [],
+  "controlConditionNames": [],
+  "experimentalConditionNames": [],
+  "correctionPresetId": "custom",
+  "expertMode": false,
+  "correctionFeatureIds": [],
+  "featureSettings": {}
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Fast Presentable Results",
+  "description": "Fast route to presentation images, intensity quantification, statistics, and export.",
+  "flashVersion": "0.x",
+  "analyses": ["SplitMerge", "RepresentativeFigure", "Intensity", "Aggregation", "Statistics", "Excel"],
+  "modulePresets": {
+    "Intensity": "roi_mean",
+    "Excel": "Exploratory (default - all sheets, raw values)"
+  }
+}

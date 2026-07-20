@@ -1,0 +1,4 @@
+DAPI GFP
+Blue Green
+default 500
+100-Infinity 50-5000

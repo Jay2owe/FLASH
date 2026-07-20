@@ -1,0 +1,33 @@
+{
+  "vocabularyVersion": 1,
+  "entries": [
+    {
+      "label": "Ventricle wall",
+      "aliases": ["ventricle", "ventricular", "ventricle wall", "lv", "lateral ventricle"]
+    },
+    {
+      "label": "Cortical pial surface",
+      "aliases": ["pia", "pial", "pial surface", "cortical pial surface", "cortical surface"]
+    },
+    {
+      "label": "White-matter boundary",
+      "aliases": ["wm boundary", "white matter", "white-matter boundary", "gray-white", "grey-white", "grey-white boundary"]
+    },
+    {
+      "label": "Wound margin",
+      "aliases": ["wound", "wound margin", "lesion", "lesion margin", "injury margin"]
+    },
+    {
+      "label": "Tissue edge",
+      "aliases": ["edge", "tissue edge", "tissue boundary", "section edge"]
+    },
+    {
+      "label": "Axon tract",
+      "aliases": ["tract", "axon", "axon tract", "fiber tract", "white matter tract"]
+    },
+    {
+      "label": "Custom",
+      "aliases": []
+    }
+  ]
+}

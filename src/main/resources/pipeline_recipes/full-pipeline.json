@@ -1,0 +1,7 @@
+{
+  "name": "Full pipeline",
+  "description": "Run every visible analysis except 3D deconvolution and experimental spectral cleanup.",
+  "flashVersion": "0.x",
+  "analyses": ["CreateBin", "DrawROIs", "SplitMerge", "Intensity", "ThreeDObject", "Spatial", "LineDistance", "Aggregation", "Statistics", "Excel"],
+  "modulePresets": {}
+}

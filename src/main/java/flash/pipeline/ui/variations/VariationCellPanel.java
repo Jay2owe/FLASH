@@ -1,0 +1,2737 @@
+package flash.pipeline.ui.variations;
+
+import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.preview.ImagePreviewPanel;
+import flash.pipeline.ui.preview.ObjectOverlayRenderer;
+import flash.pipeline.ui.preview.PreviewDisplaySettings;
+import flash.pipeline.ui.preview.ThresholdOverlayRenderer;
+
+import ij.ImagePlus;
+import ij.ImageStack;
+import ij.measure.ResultsTable;
+import ij.process.ByteProcessor;
+import ij.process.ImageProcessor;
+
+import javax.swing.BorderFactory;
+import javax.swing.JDialog;
+import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.WindowConstants;
+import java.awt.BasicStroke;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dialog;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
+import java.awt.Point;
+import java.awt.RadialGradientPaint;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.Window;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.geom.Path2D;
+import java.awt.geom.RoundRectangle2D;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+
+public final class VariationCellPanel extends JPanel {
+
+    private static final Color CARD_BACKGROUND = new Color(0x26, 0x2A, 0x2E);
+    private static final Color DEFAULT_BORDER = new Color(0x5B, 0x62, 0x69);
+    private static final Color HOVER_BORDER = new Color(0, 0, 0, 20);
+    private static final Color KNEE_BORDER = new Color(0xF0, 0xE4, 0x42);
+    private static final Color STABILITY_BORDER = new Color(0x56, 0xB4, 0xE9);
+    private static final Color COMPARE_BORDER = STABILITY_BORDER;
+    private static final Color FOOTER_COLOR = new Color(0xC0, 0xC5, 0xCA);
+    private static final Color ERROR_COLOR = new Color(0xE6, 0x9F, 0x00);
+    private static final Color RIBBON_RIM = new Color(0, 0, 0, 170);
+    private static final Color DOWNSTREAM_RIBBON = new Color(0x56, 0xB4, 0xE9);
+    private static final Color DOWNSTREAM_HELP = new Color(0xF0, 0xE4, 0x42);
+    private static final Color DOWNSTREAM_HURT = new Color(0xE6, 0x9F, 0x00);
+    private static final Color DOWNSTREAM_NEUTRAL = new Color(0x7A, 0x82, 0x89);
+    private static final Color CHIP_TEXT = new Color(0x22, 0x22, 0x22);
+    private static final int CARD_RADIUS = 8;
+    private static final float DEFAULT_OUTLINE_WIDTH = 1.5f;
+    private static final float COMPARE_OUTLINE_WIDTH = 4f;
+    private static final float HALO_ALPHA_BASE = 0.14f;
+    private static final float HALO_ALPHA_AMPLITUDE = 0.08f;
+    private static final int UNKNOWN_DELTA = Integer.MIN_VALUE;
+    private static final int PEEK_DELAY_MS = 120;
+    private static final int PEEK_DRAG_CANCEL_PX = 4;
+    private static final int FILTER_PARAM_LABEL_MAX_CHARS = 56;
+    private static final int CELL_SIZE = 260;
+    private static final int METRIC_STRIP_HEIGHT = 24;
+    private static final int FILTER_PARAM_STRIP_HEIGHT = 22;
+    private static final int METRIC_TEXT_INSET = 8;
+    private static final int OVERLAY_PILL_HEIGHT = 18;
+    private static final int OVERLAY_PILL_RADIUS = 6;
+    private static final int OVERLAY_PILL_X_PAD = 7;
+    private static final int PICK_PILL_WIDTH = 50;
+    private static final int PICK_PILL_HEIGHT = 22;
+    private static final int PICK_PILL_RADIUS = 8;
+    private static final int PICK_PILL_INSET = 10;
+    private static final int MAGNIFIER_SIZE = 22;
+    private static final int MAGNIFIER_INSET = 8;
+    private static final int ACTIVE = 0;
+    private static final int TERMINATING = 1;
+    private static final int DISPOSED = 2;
+    private static final int MAX_TERMINAL_CLEANUP_PASSES = 8;
+    private static final int MAX_STAGNANT_CLEANUP_PASSES = 3;
+    private static final Color OVERLAY_STRIP = new Color(0, 0, 0, 140);
+    private static final Color OVERLAY_TEXT = Color.WHITE;
+    private static final String ERROR_BADGE = "\u26a0";
+
+    public enum BorderHint {
+        NONE,
+        KNEE,
+        STABLE,
+        STABILITY
+    }
+
+    public enum OverlayMode {
+        NONE,
+        OTSU_MASK
+    }
+
+    private final ParameterCombo combo;
+    private final ImagePlus croppedSource;
+    private final Consumer<ParameterCombo> onAccept;
+    private final BiConsumer<ParameterCombo, VariationCellPanel> onCompare;
+    private Consumer<ParameterCombo> onPickCommit;
+    private final int placeholderIndex;
+    private final ImagePreviewPanel preview = new ImagePreviewPanel("Variation");
+    private final List<ParameterKey> footerParameterKeys =
+            new ArrayList<ParameterKey>();
+    private final Timer haloTimer;
+    private final Timer peekDelayTimer;
+
+    private ImagePlus cachedLabel;
+    private ResultsTable cachedStats;
+    private ImagePlus rawSourceImage;
+    private ImagePlus filteredImage;
+    private ImagePlus cachedOverlayImage;
+    private ImagePlus displayedPreviewImage;
+    private ImagePlus currentPreviewImage;
+    private ImagePlus ownedCachedLabel;
+    private ImagePlus ownedDisplayedPreviewImage;
+    private VariationResult installedResult;
+    private final List<ImagePlus> retiredResultImages = new ArrayList<ImagePlus>();
+    private final List<VariationResult> pendingResultCleanup =
+            new ArrayList<VariationResult>();
+    private OverlayMode overlayMode = OverlayMode.NONE;
+    private double cachedOtsuLower = Double.NaN;
+    // Object-overlay state (segmentation tiles only). The filtered crop is
+    // {@link #croppedSource}; the raw crop is supplied separately so the grid
+    // can overlay labels on either source and honour a shared LUT / display range.
+    private ImagePlus objectRawCrop;
+    private boolean objectOverlayEnabled = true;
+    private boolean objectOverlaySourceRaw;
+    private PreviewDisplaySettings objectDisplaySettings;
+    private long durationMs = -1L;
+    private int objectCount = -1;
+    private int deltaN = UNKNOWN_DELTA;
+    private double iouToNeighbours = Double.NaN;
+    private double filterSnr = Double.NaN;
+    private double filterBgSigma = Double.NaN;
+    private int downstreamDeltaN = UNKNOWN_DELTA;
+    private String errorText = "";
+    private String filterParameterText = "";
+    private String countLabelText = "pending";
+    private String deltaLabelText = "";
+    private String iouLabelText = "";
+    private String filterChipText = "";
+    private String filterDownstreamDeltaText = "";
+    private String filterSnrText = "";
+    private String filterBgSigmaText = "";
+    private String ribbonLabelOverride;
+    private String downstreamRibbonLabel;
+    private Color countLabelColor = FOOTER_COLOR;
+    private Color filterDownstreamDeltaFill = DOWNSTREAM_NEUTRAL;
+    private boolean deltaLabelVisible;
+    private boolean iouLabelVisible;
+    private boolean filterChipVisible;
+    private boolean filterDownstreamDeltaVisible;
+    private boolean filterFooterActive;
+    private boolean hover;
+    private boolean kneeWinner;
+    private boolean stabilityWinner;
+    private boolean selectedForCompare;
+    private boolean acceptEnabled;
+    private boolean errorState;
+    private boolean isBaseline;
+    private boolean showHalo;
+    private boolean peeking;
+    private boolean suppressNextClick;
+    private volatile int lifecycleState = ACTIVE;
+    private Point pressPoint;
+    private long haloStartNanos;
+    private float haloPhase;
+    private Color haloColor = KNEE_BORDER;
+
+    public VariationCellPanel(ParameterCombo combo,
+                              ImagePlus croppedSource,
+                              Consumer<ParameterCombo> onAccept,
+                              BiConsumer<ParameterCombo, VariationCellPanel> onCompare) {
+        this(combo, croppedSource, onAccept, onCompare, 0);
+    }
+
+    public VariationCellPanel(ParameterCombo combo,
+                              ImagePlus croppedSource,
+                              Consumer<ParameterCombo> onAccept,
+                              BiConsumer<ParameterCombo, VariationCellPanel> onCompare,
+                              int placeholderIndex) {
+        super(new BorderLayout(4, 4));
+        this.combo = combo == null ? ParameterCombo.builder().build() : combo;
+        this.croppedSource = croppedSource;
+        this.onAccept = onAccept;
+        this.onCompare = onCompare;
+        this.placeholderIndex = placeholderIndex;
+        this.haloTimer = new Timer(33, e -> advanceHalo());
+        this.haloTimer.setInitialDelay(0);
+        this.peekDelayTimer = new Timer(PEEK_DELAY_MS, e -> beginPeek());
+        this.peekDelayTimer.setRepeats(false);
+
+        setOpaque(false);
+        setBackground(CARD_BACKGROUND);
+        setPreferredSize(new Dimension(CELL_SIZE, CELL_SIZE));
+        setBorder(BorderFactory.createEmptyBorder());
+        preview.setSlim(true);
+        preview.setZRowVisible(false);
+        preview.setChromeless(true);
+        add(preview, BorderLayout.CENTER);
+        installMouseHandlers();
+        refreshFooter();
+        refreshBorder();
+        refreshTooltip();
+    }
+
+    public static VariationCellPanel baseline(ImagePlus croppedSource) {
+        VariationCellPanel cell = new VariationCellPanel(
+                ParameterCombo.builder().build(),
+                croppedSource,
+                null,
+                null,
+                -1);
+        cell.markAsBaseline(croppedSource);
+        return cell;
+    }
+
+    public ParameterCombo combo() {
+        return combo;
+    }
+
+    /**
+     * Sets the action run when the tile's "Pick" pill (top-right) is clicked.
+     * This commits the variation directly, distinct from a body click which
+     * only selects the tile.
+     */
+    public void setOnPickCommit(Consumer<ParameterCombo> onPickCommit) {
+        this.onPickCommit = onPickCommit;
+    }
+
+    /**
+     * Pixel dimensions of the source crop this cell renders, or {@code null}
+     * when the cell has no source image. Every cell in a sweep shares one crop,
+     * so the grid uses this to size tiles to the image's aspect ratio.
+     */
+    Dimension sourceImageSize() {
+        ImagePlus src = croppedSource;
+        if (src == null) {
+            return null;
+        }
+        return new Dimension(Math.max(1, src.getWidth()),
+                Math.max(1, src.getHeight()));
+    }
+
+    int sliceCountForSync() {
+        int previewSlices = Math.max(1, preview.getSliceCount());
+        if (currentPreviewImage != null || previewSlices > 1) {
+            return previewSlices;
+        }
+        return sliceCount(croppedSource);
+    }
+
+    private static int sliceCount(ImagePlus image) {
+        if (image == null) {
+            return 1;
+        }
+        int slices = Math.max(1, image.getNSlices());
+        if (slices <= 1) {
+            slices = Math.max(1, image.getStackSize());
+        }
+        return slices;
+    }
+
+    void markAsBaseline(ImagePlus croppedSource) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    markAsBaseline(croppedSource);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            return;
+        }
+        isBaseline = true;
+        acceptEnabled = false;
+        errorState = false;
+        errorText = "";
+        filteredImage = null;
+        invalidateOverlayCache();
+        setCachedLabel(null, false);
+        releaseInstalledResultExcept(croppedSource);
+        cachedStats = null;
+        objectCount = -1;
+        durationMs = -1L;
+        deltaN = UNKNOWN_DELTA;
+        iouToNeighbours = Double.NaN;
+        filterSnr = Double.NaN;
+        filterBgSigma = Double.NaN;
+        filterParameterText = "";
+        filterChipText = "";
+        filterChipVisible = false;
+        filterSnrText = "";
+        filterBgSigmaText = "";
+        clearRibbonLabelOverride();
+        clearDownstreamVerdictState();
+        showSegmentationFooter();
+        setDisplayedPreviewImage(croppedSource);
+        setStateText("Original", STABILITY_BORDER);
+        refreshTooltip();
+        refreshBorder();
+    }
+
+    public void setFooterParameterKeys(final List<ParameterKey> keys) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setFooterParameterKeys(keys);
+                }
+            });
+            return;
+        }
+        footerParameterKeys.clear();
+        if (keys != null) {
+            for (int i = 0; i < keys.size(); i++) {
+                ParameterKey key = keys.get(i);
+                if (key != null && !footerParameterKeys.contains(key)) {
+                    footerParameterKeys.add(key);
+                }
+            }
+        }
+        if (filterFooterActive) {
+            refreshFilterParameterLabel(combo);
+            refreshTooltip();
+        }
+    }
+
+    public ImagePreviewPanel preview() {
+        return preview;
+    }
+
+    public void setRawSource(final ImagePlus src) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setRawSource(src);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            return;
+        }
+        this.rawSourceImage = src;
+        if (src == null) {
+            cancelPeek(true);
+        }
+    }
+
+    public void setState(final String state) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setState(state);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            return;
+        }
+        showSegmentationFooter();
+        clearRibbonLabelOverride();
+        filteredImage = null;
+        setCachedLabel(null, false);
+        releaseInstalledResultExcept();
+        cachedStats = null;
+        invalidateOverlayCache();
+        errorState = false;
+        errorText = "";
+        acceptEnabled = false;
+        objectCount = -1;
+        deltaN = UNKNOWN_DELTA;
+        iouToNeighbours = Double.NaN;
+        filterSnr = Double.NaN;
+        filterBgSigma = Double.NaN;
+        clearDownstreamVerdictState();
+        filterParameterText = "";
+        filterChipText = "";
+        filterChipVisible = false;
+        filterSnrText = "";
+        filterBgSigmaText = "";
+        setDisplayedPreviewImage(null);
+        setStateText(state == null || state.trim().isEmpty() ? "pending" : state,
+                FOOTER_COLOR);
+        refreshTooltip();
+    }
+
+    public void setLabel(ImagePlus label, ResultsTable stats) {
+        setLabel(label, stats, stats == null ? -1 : stats.size(), -1L);
+    }
+
+    public void setResult(final VariationResult result) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setResult(result);
+                }
+            });
+            return;
+        }
+        if (result == null) {
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            rejectResultAfterTermination(result);
+            return;
+        }
+        if (result.hasError()) {
+            Throwable failure = VariationCleanupSupport.disposeRejectedResult(result);
+            setError(result.error());
+            rethrowInstalledResultFailure(failure);
+            return;
+        }
+        if (result.kind() == VariationResult.Kind.FILTER) {
+            setFilterResult(result);
+            return;
+        }
+        setLabel(result.label(), result.stats(), result.nObjects(),
+                result.durationMs(), result);
+        if (!Double.isNaN(result.meanNeighbourIou())) {
+            setIouToNeighbours(result.meanNeighbourIou());
+        }
+    }
+
+    public void setFilterResult(final VariationResult result) {
+        if (result == null) {
+            return;
+        }
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setFilterResult(result);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            rejectResultAfterTermination(result);
+            return;
+        }
+        if (result.hasError()) {
+            Throwable failure = VariationCleanupSupport.disposeRejectedResult(result);
+            setError(result.error());
+            rethrowInstalledResultFailure(failure);
+            return;
+        }
+        clearRibbonLabelOverride();
+        clearDownstreamVerdictState();
+        ImagePlus filtered = result.previewImage() == null
+                ? result.label()
+                : result.previewImage();
+        installResultLease(result, filtered);
+        invalidateOverlayCache();
+        filteredImage = filtered;
+        setCachedLabel(null, false);
+        cachedStats = null;
+        objectCount = -1;
+        deltaN = UNKNOWN_DELTA;
+        iouToNeighbours = Double.NaN;
+        durationMs = result.durationMs();
+        errorState = false;
+        errorText = "";
+        acceptEnabled = true;
+        filterSnr = result.snr();
+        filterBgSigma = result.bgSigma();
+        refreshFilterParameterLabel(result.combo());
+        filterSnrText = "SNR " + formatOneDecimal(filterSnr);
+        filterBgSigmaText = "bg \u03c3 " + formatInteger(filterBgSigma);
+        showFilterFooter();
+        setDisplayedPreviewImage(previewImageForOverlayMode());
+        refreshTooltip();
+    }
+
+    public void setError(final Throwable error) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setError(error);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            return;
+        }
+        clearRibbonLabelOverride();
+        clearDownstreamVerdictState();
+        filteredImage = null;
+        invalidateOverlayCache();
+        errorState = true;
+        acceptEnabled = false;
+        errorText = errorDetails(error);
+        showSegmentationFooter();
+        setCachedLabel(createEmptyLabel(), true);
+        releaseInstalledResultExcept(cachedLabel);
+        cachedStats = null;
+        objectCount = -1;
+        deltaN = UNKNOWN_DELTA;
+        iouToNeighbours = Double.NaN;
+        filterSnr = Double.NaN;
+        filterBgSigma = Double.NaN;
+        filterParameterText = "";
+        filterChipText = "";
+        filterChipVisible = false;
+        filterSnrText = "";
+        filterBgSigmaText = "";
+        durationMs = -1L;
+        setDisplayedPreviewImage(null);
+        if (PresetSweepCombo.isIncompatible(error)) {
+            setStateText("N/A", DOWNSTREAM_NEUTRAL);
+        } else {
+            setStateText(ERROR_BADGE, ERROR_COLOR);
+        }
+        refreshTooltip();
+    }
+
+    public void setLabel(final ImagePlus label,
+                         final ResultsTable stats,
+                         final int nObjects,
+                         final long durationMs) {
+        VariationResult lease = label == null ? null
+                : VariationResult.success(combo, label, nObjects, durationMs, stats);
+        setLabel(label, stats, nObjects, durationMs, lease);
+    }
+
+    private void setLabel(final ImagePlus label,
+                          final ResultsTable stats,
+                          final int nObjects,
+                          final long durationMs,
+                          final VariationResult result) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setLabel(label, stats, nObjects, durationMs, result);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            rejectResultAfterTermination(result);
+            return;
+        }
+        ImagePlus nextLabel = label == null ? createPlaceholderLabel() : label;
+        VariationResult nextLease = result == null
+                ? VariationResult.success(combo, nextLabel, nObjects, durationMs, stats)
+                : result;
+        installResultLease(nextLease, nextLabel);
+        clearRibbonLabelOverride();
+        clearDownstreamVerdictState();
+        filteredImage = null;
+        invalidateOverlayCache();
+        setCachedLabel(nextLabel, false);
+        this.cachedStats = stats;
+        this.objectCount = Math.max(0, nObjects);
+        this.durationMs = durationMs;
+        this.errorState = false;
+        this.errorText = "";
+        this.acceptEnabled = true;
+        this.filterSnr = Double.NaN;
+        this.filterBgSigma = Double.NaN;
+        this.filterParameterText = "";
+        this.filterChipText = "";
+        this.filterChipVisible = false;
+        this.filterSnrText = "";
+        this.filterBgSigmaText = "";
+        clearDownstreamVerdictState();
+        showSegmentationFooter();
+
+        ImagePlus rendered = renderObjectPreview();
+        setDisplayedPreviewImage(rendered, rendered != null && rendered != cachedLabel);
+        refreshFooter();
+        refreshTooltip();
+    }
+
+    /**
+     * Toggles whether segmentation tiles draw their labels over a source image
+     * ({@code true}) or show the bare colour-coded label map ({@code false}).
+     * No-op for filter, baseline and error tiles.
+     */
+    public void setObjectOverlayEnabled(final boolean enabled) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setObjectOverlayEnabled(enabled);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            return;
+        }
+        objectOverlayEnabled = enabled;
+        refreshObjectOverlay();
+    }
+
+    /** Chooses the raw ({@code true}) or filtered ({@code false}) crop as the overlay background. */
+    public void setObjectOverlaySourceRaw(final boolean raw) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setObjectOverlaySourceRaw(raw);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            return;
+        }
+        objectOverlaySourceRaw = raw;
+        refreshObjectOverlay();
+    }
+
+    /** Raw source crop used when the overlay background is set to "Raw image". */
+    public void setObjectRawCrop(final ImagePlus rawCrop) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setObjectRawCrop(rawCrop);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            return;
+        }
+        objectRawCrop = rawCrop;
+        refreshObjectOverlay();
+    }
+
+    /** Shared LUT + display range applied to the overlay background. */
+    public void setObjectDisplaySettings(final PreviewDisplaySettings settings) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setObjectDisplaySettings(settings);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            return;
+        }
+        objectDisplaySettings = settings;
+        refreshObjectOverlay();
+    }
+
+    private void refreshObjectOverlay() {
+        if (isBaseline || errorState || filterFooterActive || cachedLabel == null) {
+            return;
+        }
+        ImagePlus rendered = renderObjectPreview();
+        setDisplayedPreviewImage(rendered, rendered != null && rendered != cachedLabel);
+    }
+
+    private ImagePlus renderObjectPreview() {
+        ImagePlus label = cachedLabel;
+        if (label == null) {
+            return null;
+        }
+        ImagePlus source = objectOverlayEnabled ? objectOverlaySource() : null;
+        ImagePlus rendered = null;
+        if (source != null && dimensionsMatch(source, label)) {
+            rendered = ObjectOverlayRenderer.renderFiltered(source, label, null, true,
+                    objectDisplaySettings);
+        }
+        if (rendered == null) {
+            rendered = ObjectOverlayRenderer.renderLabelMap(label, objectCount);
+        }
+        if (rendered == null) {
+            rendered = label;
+        }
+        return rendered;
+    }
+
+    private ImagePlus objectOverlaySource() {
+        ImagePlus raw = objectRawCrop;
+        ImagePlus filtered = croppedSource;
+        if (objectOverlaySourceRaw) {
+            return raw != null ? raw : filtered;
+        }
+        return filtered != null ? filtered : raw;
+    }
+
+    public void setOverlayMode(final OverlayMode mode) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setOverlayMode(mode);
+                }
+            });
+            return;
+        }
+        if (lifecycleState != ACTIVE) {
+            return;
+        }
+        OverlayMode next = mode == null ? OverlayMode.NONE : mode;
+        if (overlayMode == next && cachedOverlayImage != null) {
+            return;
+        }
+        overlayMode = next;
+        setDisplayedPreviewImage(previewImageForOverlayMode());
+        refreshTooltip();
+    }
+
+    public void setZ(final int z) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setZ(z);
+                }
+            });
+            return;
+        }
+        preview.setCurrentZ(z);
+    }
+
+    public void setDeltaN(final int deltaN) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setDeltaN(deltaN);
+                }
+            });
+            return;
+        }
+        this.deltaN = deltaN;
+        refreshFooter();
+        refreshTooltip();
+    }
+
+    public void clearDeltaN() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    clearDeltaN();
+                }
+            });
+            return;
+        }
+        this.deltaN = UNKNOWN_DELTA;
+        refreshFooter();
+        refreshTooltip();
+    }
+
+    public void setDownstreamDelta(final int deltaCells) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setDownstreamDelta(deltaCells);
+                }
+            });
+            return;
+        }
+        downstreamDeltaN = deltaCells;
+        refreshDownstreamChip();
+        refreshTooltip();
+    }
+
+    public void clearDownstreamVerdict() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    clearDownstreamVerdict();
+                }
+            });
+            return;
+        }
+        clearDownstreamVerdictState();
+        refreshTooltip();
+        repaint();
+    }
+
+    public void setIouToNeighbours(final double iouToNeighbours) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setIouToNeighbours(iouToNeighbours);
+                }
+            });
+            return;
+        }
+        this.iouToNeighbours = iouToNeighbours;
+        refreshFooter();
+        refreshTooltip();
+    }
+
+    public void setKneeWinner(final boolean kneeWinner) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setKneeWinner(kneeWinner);
+                }
+            });
+            return;
+        }
+        boolean start = kneeWinner && !this.kneeWinner;
+        this.kneeWinner = kneeWinner;
+        if (start) {
+            startHalo(KNEE_BORDER);
+        } else if (!this.kneeWinner && !stabilityWinner) {
+            resetHalo();
+        }
+        refreshFooter();
+        refreshBorder();
+        refreshTooltip();
+    }
+
+    public void setStabilityWinner(boolean stabilityWinner) {
+        setStabilityWinner(stabilityWinner, Double.NaN);
+    }
+
+    public void setStabilityWinner(final boolean stabilityWinner,
+                                   final double meanNeighbourIou) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setStabilityWinner(stabilityWinner, meanNeighbourIou);
+                }
+            });
+            return;
+        }
+        boolean start = stabilityWinner && !this.stabilityWinner;
+        this.stabilityWinner = stabilityWinner;
+        if (!Double.isNaN(meanNeighbourIou)) {
+            this.iouToNeighbours = meanNeighbourIou;
+        }
+        if (start) {
+            startHalo(STABILITY_BORDER);
+        } else if (!kneeWinner && !this.stabilityWinner) {
+            resetHalo();
+        }
+        refreshFooter();
+        refreshBorder();
+        refreshTooltip();
+    }
+
+    public void setBorderHint(final BorderHint hint) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setBorderHint(hint);
+                }
+            });
+            return;
+        }
+        if (hint == null || hint == BorderHint.NONE) {
+            kneeWinner = false;
+            stabilityWinner = false;
+            clearRibbonLabelOverride();
+            resetHalo();
+        } else if (hint == BorderHint.KNEE) {
+            setKneeWinner(true);
+            return;
+        } else if (hint == BorderHint.STABLE || hint == BorderHint.STABILITY) {
+            setStabilityWinner(true);
+            return;
+        }
+        refreshFooter();
+        refreshBorder();
+        refreshTooltip();
+    }
+
+    public void setRibbonLabel(final String label) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setRibbonLabel(label);
+                }
+            });
+            return;
+        }
+        String safeLabel = label == null ? "" : label.trim();
+        if (safeLabel.toUpperCase(Locale.ROOT).contains("DOWNSTREAM")) {
+            setDownstreamRibbonLabel(safeLabel);
+            return;
+        }
+        ribbonLabelOverride = safeLabel.length() == 0 ? null : safeLabel;
+        repaint();
+    }
+
+    public void setDownstreamRibbonLabel(final String label) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setDownstreamRibbonLabel(label);
+                }
+            });
+            return;
+        }
+        String safeLabel = label == null ? "" : label.trim();
+        downstreamRibbonLabel = safeLabel.length() == 0 ? null : safeLabel;
+        repaint();
+        refreshTooltip();
+    }
+
+    void setSelectedForCompare(final boolean selectedForCompare) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override public void run() {
+                    setSelectedForCompare(selectedForCompare);
+                }
+            });
+            return;
+        }
+        this.selectedForCompare = selectedForCompare;
+        refreshBorder();
+    }
+
+    ImagePlus cachedLabel() {
+        return cachedLabel;
+    }
+
+    boolean hasCachedLabel() {
+        return cachedLabel != null;
+    }
+
+    boolean isSelectedForCompareForTest() {
+        return selectedForCompare;
+    }
+
+    String footerTextForTest() {
+        return badgeText();
+    }
+
+    String[] footerLinesForTest() {
+        if (filterFooterActive) {
+            if (filterChipVisible) {
+                return filterLines(true);
+            }
+            return filterLines(false);
+        }
+        return new String[] { badgeText() };
+    }
+
+    String badgeText() {
+        if (filterFooterActive) {
+            String prefix = filterChipVisible
+                    ? filterChipText + " "
+                    : "";
+            String downstream = filterDownstreamDeltaVisible
+                    ? filterDownstreamDeltaText + " "
+                    : "";
+            return prefix + downstream + filterSnrText + " "
+                    + filterBgSigmaText;
+        }
+        StringBuilder out = new StringBuilder(countLabelText);
+        if (deltaLabelVisible && deltaLabelText.length() > 0) {
+            out.append(' ').append(deltaLabelText);
+        }
+        if (iouLabelVisible && iouLabelText.length() > 0) {
+            out.append(' ').append(iouLabelText);
+        }
+        return out.toString();
+    }
+
+    int currentZForTest() {
+        return preview.getCurrentZ();
+    }
+
+    ImagePlus cachedLabelForTest() {
+        return cachedLabel;
+    }
+
+    ImagePlus currentPreviewImageForTest() {
+        return currentPreviewImage;
+    }
+
+    OverlayMode overlayModeForTest() {
+        return overlayMode;
+    }
+
+    boolean objectOverlayEnabledForTest() {
+        return objectOverlayEnabled;
+    }
+
+    boolean objectOverlaySourceRawForTest() {
+        return objectOverlaySourceRaw;
+    }
+
+    PreviewDisplaySettings objectDisplaySettingsForTest() {
+        return objectDisplaySettings;
+    }
+
+    double cachedOtsuLowerForTest() {
+        return cachedOtsuLower;
+    }
+
+    boolean isPeekingForTest() {
+        return peeking;
+    }
+
+    boolean isPeekDelayRunningForTest() {
+        return peekDelayTimer.isRunning();
+    }
+
+    boolean suppressNextClickForTest() {
+        return suppressNextClick;
+    }
+
+    boolean isBaselineForTest() {
+        return isBaseline;
+    }
+
+    boolean isAcceptEnabledForTest() {
+        return acceptEnabled;
+    }
+
+    boolean isHaloTimerRunningForTest() {
+        return haloTimer.isRunning();
+    }
+
+    boolean isHaloVisibleForTest() {
+        return showHalo;
+    }
+
+    String ribbonLabelForTest() {
+        return ribbonLabelOverride;
+    }
+
+    String downstreamRibbonLabelForTest() {
+        return downstreamRibbonLabel;
+    }
+
+    String countLabelTextForTest() {
+        return countLabelText;
+    }
+
+    String deltaLabelTextForTest() {
+        return deltaLabelText;
+    }
+
+    boolean deltaLabelVisibleForTest() {
+        return deltaLabelVisible;
+    }
+
+    String iouLabelTextForTest() {
+        return iouLabelText;
+    }
+
+    boolean iouLabelVisibleForTest() {
+        return iouLabelVisible;
+    }
+
+    String filterChipTextForTest() {
+        return filterChipText;
+    }
+
+    boolean filterChipVisibleForTest() {
+        return filterChipVisible;
+    }
+
+    String filterDownstreamDeltaTextForTest() {
+        return filterDownstreamDeltaText;
+    }
+
+    boolean filterDownstreamDeltaVisibleForTest() {
+        return filterDownstreamDeltaVisible;
+    }
+
+    String filterSnrTextForTest() {
+        return filterSnrText;
+    }
+
+    String filterBgSigmaTextForTest() {
+        return filterBgSigmaText;
+    }
+
+    void firePeekDelayForTest() {
+        beginPeek();
+    }
+
+    void clickForTest(boolean shift) {
+        if (suppressNextClick) {
+            suppressNextClick = false;
+            return;
+        }
+        if (shift) {
+            if (onCompare != null) {
+                onCompare.accept(combo, this);
+            }
+        } else if (acceptEnabled && onAccept != null) {
+            onAccept.accept(combo);
+        }
+    }
+
+    private boolean pickPillVisible() {
+        return acceptEnabled && !isBaseline;
+    }
+
+    boolean isPickPillVisibleForTest() {
+        return pickPillVisible();
+    }
+
+    private Rectangle pickPillBounds() {
+        int width = getWidth();
+        int height = getHeight();
+        int x = Math.max(PICK_PILL_INSET,
+                width - PICK_PILL_WIDTH - PICK_PILL_INSET);
+        int y = Math.min(Math.max(PICK_PILL_INSET, 0),
+                Math.max(0, height - PICK_PILL_HEIGHT - PICK_PILL_INSET));
+        return new Rectangle(x, y, PICK_PILL_WIDTH, PICK_PILL_HEIGHT);
+    }
+
+    private boolean hitPickPill(Point p) {
+        return !peeking && pickPillVisible() && p != null
+                && pickPillBounds().contains(p);
+    }
+
+    @Override protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        // Edge-to-edge: the image fills the cell, so there is no card box. Only
+        // the baseline and the compare selection get a flush outline; knee and
+        // stability winners are still flagged by their halo and corner ribbon.
+        g2.setColor(CARD_BACKGROUND);
+        g2.fillRect(0, 0, getWidth(), getHeight());
+        if (isBaseline || selectedForCompare) {
+            float outlineWidth = selectedForCompare ? COMPARE_OUTLINE_WIDTH : 3f;
+            if (isBaseline) {
+                g2.setStroke(new BasicStroke(outlineWidth,
+                        BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND,
+                        0f,
+                        new float[] { 7f, 4f },
+                        0f));
+            } else {
+                g2.setStroke(new BasicStroke(outlineWidth));
+            }
+            g2.setColor(isBaseline ? STABILITY_BORDER : COMPARE_BORDER);
+            int half = Math.max(1, Math.round(outlineWidth / 2f));
+            g2.drawRect(half, half,
+                    Math.max(1, getWidth() - 2 * half),
+                    Math.max(1, getHeight() - 2 * half));
+        }
+        g2.dispose();
+    }
+
+    @Override protected void paintChildren(Graphics g) {
+        super.paintChildren(g);
+        paintHoverTint(g);
+        if (!peeking) {
+            paintHalo(g);
+            paintCompareBadge(g);
+            paintRibbons(g);
+            paintMetricOverlays(g);
+            paintPickPill(g);
+            paintMagnifier(g);
+        }
+    }
+
+    @Override public void removeNotify() {
+        cancelPeek(true);
+        haloTimer.stop();
+        super.removeNotify();
+    }
+
+    void disposeImages() {
+        VariationCleanupSupport.runOnEdtAndWait(
+                new VariationCleanupSupport.Task() {
+                    @Override public void run() {
+                        disposeImagesOnEdt();
+                    }
+                });
+    }
+
+    private void disposeImagesOnEdt() {
+        if (lifecycleState == DISPOSED) {
+            return;
+        }
+        lifecycleState = TERMINATING;
+        cancelPeek(false);
+        resetHalo();
+        VariationResult oldInstalledResult = installedResult;
+        ImagePlus oldOwnedLabel = ownedCachedLabel;
+        ImagePlus oldOwnedPreview = ownedDisplayedPreviewImage;
+        ImagePlus oldOverlay = cachedOverlayImage;
+        ImagePlus oldCached = cachedLabel;
+        ImagePlus oldFiltered = filteredImage;
+        ImagePlus oldDisplayed = displayedPreviewImage;
+        ImagePlus oldCurrent = currentPreviewImage;
+
+        cachedLabel = null;
+        cachedStats = null;
+        filteredImage = null;
+        displayedPreviewImage = null;
+        currentPreviewImage = null;
+        cachedOverlayImage = null;
+        ownedCachedLabel = null;
+        ownedDisplayedPreviewImage = null;
+        installedResult = null;
+        preview.setImage(null);
+
+        ImagePlus oldInstalledLabel = oldInstalledResult == null
+                ? null
+                : oldInstalledResult.label();
+        ImagePlus oldInstalledPreview = oldInstalledResult == null
+                ? null
+                : oldInstalledResult.previewImage();
+        List<ImagePlus> fallbackImages = new ArrayList<ImagePlus>();
+        addFallbackCleanupImage(fallbackImages, oldOwnedLabel,
+                oldInstalledLabel, oldInstalledPreview);
+        addFallbackCleanupImage(fallbackImages, oldOwnedPreview,
+                oldInstalledLabel, oldInstalledPreview);
+        addFallbackCleanupImage(fallbackImages, oldOverlay,
+                oldInstalledLabel, oldInstalledPreview);
+        addFallbackCleanupImage(fallbackImages, oldCached,
+                oldInstalledLabel, oldInstalledPreview);
+        addFallbackCleanupImage(fallbackImages, oldFiltered,
+                oldInstalledLabel, oldInstalledPreview);
+        addFallbackCleanupImage(fallbackImages, oldDisplayed,
+                oldInstalledLabel, oldInstalledPreview);
+        addFallbackCleanupImage(fallbackImages, oldCurrent,
+                oldInstalledLabel, oldInstalledPreview);
+
+        ImagePlus[] installedImages =
+                protectedResultImages(oldInstalledResult, null);
+        Throwable installedFailure = retryPendingResultCleanup(
+                oldInstalledResult, installedImages);
+        rethrowTerminalFatal(installedFailure, fallbackImages, 0,
+                oldInstalledResult);
+        if (oldInstalledResult != null) {
+            installedFailure = mergeResultCleanupFailure(installedFailure,
+                    releaseResultImages(oldInstalledResult));
+            rethrowTerminalFatal(installedFailure, fallbackImages, 0);
+        }
+        for (int i = 0; i < fallbackImages.size(); i++) {
+            installedFailure = mergeResultCleanupFailure(installedFailure,
+                    releaseCellOwnedImage(fallbackImages.get(i)));
+            rethrowTerminalFatal(installedFailure, fallbackImages, i + 1);
+        }
+        int stagnantPasses = 0;
+        for (int pass = 0; pass < MAX_TERMINAL_CLEANUP_PASSES
+                && !pendingResultCleanup.isEmpty()
+                && stagnantPasses < MAX_STAGNANT_CLEANUP_PASSES; pass++) {
+            int before = pendingCleanupImageCount();
+            installedFailure = mergeResultCleanupFailure(installedFailure,
+                    retryPendingResultCleanup(null));
+            rethrowTerminalFatal(installedFailure);
+            int after = pendingCleanupImageCount();
+            stagnantPasses = after < before ? 0 : stagnantPasses + 1;
+        }
+        if (pendingResultCleanup.isEmpty()) {
+            lifecycleState = DISPOSED;
+        }
+        retiredResultImages.clear();
+        rethrowInstalledResultFailure(installedFailure);
+    }
+
+    static void disposeAllImages(List<VariationCellPanel> cells) {
+        Throwable failure = null;
+        if (cells != null) {
+            for (int i = 0; i < cells.size(); i++) {
+                VariationCellPanel cell = cells.get(i);
+                if (cell == null) {
+                    continue;
+                }
+                try {
+                    cell.disposeImages();
+                } catch (Throwable cellFailure) {
+                    failure = VariationCleanupSupport.merge(failure, cellFailure);
+                    if (VariationCleanupSupport.isVmFatal(failure)) {
+                        VariationCleanupCoordinator.registerCellsFatal(
+                                cells.subList(i, cells.size()));
+                        break;
+                    }
+                }
+            }
+        }
+        VariationCleanupSupport.rethrow(failure);
+    }
+
+    private void rethrowTerminalFatal(Throwable failure) {
+        rethrowTerminalFatal(failure, null, 0);
+    }
+
+    private void rethrowTerminalFatal(Throwable failure,
+                                      List<ImagePlus> unfinishedFallback,
+                                      int firstUnfinishedFallback,
+                                      VariationResult... unfinishedResults) {
+        if (!VariationCleanupSupport.isVmFatal(failure)) {
+            return;
+        }
+        if (unfinishedFallback != null) {
+            for (int i = Math.max(0, firstUnfinishedFallback);
+                    i < unfinishedFallback.size(); i++) {
+                retainCellOwnedImageAfterFatal(unfinishedFallback.get(i));
+            }
+        }
+        if (unfinishedResults != null) {
+            for (int i = 0; i < unfinishedResults.length; i++) {
+                VariationCleanupCoordinator.registerResultFatal(unfinishedResults[i]);
+            }
+        }
+        VariationCleanupCoordinator.registerCellFatal(this);
+        VariationCleanupSupport.rethrow(failure);
+    }
+
+    private void retainCellOwnedImageAfterFatal(ImagePlus image) {
+        if (image == null) {
+            return;
+        }
+        VariationResult lease = pendingCleanupForImage(image);
+        if (lease == null) {
+            lease = VariationResult.success(combo, image, 0, 0L, null);
+            lease.transferOwnership();
+            addPendingCleanup(lease);
+        }
+        VariationCleanupCoordinator.registerResultFatal(lease);
+    }
+
+    boolean terminalCleanupComplete() {
+        return lifecycleState == DISPOSED;
+    }
+
+    private void installMouseHandlers() {
+        MouseAdapter listener = new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent e) {
+                if (e != null && SwingUtilities.isLeftMouseButton(e)
+                        && !e.isShiftDown()
+                        && hitMagnifier(pointInCell(e))) {
+                    e.consume();
+                    cancelPeek(true);
+                    pressPoint = null;
+                    openLargeView();
+                    return;
+                }
+                if (e != null && SwingUtilities.isLeftMouseButton(e)
+                        && !e.isShiftDown()
+                        && onPickCommit != null
+                        && hitPickPill(pointInCell(e))) {
+                    e.consume();
+                    cancelPeek(true);
+                    pressPoint = null;
+                    onPickCommit.accept(combo);
+                    return;
+                }
+                handleMousePressed(e);
+                if (suppressNextClick) {
+                    suppressNextClick = false;
+                    if (e != null) {
+                        e.consume();
+                    }
+                    return;
+                }
+                if (e == null || !SwingUtilities.isLeftMouseButton(e)) {
+                    return;
+                }
+                if (e.isShiftDown()) {
+                    if (onCompare != null) {
+                        onCompare.accept(combo, VariationCellPanel.this);
+                    }
+                } else if (acceptEnabled && onAccept != null) {
+                    onAccept.accept(combo);
+                }
+            }
+
+            @Override public void mouseReleased(MouseEvent e) {
+                handleMouseReleased();
+            }
+
+            @Override public void mouseEntered(MouseEvent e) {
+                hover = true;
+                refreshTooltip();
+                refreshBorder();
+            }
+
+            @Override public void mouseExited(MouseEvent e) {
+                hover = false;
+                cancelPeek(true);
+                pressPoint = null;
+                refreshTooltip();
+                refreshBorder();
+            }
+
+            @Override public void mouseDragged(MouseEvent e) {
+                handleMouseDragged(e);
+            }
+        };
+        installMouseHandler(this, listener);
+        installMouseHandler(preview, listener);
+    }
+
+    private void installMouseHandler(Component component, MouseAdapter listener) {
+        component.addMouseListener(listener);
+        component.addMouseMotionListener(listener);
+    }
+
+    private void handleMousePressed(MouseEvent e) {
+        cancelPeek(true);
+        pressPoint = null;
+        if (e == null || !SwingUtilities.isLeftMouseButton(e) || !canPeek()) {
+            return;
+        }
+        pressPoint = pointInCell(e);
+        peekDelayTimer.restart();
+    }
+
+    private void handleMouseReleased() {
+        cancelPeek(true);
+        pressPoint = null;
+    }
+
+    private void handleMouseDragged(MouseEvent e) {
+        if (pressPoint == null || e == null) {
+            return;
+        }
+        Point current = pointInCell(e);
+        if (current == null) {
+            return;
+        }
+        int dx = current.x - pressPoint.x;
+        int dy = current.y - pressPoint.y;
+        if (dx * dx + dy * dy > PEEK_DRAG_CANCEL_PX * PEEK_DRAG_CANCEL_PX) {
+            cancelPeek(true);
+            pressPoint = null;
+        }
+    }
+
+    private Point pointInCell(MouseEvent e) {
+        Object source = e.getSource();
+        if (source instanceof Component) {
+            return SwingUtilities.convertPoint((Component) source,
+                    e.getPoint(), this);
+        }
+        return e.getPoint();
+    }
+
+    private boolean canPeek() {
+        return rawSourceImage != null && displayedPreviewImage != null;
+    }
+
+    private void beginPeek() {
+        peekDelayTimer.stop();
+        if (pressPoint == null || !canPeek()) {
+            return;
+        }
+        peeking = true;
+        suppressNextClick = true;
+        showPreviewImage(rawSourceImage);
+        repaint();
+    }
+
+    private void cancelPeek(boolean restoreImage) {
+        peekDelayTimer.stop();
+        if (restoreImage && peeking) {
+            restorePeekImage();
+        }
+    }
+
+    private void restorePeekImage() {
+        peeking = false;
+        showPreviewImage(displayedPreviewImage);
+        repaint();
+    }
+
+    private ImagePlus previewImageForOverlayMode() {
+        ImagePlus filtered = filteredImage;
+        if (overlayMode != OverlayMode.OTSU_MASK || filtered == null) {
+            return filtered;
+        }
+        if (cachedOverlayImage != null) {
+            return cachedOverlayImage;
+        }
+        ThresholdOverlayRenderer.OtsuThreshold threshold =
+                ThresholdOverlayRenderer.otsuThreshold(filtered);
+        if (!threshold.hasValues()) {
+            return filtered;
+        }
+        ImagePlus rendered = ThresholdOverlayRenderer.render(filtered,
+                threshold.getLower(),
+                threshold.getUpper(),
+                ThresholdOverlayRenderer.MODE_RED_OVERLAY);
+        if (rendered == null) {
+            return filtered;
+        }
+        cachedOtsuLower = threshold.getLower();
+        cachedOverlayImage = rendered;
+        return rendered;
+    }
+
+    private void invalidateOverlayCache() {
+        ImagePlus previous = cachedOverlayImage;
+        cachedOverlayImage = null;
+        cachedOtsuLower = Double.NaN;
+        disposeOwnedImage(previous);
+    }
+
+    private void setDisplayedPreviewImage(ImagePlus image) {
+        setDisplayedPreviewImage(image, false);
+    }
+
+    private void setDisplayedPreviewImage(ImagePlus image, boolean owned) {
+        ImagePlus previous = ownedDisplayedPreviewImage;
+        displayedPreviewImage = image;
+        ownedDisplayedPreviewImage = owned ? image : null;
+        if (previous != null && previous != image
+                && previous != cachedOverlayImage) {
+            disposeOwnedImage(previous);
+        }
+        if (!peeking) {
+            showPreviewImage(image);
+        }
+    }
+
+    private void showPreviewImage(ImagePlus image) {
+        currentPreviewImage = image;
+        preview.setImage(image);
+    }
+
+    private void refreshBorder() {
+        repaint();
+    }
+
+    private void refreshFooter() {
+        if (objectCount < 0) {
+            return;
+        }
+        countLabelText = String.valueOf(objectCount);
+        countLabelColor = OVERLAY_TEXT;
+
+        deltaLabelText = deltaN == UNKNOWN_DELTA ? "" : formatDelta(deltaN);
+        deltaLabelVisible = deltaN != UNKNOWN_DELTA;
+
+        boolean hasIou = !Double.isNaN(iouToNeighbours);
+        iouLabelText = hasIou ? "IoU "
+                + String.format(Locale.ROOT, "%.2f",
+                Double.valueOf(iouToNeighbours)) : "";
+        iouLabelVisible = hasIou;
+        repaint();
+    }
+
+    private void refreshTooltip() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<html>");
+        if (isBaseline) {
+            sb.append("Original source crop");
+            sb.append("</html>");
+            setTooltips(sb.toString());
+            return;
+        }
+        sb.append(html(combo.toCanonicalJson()));
+        if (errorState) {
+            sb.append("<br><b>Failed:</b> ")
+                    .append(html(errorText).replace("\n", "<br>"));
+            appendPickInstruction(sb);
+            sb.append("</html>");
+            setTooltips(sb.toString());
+            return;
+        }
+        if (filterFooterActive) {
+            if (filterParameterText.length() > 0) {
+                sb.append("<br>").append(html(filterParameterText));
+            }
+            if (filterDownstreamDeltaVisible) {
+                sb.append("<br>").append(html(filterDownstreamDeltaText))
+                        .append(" vs no-filter downstream baseline");
+            }
+            sb.append("<br>").append(html(filterSnrText));
+            sb.append("<br>").append(html(filterBgSigmaText));
+            if (durationMs >= 0L) {
+                sb.append("<br>durationMs: ").append(durationMs).append(" ms");
+            }
+            appendPickInstruction(sb);
+            sb.append("</html>");
+            setTooltips(sb.toString());
+            return;
+        }
+        if (deltaN != UNKNOWN_DELTA) {
+            sb.append("<br>").append("\u0394n vs neighbour: ")
+                    .append(formatSigned(deltaN));
+        }
+        if (!Double.isNaN(iouToNeighbours)) {
+            sb.append("<br>Mean IoU with neighbours: ")
+                    .append(String.format(Locale.ROOT, "%.2f",
+                            Double.valueOf(iouToNeighbours)));
+            if (stabilityWinner) {
+                sb.append(" (most stable object masks)");
+            }
+        } else if (stabilityWinner) {
+            sb.append("<br>Most stable object masks");
+        }
+        if (kneeWinner) {
+            sb.append("<br>Most stable count");
+        }
+        if (durationMs >= 0L) {
+            sb.append("<br>durationMs: ").append(durationMs).append(" ms");
+        }
+        if (cachedStats != null) {
+            sb.append("<br>").append(cachedStats.size()).append(" stats rows");
+        }
+        appendPickInstruction(sb);
+        sb.append("</html>");
+        setTooltips(sb.toString());
+    }
+
+    private void appendPickInstruction(StringBuilder sb) {
+        if (hover && acceptEnabled) {
+            sb.append("<br>Click to pick this combo");
+        }
+    }
+
+    private void setTooltips(String text) {
+        setToolTipText(text);
+        preview.setToolTipText(text);
+    }
+
+    private void setStateText(String text, Color color) {
+        countLabelText = text;
+        countLabelColor = color == null ? FOOTER_COLOR : color;
+        deltaLabelText = "";
+        deltaLabelVisible = false;
+        iouLabelText = "";
+        iouLabelVisible = false;
+        repaint();
+    }
+
+    private void showSegmentationFooter() {
+        filterFooterActive = false;
+        repaint();
+    }
+
+    private void showFilterFooter() {
+        filterFooterActive = true;
+        repaint();
+    }
+
+    private void paintHoverTint(Graphics g) {
+        if (!hover || selectedForCompare) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setClip(cardShape());
+        g2.setColor(HOVER_BORDER);
+        g2.fillRect(0, 0, getWidth(), getHeight());
+        g2.dispose();
+    }
+
+    private void paintHalo(Graphics g) {
+        if (!showHalo) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setClip(cardShape());
+        float alpha = HALO_ALPHA_BASE
+                + HALO_ALPHA_AMPLITUDE * (float) Math.sin(haloPhase);
+        int radius = Math.max(getWidth(), getHeight());
+        Color core = haloColor == null ? KNEE_BORDER : haloColor;
+        g2.setPaint(new RadialGradientPaint(
+                getWidth() / 2f,
+                getHeight() / 2f,
+                radius,
+                new float[] { 0f, 1f },
+                new Color[] {
+                        new Color(core.getRed(), core.getGreen(), core.getBlue(),
+                                Math.max(0, Math.min(255, (int) (alpha * 255f)))),
+                        new Color(core.getRed(), core.getGreen(), core.getBlue(), 0)
+                }));
+        g2.fillRect(0, 0, getWidth(), getHeight());
+        g2.dispose();
+    }
+
+    private void paintCompareBadge(Graphics g) {
+        if (!selectedForCompare) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        int diameter = 10;
+        int x = Math.max(6, getWidth() - diameter - 10);
+        int y = Math.max(6, getHeight() - diameter - 10);
+        g2.setColor(STABILITY_BORDER);
+        g2.fillOval(x, y, diameter, diameter);
+        g2.setColor(RIBBON_RIM);
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.drawOval(x, y, diameter, diameter);
+        g2.dispose();
+    }
+
+    private void paintRibbons(Graphics g) {
+        if (isBaseline) {
+            paintRibbon(g, "ORIGINAL", STABILITY_BORDER, Color.WHITE, true);
+            return;
+        }
+        if (kneeWinner) {
+            String text = ribbonLabelOverride == null
+                    ? "STABLE COUNT"
+                    : ribbonLabelOverride;
+            paintRibbon(g, text, KNEE_BORDER, new Color(0x22, 0x22, 0x22),
+                    true);
+        }
+        if (stabilityWinner && downstreamRibbonLabel == null) {
+            paintRibbon(g, "STABLE MASKS", STABILITY_BORDER, Color.WHITE,
+                    !kneeWinner);
+        }
+        if (downstreamRibbonLabel != null) {
+            paintRibbon(g, downstreamRibbonLabel, DOWNSTREAM_RIBBON, Color.WHITE,
+                    false);
+        }
+    }
+
+    private void paintRibbon(Graphics g, String text, Color fill, Color textColor,
+                             boolean left) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        int side = 86;
+        int band = 18;
+        Path2D.Double path = new Path2D.Double();
+        if (left) {
+            path.moveTo(0, band);
+            path.lineTo(band, 0);
+            path.lineTo(side, 0);
+            path.lineTo(0, side);
+        } else {
+            int w = getWidth();
+            path.moveTo(w - band, 0);
+            path.lineTo(w, band);
+            path.lineTo(w, side);
+            path.lineTo(w - side, 0);
+        }
+        path.closePath();
+        g2.setColor(fill);
+        g2.fill(path);
+        g2.setColor(RIBBON_RIM);
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.draw(path);
+        g2.setClip(path);
+        g2.setFont(FlashTheme.bodyMedium().deriveFont(8.5f));
+        g2.setColor(textColor);
+        if (left) {
+            g2.translate(8, 55);
+            g2.rotate(-Math.PI / 4.0d);
+            g2.drawString(text, 0, 0);
+        } else {
+            g2.translate(getWidth() - 70, 6);
+            g2.rotate(Math.PI / 4.0d);
+            g2.drawString(text, 0, 0);
+        }
+        g2.dispose();
+    }
+
+    private void paintMetricOverlays(Graphics g) {
+        int width = getWidth();
+        int height = getHeight();
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setClip(cardShape());
+            if (filterFooterActive) {
+                paintFilterOverlays(g2, width, height);
+            } else {
+                paintSegmentationOverlay(g2, width, height);
+            }
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private void paintPickPill(Graphics g) {
+        if (!pickPillVisible()) {
+            return;
+        }
+        int width = getWidth();
+        int height = getHeight();
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setClip(cardShape());
+            Rectangle pill = pickPillBounds();
+            int x = pill.x;
+            int y = pill.y;
+            g2.setColor(hover ? STABILITY_BORDER.brighter() : STABILITY_BORDER);
+            g2.fillRoundRect(x, y, PICK_PILL_WIDTH, PICK_PILL_HEIGHT,
+                    PICK_PILL_RADIUS, PICK_PILL_RADIUS);
+            g2.setColor(new Color(0, 0, 0, 90));
+            g2.drawRoundRect(x, y, PICK_PILL_WIDTH - 1, PICK_PILL_HEIGHT - 1,
+                    PICK_PILL_RADIUS, PICK_PILL_RADIUS);
+            g2.setFont(FlashTheme.bodyMedium().deriveFont(Font.BOLD, 11f));
+            FontMetrics fm = g2.getFontMetrics();
+            String text = "Pick";
+            int textX = x + (PICK_PILL_WIDTH - fm.stringWidth(text)) / 2;
+            int baseline = y + (PICK_PILL_HEIGHT - fm.getHeight()) / 2
+                    + fm.getAscent();
+            g2.setColor(Color.WHITE);
+            g2.drawString(text, textX, baseline);
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    /** True when the corner magnifier (open-larger-view) affordance is shown. */
+    private boolean magnifierVisible() {
+        return !peeking
+                && getWidth() > 0
+                && getHeight() > 0
+                && largeViewImage() != null;
+    }
+
+    private Rectangle magnifierBounds() {
+        int size = MAGNIFIER_SIZE;
+        int x = MAGNIFIER_INSET;
+        int y = Math.max(MAGNIFIER_INSET,
+                getHeight() - METRIC_STRIP_HEIGHT - size - 4);
+        return new Rectangle(x, y, size, size);
+    }
+
+    private boolean hitMagnifier(Point pointInCell) {
+        return magnifierVisible() && pointInCell != null
+                && magnifierBounds().contains(pointInCell);
+    }
+
+    private void paintMagnifier(Graphics g) {
+        if (!magnifierVisible()) {
+            return;
+        }
+        Rectangle b = magnifierBounds();
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setClip(cardShape());
+            g2.setColor(new Color(0, 0, 0, hover ? 180 : 120));
+            g2.fillRoundRect(b.x, b.y, b.width, b.height, 8, 8);
+            g2.setColor(new Color(255, 255, 255, 50));
+            g2.drawRoundRect(b.x, b.y, b.width - 1, b.height - 1, 8, 8);
+            // Loupe glyph: a circle with a short diagonal handle.
+            g2.setColor(hover ? Color.WHITE : new Color(0xE0, 0xE4, 0xE8));
+            g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND,
+                    BasicStroke.JOIN_ROUND));
+            int pad = 5;
+            int lens = b.height - 2 * pad - 4;
+            int lx = b.x + pad;
+            int ly = b.y + pad;
+            g2.drawOval(lx, ly, lens, lens);
+            int hx = lx + lens;
+            int hy = ly + lens;
+            g2.drawLine(hx, hy, hx + 4, hy + 4);
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    private ImagePlus largeViewImage() {
+        return displayedPreviewImage != null
+                ? displayedPreviewImage
+                : currentPreviewImage;
+    }
+
+    private String largeViewTitle() {
+        if (isBaseline) {
+            return "Original source crop";
+        }
+        return "Variation (larger view)";
+    }
+
+    /** Pops a large, resizable view of this tile's current preview image. */
+    private void openLargeView() {
+        ImagePlus img = largeViewImage();
+        if (img == null) {
+            return;
+        }
+        Window owner = SwingUtilities.getWindowAncestor(this);
+        final JDialog dialog = new JDialog(owner, largeViewTitle(),
+                Dialog.ModalityType.MODELESS);
+        dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        ImagePreviewPanel large = new ImagePreviewPanel(largeViewTitle());
+        large.setImage(img);
+        large.setCurrentZ(preview.getCurrentZ());
+        large.setToolTipText(getToolTipText());
+        dialog.setLayout(new BorderLayout());
+        dialog.add(large, BorderLayout.CENTER);
+        Rectangle desktop = GraphicsEnvironment
+                .getLocalGraphicsEnvironment()
+                .getMaximumWindowBounds();
+        int w = Math.max(480, Math.min(1400,
+                (int) Math.round(desktop.width * 0.6d)));
+        int h = Math.max(360, Math.min(1100,
+                (int) Math.round(desktop.height * 0.7d)));
+        dialog.setSize(w, h);
+        dialog.setLocationRelativeTo(owner);
+        dialog.setVisible(true);
+    }
+
+    boolean magnifierVisibleForTest() {
+        return magnifierVisible();
+    }
+
+    private void paintFilterOverlays(Graphics2D g2, int width, int height) {
+        if (filterChipVisible || filterDownstreamDeltaVisible) {
+            paintFilterTopStrip(g2, width);
+        }
+        paintBottomStrip(g2, width, height, filterMetricsOverlayText(),
+                OVERLAY_TEXT);
+    }
+
+    private void paintFilterTopStrip(Graphics2D g2, int width) {
+        int stripHeight = Math.min(FILTER_PARAM_STRIP_HEIGHT,
+                Math.max(1, getHeight()));
+        g2.setColor(OVERLAY_STRIP);
+        g2.fillRect(0, 0, width, stripHeight);
+
+        g2.setFont(FlashTheme.mono(10f).deriveFont(Font.BOLD));
+        FontMetrics fm = g2.getFontMetrics();
+        int right = width - METRIC_TEXT_INSET;
+        if (filterDownstreamDeltaVisible) {
+            int pillWidth = pillWidth(fm, filterDownstreamDeltaText);
+            int x = Math.max(METRIC_TEXT_INSET, width - METRIC_TEXT_INSET
+                    - pillWidth);
+            int y = Math.max(2, (stripHeight - OVERLAY_PILL_HEIGHT) / 2);
+            paintPill(g2, x, y, pillWidth, OVERLAY_PILL_HEIGHT,
+                    filterDownstreamDeltaFill, CHIP_TEXT,
+                    filterDownstreamDeltaText);
+            right = Math.max(METRIC_TEXT_INSET, x - 6);
+        }
+        if (filterChipVisible && right > METRIC_TEXT_INSET) {
+            drawOverlayText(g2, filterParameterText, METRIC_TEXT_INSET,
+                    right, 0, stripHeight, OVERLAY_TEXT);
+        }
+    }
+
+    private void paintSegmentationOverlay(Graphics2D g2, int width, int height) {
+        paintBottomStrip(g2, width, height, segmentationMetricsOverlayText(),
+                countLabelColor == null ? OVERLAY_TEXT : countLabelColor);
+    }
+
+    private void paintBottomStrip(Graphics2D g2, int width, int height,
+                                  String text, Color textColor) {
+        int stripHeight = Math.min(METRIC_STRIP_HEIGHT, Math.max(1, height));
+        int y = Math.max(0, height - stripHeight);
+        g2.setColor(OVERLAY_STRIP);
+        g2.fillRect(0, y, width, stripHeight);
+        g2.setFont(FlashTheme.mono(11f).deriveFont(Font.BOLD));
+        drawOverlayText(g2, text, METRIC_TEXT_INSET,
+                Math.max(METRIC_TEXT_INSET, width - METRIC_TEXT_INSET),
+                y, stripHeight, textColor);
+    }
+
+    private void drawOverlayText(Graphics2D g2, String text, int left, int right,
+                                 int y, int height, Color color) {
+        FontMetrics fm = g2.getFontMetrics();
+        int maxWidth = Math.max(0, right - left);
+        String visibleText = ellipsizeToWidth(text, fm, maxWidth);
+        if (visibleText.length() == 0) {
+            return;
+        }
+        int baseline = y + (height - fm.getHeight()) / 2 + fm.getAscent();
+        g2.setColor(color == null ? OVERLAY_TEXT : color);
+        g2.drawString(visibleText, left, baseline);
+    }
+
+    private void paintPill(Graphics2D g2, int x, int y, int width, int height,
+                           Color fill, Color textColor, String text) {
+        g2.setColor(fill == null ? DOWNSTREAM_NEUTRAL : fill);
+        g2.fillRoundRect(x, y, width, height, OVERLAY_PILL_RADIUS,
+                OVERLAY_PILL_RADIUS);
+        g2.setColor(new Color(0, 0, 0, 80));
+        g2.drawRoundRect(x, y, width - 1, height - 1, OVERLAY_PILL_RADIUS,
+                OVERLAY_PILL_RADIUS);
+        FontMetrics fm = g2.getFontMetrics();
+        int baseline = y + (height - fm.getHeight()) / 2 + fm.getAscent();
+        g2.setColor(textColor == null ? CHIP_TEXT : textColor);
+        g2.drawString(text == null ? "" : text, x + OVERLAY_PILL_X_PAD,
+                baseline);
+    }
+
+    private int pillWidth(FontMetrics fm, String text) {
+        int textWidth = fm == null ? 0 : fm.stringWidth(text == null ? "" : text);
+        return textWidth + OVERLAY_PILL_X_PAD * 2;
+    }
+
+    private String filterMetricsOverlayText() {
+        return "SNR " + formatOneDecimal(filterSnr)
+                + "   bg \u03c3 " + formatInteger(filterBgSigma);
+    }
+
+    private String segmentationMetricsOverlayText() {
+        StringBuilder out = new StringBuilder(countLabelText);
+        if (deltaLabelVisible && deltaLabelText.length() > 0) {
+            out.append("   ").append(deltaLabelText);
+        }
+        if (iouLabelVisible && iouLabelText.length() > 0) {
+            out.append("   ").append(iouLabelText);
+        }
+        return out.toString();
+    }
+
+    private void clearRibbonLabelOverride() {
+        ribbonLabelOverride = null;
+    }
+
+    private void clearDownstreamVerdictState() {
+        downstreamRibbonLabel = null;
+        downstreamDeltaN = UNKNOWN_DELTA;
+        filterDownstreamDeltaText = "";
+        filterDownstreamDeltaVisible = false;
+        filterDownstreamDeltaFill = DOWNSTREAM_NEUTRAL;
+    }
+
+    private void refreshDownstreamChip() {
+        if (downstreamDeltaN == UNKNOWN_DELTA) {
+            filterDownstreamDeltaText = "";
+            filterDownstreamDeltaVisible = false;
+            filterDownstreamDeltaFill = DOWNSTREAM_NEUTRAL;
+        } else {
+            filterDownstreamDeltaText = "delta "
+                    + formatSignedCompact(downstreamDeltaN);
+            filterDownstreamDeltaFill = downstreamDeltaN > 0
+                    ? DOWNSTREAM_HELP
+                    : downstreamDeltaN < 0 ? DOWNSTREAM_HURT : DOWNSTREAM_NEUTRAL;
+            filterDownstreamDeltaVisible = true;
+        }
+        repaint();
+    }
+
+    private void refreshFilterParameterLabel(ParameterCombo sourceCombo) {
+        filterParameterText = filterComboLabel(sourceCombo, footerParameterKeys);
+        filterChipText = abbreviate(filterParameterText, FILTER_PARAM_LABEL_MAX_CHARS);
+        filterChipVisible = filterParameterText.length() > 0;
+        repaint();
+    }
+
+    private String[] filterLines(boolean hasFilterChip) {
+        java.util.List<String> lines = new java.util.ArrayList<String>();
+        if (hasFilterChip) {
+            lines.add(filterChipText);
+        }
+        if (filterDownstreamDeltaVisible) {
+            lines.add(filterDownstreamDeltaText);
+        }
+        lines.add(filterSnrText);
+        lines.add(filterBgSigmaText);
+        return lines.toArray(new String[lines.size()]);
+    }
+
+    private void startHalo(Color color) {
+        haloColor = color;
+        haloStartNanos = System.nanoTime();
+        haloPhase = 0f;
+        showHalo = true;
+        if (!haloTimer.isRunning()) {
+            haloTimer.start();
+        }
+        repaint();
+    }
+
+    private void resetHalo() {
+        showHalo = false;
+        haloPhase = 0f;
+        haloTimer.stop();
+        repaint();
+    }
+
+    private void advanceHalo() {
+        long elapsedNanos = System.nanoTime() - haloStartNanos;
+        haloPhase = (elapsedNanos % 2_000_000_000L) / 2_000_000_000f
+                * (float) (Math.PI * 2.0d);
+        repaint();
+    }
+
+    private RoundRectangle2D cardShape() {
+        return cardShape(DEFAULT_OUTLINE_WIDTH);
+    }
+
+    private RoundRectangle2D cardShape(float outlineWidth) {
+        double inset = Math.max(0.5d, outlineWidth / 2.0d);
+        return new RoundRectangle2D.Double(inset, inset,
+                Math.max(1.0d, getWidth() - 2.0d * inset),
+                Math.max(1.0d, getHeight() - 2.0d * inset),
+                CARD_RADIUS, CARD_RADIUS);
+    }
+
+    private static String formatDelta(int value) {
+        return "\u0394" + formatSignedCompact(value);
+    }
+
+    private static String formatOneDecimal(double value) {
+        double safeValue = Double.isFinite(value) ? value : 0.0d;
+        return String.format(Locale.ROOT, "%.1f", Double.valueOf(safeValue));
+    }
+
+    private static String formatInteger(double value) {
+        double safeValue = Double.isFinite(value) ? value : 0.0d;
+        return String.format(Locale.ROOT, "%.0f", Double.valueOf(safeValue));
+    }
+
+    private static String filterComboLabel(ParameterCombo combo,
+                                           List<ParameterKey> preferredKeys) {
+        if (combo == null || combo.values().isEmpty()) {
+            return "";
+        }
+        PresetSweepCombo presetCombo = PresetSweepCombo.from(combo);
+        if (presetCombo != null && shouldUsePresetSummary(preferredKeys)) {
+            return presetComboLabel(presetCombo, preferredKeys);
+        }
+        SlotSubstitutionCombo substitution = SlotSubstitutionCombo.from(combo);
+        if (substitution != null && shouldUseSlotSummary(preferredKeys)) {
+            return substitution.displayLabel();
+        }
+
+        List<ParameterKey> keys = keysForSummary(combo, preferredKeys);
+        if (keys.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < keys.size(); i++) {
+            ParameterKey key = keys.get(i);
+            if (key instanceof PresetSweepKey
+                    && ((PresetSweepKey) key).role()
+                    == PresetSweepKey.Role.X_PARAM_KEY) {
+                continue;
+            }
+            if (!combo.contains(key)) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append(", ");
+            }
+            out.append(keyLabelForFooter(key))
+                    .append("=")
+                    .append(formatFooterValue(combo.get(key)));
+        }
+        return out.toString();
+    }
+
+    private static boolean shouldUsePresetSummary(List<ParameterKey> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return true;
+        }
+        for (int i = 0; i < keys.size(); i++) {
+            ParameterKey key = keys.get(i);
+            if (key instanceof PresetSweepKey) {
+                PresetSweepKey presetKey = (PresetSweepKey) key;
+                if (presetKey.role() == PresetSweepKey.Role.X_VALUE
+                        || presetKey.role() == PresetSweepKey.Role.PRESET_NAME) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean shouldUseSlotSummary(List<ParameterKey> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return true;
+        }
+        for (int i = 0; i < keys.size(); i++) {
+            if (keys.get(i) instanceof SlotSubstitutionKey) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String presetComboLabel(PresetSweepCombo presetCombo,
+                                           List<ParameterKey> keys) {
+        String param = presetCombo.xParamKey();
+        if ((param == null || param.trim().isEmpty())
+                && presetCombo.xValue() == null) {
+            String preset = presetCombo.presetName();
+            return preset == null ? "" : preset.trim();
+        }
+        String xPart = (param == null || param.trim().isEmpty()
+                ? "value"
+                : param.trim())
+                + "=" + formatFooterValue(presetCombo.xValue());
+        boolean includePreset = false;
+        if (keys != null) {
+            for (int i = 0; i < keys.size(); i++) {
+                ParameterKey key = keys.get(i);
+                if (key instanceof PresetSweepKey
+                        && ((PresetSweepKey) key).role()
+                        == PresetSweepKey.Role.PRESET_NAME) {
+                    includePreset = true;
+                    break;
+                }
+            }
+        }
+        if (!includePreset) {
+            return xPart;
+        }
+        String preset = presetCombo.presetName();
+        return preset == null || preset.trim().isEmpty()
+                ? xPart
+                : preset.trim() + " | " + xPart;
+    }
+
+    private static List<ParameterKey> keysForSummary(
+            ParameterCombo combo,
+            List<ParameterKey> preferredKeys) {
+        List<ParameterKey> out = new ArrayList<ParameterKey>();
+        if (preferredKeys != null && !preferredKeys.isEmpty()) {
+            for (int i = 0; i < preferredKeys.size(); i++) {
+                ParameterKey key = preferredKeys.get(i);
+                if (key != null && combo.contains(key) && !out.contains(key)) {
+                    out.add(key);
+                }
+            }
+            return out;
+        }
+        for (Map.Entry<ParameterKey, Object> entry : combo.values().entrySet()) {
+            ParameterKey key = entry.getKey();
+            if (key != null && !out.contains(key)) {
+                out.add(key);
+            }
+        }
+        return out;
+    }
+
+    private static String keyLabelForFooter(ParameterKey key) {
+        if (key instanceof FilterParameterId) {
+            FilterParameterId filterKey = (FilterParameterId) key;
+            String command = compactCommandLabel(filterKey.commandLabel());
+            String param = filterKey.paramKey();
+            if (command.length() == 0) {
+                return param;
+            }
+            return command + " " + param;
+        }
+        return key == null ? "" : key.displayLabel();
+    }
+
+    private static String compactCommandLabel(String commandLabel) {
+        String text = commandLabel == null ? "" : commandLabel.trim();
+        if (text.endsWith("...")) {
+            text = text.substring(0, text.length() - 3).trim();
+        }
+        while (text.endsWith(".")) {
+            text = text.substring(0, text.length() - 1).trim();
+        }
+        return text;
+    }
+
+    private static String formatFooterValue(Object value) {
+        if (value instanceof Number) {
+            double number = ((Number) value).doubleValue();
+            if (Double.isFinite(number)
+                    && Math.abs(number - Math.rint(number)) < 0.0000001d
+                    && Math.abs(number) < 1000000000.0d) {
+                return String.valueOf((long) Math.rint(number));
+            }
+            String text = String.format(Locale.ROOT, "%.3f", Double.valueOf(number));
+            return text.replaceAll("0+$", "").replaceAll("\\.$", "");
+        }
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static String abbreviate(String text, int maxLength) {
+        String safe = text == null ? "" : text;
+        if (maxLength < 4 || safe.length() <= maxLength) {
+            return safe;
+        }
+        return safe.substring(0, maxLength - 3) + "...";
+    }
+
+    private static String ellipsizeToWidth(String text, FontMetrics fm,
+                                           int maxWidth) {
+        String safe = text == null ? "" : text;
+        if (fm == null || maxWidth <= 0 || safe.length() == 0) {
+            return "";
+        }
+        if (fm.stringWidth(safe) <= maxWidth) {
+            return safe;
+        }
+        String ellipsis = "...";
+        int ellipsisWidth = fm.stringWidth(ellipsis);
+        if (ellipsisWidth > maxWidth) {
+            return "";
+        }
+        int end = safe.length();
+        while (end > 0
+                && fm.stringWidth(safe.substring(0, end)) + ellipsisWidth
+                > maxWidth) {
+            end--;
+        }
+        return end <= 0 ? "" : safe.substring(0, end) + ellipsis;
+    }
+
+    private static String formatSigned(int value) {
+        return (value > 0 ? "+" : "") + value;
+    }
+
+    private static String formatSignedCompact(int value) {
+        String sign = value > 0 ? "+" : "";
+        int magnitude = Math.abs(value);
+        if (magnitude > 999) {
+            return sign + String.format(Locale.ROOT, "%.1fk",
+                    Double.valueOf(value / 1000.0d));
+        }
+        return sign + value;
+    }
+
+    private ImagePlus createPlaceholderLabel() {
+        int width = croppedSource == null ? 96 : Math.max(1, croppedSource.getWidth());
+        int height = croppedSource == null ? 96 : Math.max(1, croppedSource.getHeight());
+        int slices = croppedSource == null ? 1 : Math.max(1, croppedSource.getStackSize());
+        int labelValue = Math.floorMod(placeholderIndex, 250) + 1;
+        ImageStack stack = new ImageStack(width, height);
+        for (int z = 0; z < slices; z++) {
+            ByteProcessor bp = new ByteProcessor(width, height);
+            bp.setValue(labelValue);
+            bp.fill();
+            stack.addSlice("z" + (z + 1), bp);
+        }
+        ImagePlus label = new ImagePlus("placeholder-" + placeholderIndex, stack);
+        if (croppedSource != null) {
+            int channels = Math.max(1, croppedSource.getNChannels());
+            int imageSlices = Math.max(1, croppedSource.getNSlices());
+            int frames = Math.max(1, croppedSource.getNFrames());
+            if (channels * imageSlices * frames == stack.getSize()) {
+                label.setDimensions(channels, imageSlices, frames);
+                label.setOpenAsHyperStack(croppedSource.isHyperStack());
+            }
+        }
+        return label;
+    }
+
+    private ImagePlus createEmptyLabel() {
+        int width = croppedSource == null ? 96 : Math.max(1, croppedSource.getWidth());
+        int height = croppedSource == null ? 96 : Math.max(1, croppedSource.getHeight());
+        int slices = croppedSource == null ? 1 : Math.max(1, croppedSource.getStackSize());
+        ImageStack stack = new ImageStack(width, height);
+        for (int z = 0; z < slices; z++) {
+            stack.addSlice("z" + (z + 1), new ByteProcessor(width, height));
+        }
+        ImagePlus label = new ImagePlus("failed-variation", stack);
+        if (croppedSource != null) {
+            int channels = Math.max(1, croppedSource.getNChannels());
+            int imageSlices = Math.max(1, croppedSource.getNSlices());
+            int frames = Math.max(1, croppedSource.getNFrames());
+            if (channels * imageSlices * frames == stack.getSize()) {
+                label.setDimensions(channels, imageSlices, frames);
+                label.setOpenAsHyperStack(croppedSource.isHyperStack());
+            }
+        }
+        return label;
+    }
+
+    private void setCachedLabel(ImagePlus label, boolean owned) {
+        ImagePlus previous = ownedCachedLabel;
+        cachedLabel = label;
+        ownedCachedLabel = owned ? label : null;
+        if (previous != null && previous != label) {
+            disposeOwnedImage(previous);
+        }
+    }
+
+    private void installResultLease(VariationResult result,
+                                    ImagePlus... retainedImages) {
+        if (result == null) {
+            releaseInstalledResultExcept(retainedImages);
+            return;
+        }
+        result.transferOwnership();
+        VariationResult previous = installedResult;
+        installedResult = result;
+        removePendingCleanupSharing(result);
+        ImagePlus[] protectedImages = protectedResultImages(result, retainedImages);
+        Throwable failure = retryPendingResultCleanup(result, protectedImages);
+        if (previous != null && previous != result
+                && !previous.sharesImageOwnershipWith(result)) {
+            handoffRetainedCleanup(previous, result, protectedImages);
+            failure = mergeResultCleanupFailure(failure,
+                    releaseResultImages(previous));
+        }
+        rethrowInstalledResultFailure(failure);
+    }
+
+    private void rejectResultAfterTermination(VariationResult result) {
+        Throwable failure = VariationCleanupSupport.disposeRejectedResult(result);
+        rethrowInstalledResultFailure(failure);
+    }
+
+    private void releaseInstalledResultExcept(ImagePlus... retainedImages) {
+        VariationResult previous = installedResult;
+        installedResult = null;
+        Throwable failure = retryPendingResultCleanup(null, retainedImages);
+        if (previous != null) {
+            failure = mergeResultCleanupFailure(failure,
+                    releaseResultImages(previous, retainedImages));
+        }
+        rethrowInstalledResultFailure(failure);
+    }
+
+    private Throwable retryPendingResultCleanup(VariationResult activeResult,
+                                                ImagePlus... retainedImages) {
+        List<VariationResult> snapshot =
+                new ArrayList<VariationResult>(pendingResultCleanup);
+        Throwable failure = null;
+        for (int i = 0; i < snapshot.size(); i++) {
+            VariationResult pending = snapshot.get(i);
+            if (pending == null || (activeResult != null
+                    && pending.sharesImageOwnershipWith(activeResult))) {
+                removePendingCleanupSharing(pending);
+                continue;
+            }
+            if (activeResult != null) {
+                handoffRetainedCleanup(pending, activeResult, retainedImages);
+            }
+            failure = mergeResultCleanupFailure(failure,
+                    releaseResultImages(pending,
+                            activeResult == null ? retainedImages : new ImagePlus[0]));
+            if (isVmFatal(failure)) {
+                break;
+            }
+        }
+        return failure;
+    }
+
+    private static void handoffRetainedCleanup(VariationResult source,
+                                               VariationResult target,
+                                               ImagePlus... retainedImages) {
+        if (source == null || target == null || retainedImages == null) {
+            return;
+        }
+        target.adoptTransferredCleanup(
+                source.detachTransferredCleanup(retainedImages));
+    }
+
+    private static ImagePlus[] protectedResultImages(VariationResult result,
+                                                     ImagePlus[] retainedImages) {
+        List<ImagePlus> protectedImages = new ArrayList<ImagePlus>();
+        addIdentity(protectedImages, result == null ? null : result.label());
+        addIdentity(protectedImages, result == null ? null : result.previewImage());
+        if (retainedImages != null) {
+            for (int i = 0; i < retainedImages.length; i++) {
+                addIdentity(protectedImages, retainedImages[i]);
+            }
+        }
+        return protectedImages.toArray(new ImagePlus[protectedImages.size()]);
+    }
+
+    private static void addIdentity(List<ImagePlus> images, ImagePlus image) {
+        if (image != null && !containsIdentity(images, image)) {
+            images.add(image);
+        }
+    }
+
+    private Throwable releaseResultImages(VariationResult result,
+                                          ImagePlus... retainedImages) {
+        if (result == null) {
+            return null;
+        }
+        ImagePlus[] before = result.pendingTransferredImages();
+        ImagePlus[] attempted = withoutRetainedImages(before, retainedImages);
+        Throwable failure = null;
+        try {
+            result.releaseTransferredImages(retainedImages);
+        } catch (Throwable t) {
+            failure = t;
+        }
+        ImagePlus[] after = result.pendingTransferredImages();
+        rememberSuccessfulCleanup(attempted, after);
+        if (after.length == 0) {
+            removePendingCleanupSharing(result);
+        } else {
+            addPendingCleanup(result);
+            if (isVmFatal(failure)) {
+                VariationCleanupCoordinator.registerResultFatal(result);
+            }
+        }
+        return failure;
+    }
+
+    private void addPendingCleanup(VariationResult result) {
+        if (result == null) {
+            return;
+        }
+        for (int i = 0; i < pendingResultCleanup.size(); i++) {
+            VariationResult pending = pendingResultCleanup.get(i);
+            if (pending == result || pending.sharesImageOwnershipWith(result)) {
+                return;
+            }
+        }
+        pendingResultCleanup.add(result);
+    }
+
+    private void removePendingCleanupSharing(VariationResult result) {
+        if (result == null) {
+            return;
+        }
+        for (int i = pendingResultCleanup.size() - 1; i >= 0; i--) {
+            VariationResult pending = pendingResultCleanup.get(i);
+            if (pending == result || pending.sharesImageOwnershipWith(result)) {
+                pendingResultCleanup.remove(i);
+            }
+        }
+    }
+
+    private void rememberSuccessfulCleanup(ImagePlus[] attempted,
+                                           ImagePlus[] stillPending) {
+        if (attempted == null) {
+            return;
+        }
+        for (int i = 0; i < attempted.length; i++) {
+            ImagePlus image = attempted[i];
+            if (image != null && !containsIdentity(stillPending, image)
+                    && !containsIdentity(retiredResultImages, image)) {
+                retiredResultImages.add(image);
+            }
+        }
+    }
+
+    private static ImagePlus[] withoutRetainedImages(ImagePlus[] images,
+                                                     ImagePlus[] retainedImages) {
+        if (images == null || images.length == 0) {
+            return new ImagePlus[0];
+        }
+        List<ImagePlus> attempted = new ArrayList<ImagePlus>();
+        for (int i = 0; i < images.length; i++) {
+            if (!containsIdentity(retainedImages, images[i])) {
+                attempted.add(images[i]);
+            }
+        }
+        return attempted.toArray(new ImagePlus[attempted.size()]);
+    }
+
+    private static boolean containsIdentity(ImagePlus[] images,
+                                            ImagePlus candidate) {
+        if (images == null || candidate == null) {
+            return false;
+        }
+        for (int i = 0; i < images.length; i++) {
+            if (images[i] == candidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsIdentity(List<ImagePlus> images,
+                                            ImagePlus candidate) {
+        if (images == null || candidate == null) {
+            return false;
+        }
+        for (int i = 0; i < images.size(); i++) {
+            if (images.get(i) == candidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void rethrowInstalledResultFailure(Throwable failure) {
+        if (failure == null) {
+            return;
+        }
+        if (failure instanceof ThreadDeath) {
+            throw (ThreadDeath) failure;
+        }
+        if (failure instanceof VirtualMachineError) {
+            throw (VirtualMachineError) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        throw new IllegalStateException("Could not release installed variation result.",
+                failure);
+    }
+
+    private static Throwable mergeResultCleanupFailure(Throwable primary,
+                                                       Throwable additional) {
+        if (additional == null) {
+            return primary;
+        }
+        if (primary == null) {
+            return additional;
+        }
+        if (isVmFatal(additional) && !isVmFatal(primary)) {
+            addCleanupSuppressed(additional, primary);
+            return additional;
+        }
+        addCleanupSuppressed(primary, additional);
+        return primary;
+    }
+
+    private static boolean isVmFatal(Throwable failure) {
+        return failure instanceof ThreadDeath || failure instanceof VirtualMachineError;
+    }
+
+    private static void addCleanupSuppressed(Throwable primary,
+                                             Throwable suppressed) {
+        if (primary == suppressed) {
+            return;
+        }
+        try {
+            primary.addSuppressed(suppressed);
+        } catch (RuntimeException ignored) {
+            // Suppression is diagnostic only.
+        }
+    }
+
+    private boolean isPendingResultCleanupImage(ImagePlus image) {
+        if (image == null) {
+            return false;
+        }
+        for (int i = 0; i < pendingResultCleanup.size(); i++) {
+            if (containsIdentity(
+                    pendingResultCleanup.get(i).pendingTransferredImages(), image)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void addFallbackCleanupImage(List<ImagePlus> images,
+                                         ImagePlus image,
+                                         ImagePlus... excludedImages) {
+        if (image == null || image == rawSourceImage || image == croppedSource
+                || containsIdentity(retiredResultImages, image)
+                || isPendingResultCleanupImage(image)
+                || containsIdentity(images, image)
+                || containsIdentity(excludedImages, image)) {
+            return;
+        }
+        images.add(image);
+    }
+
+    private Throwable releaseCellOwnedImage(ImagePlus image) {
+        if (image == null || image == rawSourceImage || image == croppedSource
+                || containsIdentity(retiredResultImages, image)) {
+            return null;
+        }
+        if (installedResult != null && containsIdentity(
+                protectedResultImages(installedResult, null), image)) {
+            return null;
+        }
+        VariationResult lease = pendingCleanupForImage(image);
+        if (lease == null) {
+            lease = VariationResult.success(combo, image, 0, 0L, null);
+            lease.transferOwnership();
+        }
+        return releaseResultImages(lease);
+    }
+
+    private VariationResult pendingCleanupForImage(ImagePlus image) {
+        if (image == null) {
+            return null;
+        }
+        for (int i = 0; i < pendingResultCleanup.size(); i++) {
+            VariationResult pending = pendingResultCleanup.get(i);
+            if (containsIdentity(pending.pendingTransferredImages(), image)) {
+                return pending;
+            }
+        }
+        return null;
+    }
+
+    private int pendingCleanupImageCount() {
+        List<ImagePlus> pendingImages = new ArrayList<ImagePlus>();
+        for (int i = 0; i < pendingResultCleanup.size(); i++) {
+            ImagePlus[] images = pendingResultCleanup.get(i).pendingTransferredImages();
+            for (int j = 0; j < images.length; j++) {
+                addIdentity(pendingImages, images[j]);
+            }
+        }
+        return pendingImages.size();
+    }
+
+    private void disposeOwnedImage(ImagePlus image) {
+        rethrowInstalledResultFailure(releaseCellOwnedImage(image));
+    }
+
+    private static boolean dimensionsMatch(ImagePlus source, ImagePlus label) {
+        if (source == null || label == null) {
+            return false;
+        }
+        if (source.getWidth() != label.getWidth()
+                || source.getHeight() != label.getHeight()) {
+            return false;
+        }
+        ImageProcessor sourceProcessor = source.getProcessor();
+        ImageProcessor labelProcessor = label.getProcessor();
+        return sourceProcessor != null && labelProcessor != null;
+    }
+
+    private static String errorDetails(Throwable error) {
+        if (error == null) {
+            return "Unknown error";
+        }
+        StringBuilder sb = new StringBuilder();
+        String message = error.getMessage();
+        sb.append(message == null || message.trim().isEmpty()
+                ? error.getClass().getSimpleName()
+                : message.trim());
+        Throwable cause = error.getCause();
+        if (cause != null && cause != error) {
+            String causeMessage = cause.getMessage();
+            sb.append("\nCaused by: ");
+            sb.append(causeMessage == null || causeMessage.trim().isEmpty()
+                    ? cause.getClass().getSimpleName()
+                    : causeMessage.trim());
+        }
+        return sb.toString();
+    }
+
+    private static String html(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
+    }
+
+}

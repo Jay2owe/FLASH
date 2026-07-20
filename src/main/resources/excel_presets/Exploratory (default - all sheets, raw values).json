@@ -1,0 +1,14 @@
+{
+  "name": "Exploratory (default - all sheets, raw values)",
+  "description": "All sheets; per-metric sheets show raw values; yellow highlight for p < 0.05. Matches legacy output.",
+  "libraryVersion": "1",
+  "includeExperimentalConditionsSheet": true,
+  "includeDataSummarySheet": true,
+  "includePerMetricSheets": true,
+  "includeStatisticsSheet": true,
+  "metricSheetDetail": "raw_values",
+  "includeMethodsAppendix": false,
+  "significanceHighlight": "yellow",
+  "headerStyle": "standard",
+  "significanceStars": false
+}

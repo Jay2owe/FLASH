@@ -1,0 +1,14 @@
+{
+  "name": "Minimal (metric sheets only)",
+  "description": "Skip conditions, data summary, and statistics sheets. Just the per-metric data tables.",
+  "libraryVersion": "1",
+  "includeExperimentalConditionsSheet": false,
+  "includeDataSummarySheet": false,
+  "includePerMetricSheets": true,
+  "includeStatisticsSheet": false,
+  "metricSheetDetail": "raw_values",
+  "includeMethodsAppendix": false,
+  "significanceHighlight": "off",
+  "headerStyle": "standard",
+  "significanceStars": false
+}

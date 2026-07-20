@@ -1,0 +1,2799 @@
+package flash.pipeline.ui.config;
+
+import flash.pipeline.bin.BinConfig;
+import flash.pipeline.cellpose.CellposeModel;
+import flash.pipeline.cellpose.CellposeRuntime;
+import flash.pipeline.help.AnalysisHelpCatalog;
+import flash.pipeline.help.AnalysisHelpDialog;
+import flash.pipeline.help.SetupHelpCatalog;
+import flash.pipeline.help.SetupHelpTopic;
+import flash.pipeline.objects.ObjectsCounter3DWrapper;
+import flash.pipeline.runrecord.LoadedRunParameters;
+import flash.pipeline.segmentation.SegmentationMethod;
+import flash.pipeline.segmentation.SegmentationRunFailureException;
+import flash.pipeline.segmentation.SegmentationTokenParser;
+import flash.pipeline.segmentation.catalog.ModelCatalog;
+import flash.pipeline.segmentation.catalog.ModelCatalogIO;
+import flash.pipeline.segmentation.catalog.ModelEntry;
+import flash.pipeline.ui.Debouncer;
+import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.HelpButton;
+import flash.pipeline.ui.ModelEntryListCellRenderer;
+import flash.pipeline.ui.SegmentationModelManagerDialog;
+import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.preview.ObjectSizeFilterPreview;
+import flash.pipeline.ui.preview.PreviewPairPanel;
+import flash.pipeline.ui.variations.MontageDisplayActionDelegate;
+import flash.pipeline.ui.variations.ParameterCombo;
+import flash.pipeline.ui.variations.ParameterId;
+import flash.pipeline.ui.variations.VariationEngineContext;
+import flash.pipeline.ui.variations.VariationsDialog;
+import ij.IJ;
+import ij.ImagePlus;
+import ij.measure.ResultsTable;
+
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import java.awt.Color;
+import java.awt.Container;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
+import java.awt.Window;
+import java.io.File;
+import java.lang.ref.WeakReference;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+
+public final class CellposeParameterStage implements ConfigQcStage {
+
+    private static final Color HELP_COLOR = FlashTheme.TEXT_HELP;
+
+    public interface ParameterStore {
+        String getMethodToken();
+        void save(String methodToken);
+    }
+
+    public interface SizeStore {
+        String get();
+        void set(String token);
+    }
+
+    public interface PreviewAdapter {
+        ImagePlus createRawSource(ConfigQcContext context) throws Exception;
+        ImagePlus createFilteredSource(ConfigQcContext context) throws Exception;
+        ImagePlus createFilteredCompanionSource(ConfigQcContext context, int channelIndex) throws Exception;
+        ImagePlus runPreview(ImagePlus filteredSource, ImagePlus filteredCompanionSource,
+                             Parameters parameters) throws Exception;
+        int countLabels(ImagePlus labelImage);
+        void close(ImagePlus image);
+    }
+
+    public interface RuntimeAdapter {
+        CellposeRuntime.Status cachedRuntimeStatus();
+        CompletableFuture<CellposeRuntime.Status> probeRuntimeAsync();
+        boolean nvidiaGpuLikelyAvailable();
+        GpuInstallResult installGpuSupport();
+    }
+
+    interface ModelManagerLauncher {
+        void show(Window owner, Path root, ModelEntry.Engine engine);
+    }
+
+    public static final class GpuInstallResult {
+        public final boolean success;
+        public final String message;
+        public final String details;
+
+        public GpuInstallResult(boolean success, String message, String details) {
+            this.success = success;
+            this.message = message == null ? "" : message;
+            this.details = details == null ? "" : details;
+        }
+    }
+
+    public static final class Parameters {
+        public final String modelToken;
+        public final int secondChannelIndex;
+        public final double diameter;
+        public final double flowThreshold;
+        public final double cellprobThreshold;
+        public final boolean useGpu;
+        public final boolean dumpCellprob;
+
+        public Parameters(String modelToken,
+                          int secondChannelIndex,
+                          double diameter,
+                          double flowThreshold,
+                          double cellprobThreshold,
+                          boolean useGpu) {
+            this(modelToken, secondChannelIndex, diameter, flowThreshold,
+                    cellprobThreshold, useGpu, false);
+        }
+
+        public Parameters(String modelToken,
+                          int secondChannelIndex,
+                          double diameter,
+                          double flowThreshold,
+                          double cellprobThreshold,
+                          boolean useGpu,
+                          boolean dumpCellprob) {
+            this.modelToken = normalizeModelKey(modelToken);
+            this.secondChannelIndex = sanitizeSecondChannelForKnownModel(this.modelToken, secondChannelIndex);
+            this.diameter = sanitizePositive(diameter, BinConfig.DEFAULT_CELLPOSE_DIAMETER);
+            this.flowThreshold = flowThreshold;
+            this.cellprobThreshold = cellprobThreshold;
+            this.useGpu = useGpu;
+            this.dumpCellprob = dumpCellprob;
+        }
+
+        static Parameters defaults(boolean useGpu) {
+            return new Parameters(
+                    BinConfig.DEFAULT_CELLPOSE_MODEL,
+                    -1,
+                    BinConfig.DEFAULT_CELLPOSE_DIAMETER,
+                    BinConfig.DEFAULT_CELLPOSE_FLOW_THRESHOLD,
+                    BinConfig.DEFAULT_CELLPOSE_CELLPROB_THRESHOLD,
+                    useGpu);
+        }
+    }
+
+    private static final String STALE_TEXT = "Preview is out of date. Press Run Preview.";
+    private static final String EMPTY_TEXT = "Filtered input is ready. Press Run Preview.";
+    private static final int MAX_PREVIEW_ERROR_CHARS = 200;
+    private static final String PREVIEW_ERROR_SUFFIX = "...see log for full";
+
+    private final ParameterStore parameterStore;
+    private final SizeStore sizeStore;
+    private final PreviewAdapter previewAdapter;
+    private final RuntimeAdapter runtimeAdapter;
+    private final LinkedHashMap<String, Integer> companionChoices;
+    private final int channelCount;
+    private final int primaryChannelIndex;
+    private final boolean defaultUseGpu;
+    private ModelManagerLauncher modelManagerLauncher = defaultModelManagerLauncher();
+
+    private ConfigQcActions actions;
+    private PreviewPairPanel preview;
+    private ConfigQcContext activeContext;
+    private Parameters savedParameters;
+    private Parameters restartParameters;
+    private ParticleSizeStage.SizeToken savedSize = new ParticleSizeStage.SizeToken("100", "Infinity");
+    private ParticleSizeStage.SizeToken restartSize;
+    private ImagePlus rawSource;
+    private ImagePlus filteredSource;
+    private ImagePlus labelPreview;
+    private ImagePlus previousLabelPreview;
+    private final Set<ImagePlus> retainedPreviewCleanup = Collections.newSetFromMap(
+            new IdentityHashMap<ImagePlus, Boolean>());
+    private final PreviewInputLeaseRegistry previewInputLeases =
+            new PreviewInputLeaseRegistry();
+    private PreviewWorkerExecutor previewWorkerExecutor = PreviewWorkerExecutor.DEFAULT;
+    private String previousPreviewText = "";
+    private Parameters previousSettings;
+    private ParticleSizeStage.SizeToken previousSettingsSize;
+    private Parameters displayedSettings;
+    private ParticleSizeStage.SizeToken displayedSize;
+    private ResultsTable objectStats;
+    private volatile SwingWorker<ImagePlus, Void> previewWorker;
+    private volatile Runnable previewWorkerPreStartCompletion;
+    private volatile long previewEpoch;
+    private volatile boolean previewSessionActive;
+    private volatile Throwable previewWorkerCompletionFailure;
+    private volatile boolean previewWorkerCompletionHandled;
+    private volatile boolean previewWorkerFailureObservedInterrupt;
+    private volatile boolean previewWorkerCompletionObservedInterrupt;
+    private SwingWorker<GpuInstallResult, Void> installWorker;
+    private boolean previewStale = true;
+    private boolean updatingControls;
+    private boolean showRawSource;
+    private boolean savedMethodExplicitGpu;
+    private boolean gpuEdited;
+    private volatile boolean runtimeUiActive;
+    private volatile int runtimeProbeRequestId;
+    private int lastObjectCount = -1;
+    private List<ModelOption> modelOptions = Collections.emptyList();
+    private String missingModelKey;
+    private String selectedModelKeySnapshot;
+    private Parameters pendingDefaultsPrevious;
+    private Parameters pendingDefaultsSuggested;
+
+    private JComboBox<ModelOption> modelCombo;
+    private JComboBox<ModelOption> missingModelReplacementCombo;
+    private JComboBox<String> companionCombo;
+    private JTextField diameterField;
+    private JTextField flowField;
+    private JTextField cellprobField;
+    private JTextField sizeMinField;
+    private JTextField sizeMaxField;
+    private ToggleSwitch gpuSwitch;
+    private JButton previewButton;
+    private JButton installGpuButton;
+    private JButton resetButton;
+    private JButton variationsButton;
+    private JButton manageModelsButton;
+    private JPanel missingNoticeContainer;
+    private JLabel missingModelNoticeLabel;
+    private JLabel defaultsNoticeLabel;
+    private JButton defaultsApplyButton;
+    private JButton defaultsRevertButton;
+    private JLabel modelDescriptionLabel;
+    private JLabel companionHelpLabel;
+    private JLabel runtimeLabel;
+    private ObjectSizeCutoffPanel sizeCutoffPanel;
+    private ToggleSwitch showRemovedObjectsSwitch;
+    private Debouncer sizeFilterDebouncer;
+    private ObjectSizeFilterPreview.Summary sizeSummary;
+
+    public CellposeParameterStage(ParameterStore parameterStore,
+                                  PreviewAdapter previewAdapter,
+                                  RuntimeAdapter runtimeAdapter,
+                                  List<String> channelNames,
+                                  int primaryChannelIndex,
+                                  boolean defaultUseGpu) {
+        this(parameterStore, defaultSizeStore(), previewAdapter, runtimeAdapter,
+                channelNames, primaryChannelIndex, defaultUseGpu);
+    }
+
+    public CellposeParameterStage(ParameterStore parameterStore,
+                                  SizeStore sizeStore,
+                                  PreviewAdapter previewAdapter,
+                                  RuntimeAdapter runtimeAdapter,
+                                  List<String> channelNames,
+                                  int primaryChannelIndex,
+                                  boolean defaultUseGpu) {
+        if (parameterStore == null) {
+            throw new IllegalArgumentException("parameterStore must not be null");
+        }
+        if (sizeStore == null) {
+            throw new IllegalArgumentException("sizeStore must not be null");
+        }
+        if (previewAdapter == null) {
+            throw new IllegalArgumentException("previewAdapter must not be null");
+        }
+        this.parameterStore = parameterStore;
+        this.sizeStore = sizeStore;
+        this.previewAdapter = previewAdapter;
+        this.runtimeAdapter = runtimeAdapter == null ? noopRuntimeAdapter() : runtimeAdapter;
+        this.primaryChannelIndex = Math.max(0, primaryChannelIndex);
+        this.channelCount = channelNames == null ? 0 : channelNames.size();
+        this.defaultUseGpu = defaultUseGpu;
+        this.companionChoices = buildCompanionChoices(channelNames, primaryChannelIndex);
+        this.savedParameters = parseMethod(
+                parameterStore.getMethodToken(),
+                defaultUseGpu,
+                channelCount,
+                primaryChannelIndex);
+        this.savedSize = ParticleSizeStage.parseSizeToken(sizeStore.get());
+    }
+
+    @Override
+    public String title() {
+        return "Cellpose";
+    }
+
+    @Override
+    public SetupHelpTopic helpTopic() {
+        return SetupHelpCatalog.CELLPOSE;
+    }
+
+    @Override
+    public boolean controlsCanExpand() {
+        return true;
+    }
+
+    @Override
+    public JComponent buildControls(ConfigQcContext context, ConfigQcActions actions) {
+        this.actions = actions;
+        this.activeContext = context;
+        String methodToken = parameterStore.getMethodToken();
+        this.savedMethodExplicitGpu = hasExplicitGpuOption(methodToken);
+        this.gpuEdited = false;
+        this.runtimeUiActive = true;
+        this.runtimeProbeRequestId++;
+        this.savedParameters = restartParameters == null
+                ? parseMethod(methodToken,
+                defaultUseGpu,
+                channelCount,
+                primaryChannelIndex)
+                : restartParameters;
+        this.savedSize = restartSize == null
+                ? ParticleSizeStage.parseSizeToken(sizeStore.get())
+                : restartSize;
+        this.modelOptions = modelOptionsFor(context);
+        this.missingModelKey = containsModelKey(modelOptions, savedParameters.modelToken)
+                ? null
+                : savedParameters.modelToken;
+        if (sizeFilterDebouncer != null) {
+            sizeFilterDebouncer.cancel();
+        }
+        sizeFilterDebouncer = new Debouncer(250, new Runnable() {
+            @Override public void run() {
+                sizeFieldChanged();
+            }
+        });
+
+        JPanel panel = new JPanel();
+        panel.setOpaque(false);
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(FlashTheme.pad(2, 0, 0, 0));
+        missingNoticeContainer = buildMissingModelNoticeContainer();
+        panel.add(missingNoticeContainer);
+        refreshMissingModelNoticeRow();
+        panel.add(buildModelRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildDefaultsRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildDetectionRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildSizeRow());
+        panel.add(Box.createVerticalStrut(4));
+        sizeCutoffPanel = new ObjectSizeCutoffPanel();
+        panel.add(sizeCutoffPanel);
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildHintRow());
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(buildActionRow());
+        loadFields(savedParameters);
+        loadSizeFields(savedSize);
+        updateParameterValidationState();
+        refreshSizeCutoffPanelOnly();
+        refreshCompanionState();
+        markPreviewStale(EMPTY_TEXT);
+        if (!updateParameterValidationState()) {
+            setStatus(validationHint());
+        }
+        return panel;
+    }
+
+    @Override
+    public boolean supportsLoadedParameters() {
+        return true;
+    }
+
+    @Override
+    public LoadedRunParameters.Result applyLoadedParameters(Map<String, Object> parameters) {
+        int channel = activeContext == null ? primaryChannelIndex : activeContext.getChannelIndex();
+        LoadedRunParameters.ValueLoad<String> method =
+                LoadedRunParameters.segmentationMethod(parameters, channel);
+        LoadedRunParameters.ValueLoad<ParticleSizeStage.SizeToken> size =
+                LoadedRunParameters.particleSize(parameters, channel);
+        if (method.value != null
+                && SegmentationTokenParser.parseLenient(method.value).isCellpose()) {
+            Parameters loaded = parseMethod(method.value, defaultUseGpu, channelCount, primaryChannelIndex);
+            savedParameters = loaded;
+            restartParameters = loaded;
+            if (modelCombo != null) {
+                loadFields(loaded);
+                refreshCompanionState();
+            }
+        }
+        if (size.value != null) {
+            savedSize = size.value;
+            restartSize = size.value;
+            sizeStore.set(size.value.toToken());
+            loadSizeFields(size.value);
+            refreshSizeCutoffPanelOnly();
+        }
+        updateParameterValidationState();
+        markPreviewStale("Loaded Cellpose parameters. Press Run Preview.");
+        return LoadedRunParameters.Result.merge(method.result, size.result);
+    }
+
+    @Override
+    public void onEnter(ConfigQcContext context, PreviewPairPanel preview) {
+        previewSessionActive = false;
+        closePreviewWorker();
+        closeImages();
+        this.activeContext = context;
+        this.preview = preview;
+        previewSessionActive = true;
+        showRawSource = false;
+        if (preview != null) {
+            preview.clearLargePreviewImages();
+            preview.setShowRemovedObjects(showRemovedObjectsSwitch != null
+                    && showRemovedObjectsSwitch.isSelected());
+            preview.setSourceToggleVisible(true);
+            preview.setSourceMode(PreviewPairPanel.SourceMode.FILTERED);
+            preview.setSourceModeEnabled(true);
+            preview.setComparisonPreviewVisible(true);
+            preview.setComparisonRestoreAction(null);
+            preview.setSourceModeChangeListener(mode -> {
+                showRawSource = mode == PreviewPairPanel.SourceMode.RAW;
+                refreshSourceAndOutputPreview();
+            });
+        }
+        if (actions != null) {
+            actions.registerPreviewButton(previewButton);
+        }
+        try {
+            rawSource = previewAdapter.createRawSource(context);
+            if (rawSource == null) {
+                throw new IllegalStateException("No raw Cellpose input image is available.");
+            }
+            filteredSource = previewAdapter.createFilteredSource(context);
+            if (filteredSource == null) {
+                throw new IllegalStateException("No filtered Cellpose input image is available.");
+            }
+            updateParameterValidationState();
+            if (preview != null) {
+                preview.setOriginal(currentSourceImage());
+                preview.setAdjusted(null);
+                preview.setAdjustedState(PreviewPairPanel.PreviewState.STALE, EMPTY_TEXT);
+            }
+            refreshSizeCutoffPanelOnly();
+            refreshLargePreviewModel();
+            setStatus(EMPTY_TEXT);
+            if (!updateParameterValidationState()) {
+                setStatus(validationHint());
+            }
+            setVariationsButtonReady(true);
+        } catch (Exception e) {
+            closeImages();
+            setVariationsButtonReady(false);
+            setError("Could not prepare Cellpose input: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public boolean lockIn(ConfigQcContext context) {
+        if (missingModelKey != null) {
+            setError("Cannot run segmentation: model missing.");
+            return false;
+        }
+        try {
+            Parameters parameters = collectParameters();
+            ParticleSizeStage.SizeToken size = collectSizeToken();
+            ParticleSizeStage.validateSizeToken(size, filteredSource);
+            parameterStore.save(formatMethod(parameters));
+            sizeStore.set(size.toToken());
+            savedParameters = parameters;
+            savedSize = size;
+            restartParameters = null;
+            restartSize = null;
+            setStatus("Locked Cellpose parameters.");
+            return true;
+        } catch (RuntimeException e) {
+            setError("Enter valid min and max voxel sizes.");
+            return false;
+        }
+    }
+
+    @Override
+    public void skipCurrentImage(ConfigQcContext context) {
+        setStatus("Skipped this image; Cellpose parameters are unchanged.");
+    }
+
+    @Override
+    public void restartStage(ConfigQcContext context) {
+        closePreviewWorker();
+        restartParameters = collectParameters();
+        try {
+            restartSize = collectSizeToken();
+        } catch (RuntimeException ignored) {
+            // Keep the prior restart value if the current fields are invalid.
+        }
+        setStatus("Restarting Cellpose review from the first image.");
+    }
+
+    @Override
+    public void onLeave(ConfigQcContext context) {
+        previewSessionActive = false;
+        runtimeUiActive = false;
+        runtimeProbeRequestId++;
+        closePreviewWorker();
+        closeInstallWorker();
+        if (sizeFilterDebouncer != null) {
+            sizeFilterDebouncer.cancel();
+        }
+        if (preview != null) {
+            preview.setSourceModeChangeListener(null);
+            preview.setDisplaySettingsChangeListener(null);
+            preview.setObjectSizeGuide(null);
+            preview.clearComparisonPreview();
+            preview.clearLargePreviewImages();
+        }
+        closeImages();
+        setVariationsButtonReady(false);
+        preview = null;
+        activeContext = null;
+    }
+
+    boolean isPreviewStaleForTest() {
+        return previewStale;
+    }
+
+    String currentMethodForTest() {
+        return formatMethod(collectParameters());
+    }
+
+    void setDiameterForTest(String value) {
+        if (diameterField != null) diameterField.setText(value);
+    }
+
+    void setFlowForTest(String value) {
+        if (flowField != null) flowField.setText(value);
+    }
+
+    void setCellprobForTest(String value) {
+        if (cellprobField != null) cellprobField.setText(value);
+    }
+
+    void setModelForTest(String model) {
+        selectModelKey(model);
+    }
+
+    void setCompanionForTest(String label) {
+        if (companionCombo != null) companionCombo.setSelectedItem(label);
+    }
+
+    void setUseGpuForTest(boolean useGpu) {
+        if (gpuSwitch != null) {
+            gpuSwitch.setSelected(useGpu);
+            fieldChanged();
+        }
+    }
+
+    void setSizeMinForTest(String value) {
+        if (sizeMinField != null) sizeMinField.setText(value);
+        flushSizeFilterDebounceForTest();
+    }
+
+    void setSizeMaxForTest(String value) {
+        if (sizeMaxField != null) sizeMaxField.setText(value);
+        flushSizeFilterDebounceForTest();
+    }
+
+    void flushSizeFilterDebounceForTest() {
+        if (sizeFilterDebouncer != null) sizeFilterDebouncer.flushNow();
+    }
+
+    void runPreviewNowForTest() throws Exception {
+        runPreviewNow();
+    }
+
+    void runPreviewOnWorkerForTest() {
+        runPreviewOnWorker();
+    }
+
+    void setPreviewWorkerExecutorForTest(PreviewWorkerExecutor executor) {
+        previewWorkerExecutor = executor == null ? PreviewWorkerExecutor.DEFAULT : executor;
+    }
+
+    boolean previewWorkerActiveForTest() {
+        return previewWorker != null;
+    }
+
+    Throwable previewWorkerCompletionFailureForTest() {
+        return previewWorkerCompletionFailure;
+    }
+
+    boolean previewWorkerCompletionHandledForTest() {
+        return previewWorkerCompletionHandled;
+    }
+
+    boolean previewWorkerFailureObservedInterruptForTest() {
+        return previewWorkerFailureObservedInterrupt;
+    }
+
+    boolean previewWorkerCompletionObservedInterruptForTest() {
+        return previewWorkerCompletionObservedInterrupt;
+    }
+
+    ImagePlus labelPreviewForTest() {
+        return labelPreview;
+    }
+
+    String sizeCutoffSummaryForTest() {
+        return sizeCutoffPanel == null ? "" : sizeCutoffPanel.summaryTextForTest();
+    }
+
+    void selectRawSourceForTest() {
+        setRawSourceVisible(true);
+    }
+
+    void selectFilteredSourceForTest() {
+        setRawSourceVisible(false);
+    }
+
+    void setShowOverlayForTest(boolean showOverlay) {
+        if (preview != null) preview.setObjectOverlaySelected(showOverlay);
+        refreshSourceAndOutputPreview();
+    }
+
+    boolean objectOverlaySelectedForTest() {
+        return preview != null && preview.objectOverlaySelected();
+    }
+
+    String currentSourceTitleForTest() {
+        ImagePlus source = currentSourceImage();
+        return source == null ? null : source.getTitle();
+    }
+
+    int largePreviewPaneCountForTest() {
+        return labelPreview == null ? 2 : 3;
+    }
+
+    void applyVariationComboForTest(ParameterCombo combo) {
+        applyVariationCombo(combo);
+    }
+
+    String modelHintTextForTest() {
+        return modelDescriptionLabel == null ? "" : modelDescriptionLabel.getText();
+    }
+
+    String companionHintTextForTest() {
+        return companionHelpLabel == null ? "" : companionHelpLabel.getText();
+    }
+
+    String runtimeHintTextForTest() {
+        return runtimeLabel == null ? "" : runtimeLabel.getText();
+    }
+
+    boolean installGpuButtonReachableForTest() {
+        return installGpuButton != null && installGpuButton.isEnabled();
+    }
+
+    List<String> modelKeysForTest() {
+        List<String> keys = new ArrayList<String>();
+        if (modelCombo == null) return keys;
+        for (int i = 0; i < modelCombo.getItemCount(); i++) {
+            keys.add(modelCombo.getItemAt(i).entry.modelKey);
+        }
+        return keys;
+    }
+
+    String selectedModelKeyForTest() {
+        ModelOption selected = selectedModelOption();
+        return selected == null ? null : selected.entry.modelKey;
+    }
+
+    boolean manageModelsButtonEnabledForTest() {
+        return manageModelsButton != null && manageModelsButton.isEnabled();
+    }
+
+    boolean defaultsApplyVisibleForTest() {
+        return defaultsApplyButton != null && defaultsApplyButton.isVisible();
+    }
+
+    void applyPendingDefaultsForTest() {
+        applyPendingDefaults();
+    }
+
+    void revertPendingDefaultsForTest() {
+        revertPendingDefaults();
+    }
+
+    String missingModelNoticeTextForTest() {
+        return missingModelNoticeLabel == null ? "" : missingModelNoticeLabel.getText();
+    }
+
+    boolean replacementSelectorVisibleForTest() {
+        return missingModelReplacementCombo != null && missingModelReplacementCombo.isVisible();
+    }
+
+    boolean missingModelNoticeInPanelForTest() {
+        return missingNoticeContainer != null
+                && missingNoticeContainer.isVisible()
+                && missingNoticeContainer.getComponentCount() > 0;
+    }
+
+    void setModelManagerLauncherForTest(ModelManagerLauncher launcher) {
+        modelManagerLauncher = launcher == null ? defaultModelManagerLauncher() : launcher;
+    }
+
+    void refreshModelOptionsFromCatalogForTest() {
+        refreshModelOptionsFromCatalog();
+    }
+
+    private JComponent buildMissingModelNoticeRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+
+        missingModelNoticeLabel = new JLabel("Cellpose model '" + missingModelKey
+                + "' is not in the catalog. Pick a replacement:");
+        missingModelNoticeLabel.setForeground(FlashTheme.WARNING_FG);
+
+        missingModelReplacementCombo = new JComboBox<ModelOption>(
+                modelOptions.toArray(new ModelOption[0]));
+        missingModelReplacementCombo.setRenderer(new ModelEntryListCellRenderer());
+        missingModelReplacementCombo.addActionListener(e -> {
+            if (updatingControls) return;
+            ModelOption selected = (ModelOption) missingModelReplacementCombo.getSelectedItem();
+            if (selected == null) return;
+            resolveMissingModel(selected.entry.modelKey);
+        });
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(missingModelNoticeLabel, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(missingModelReplacementCombo, gbc);
+        JButton manage = new JButton("Open Manage models...");
+        manage.addActionListener(e -> openModelManager());
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(manage, gbc);
+        return row;
+    }
+
+    private JPanel buildMissingModelNoticeContainer() {
+        JPanel container = new JPanel();
+        container.setOpaque(false);
+        container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
+        container.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        return container;
+    }
+
+    private void refreshMissingModelNoticeRow() {
+        if (missingNoticeContainer == null) return;
+        missingNoticeContainer.removeAll();
+        if (missingModelKey == null) {
+            missingModelNoticeLabel = null;
+            missingModelReplacementCombo = null;
+            missingNoticeContainer.setVisible(false);
+        } else {
+            missingNoticeContainer.add(buildMissingModelNoticeRow());
+            missingNoticeContainer.add(Box.createVerticalStrut(4));
+            missingNoticeContainer.setVisible(true);
+        }
+        missingNoticeContainer.revalidate();
+        missingNoticeContainer.repaint();
+        Container parent = missingNoticeContainer.getParent();
+        if (parent != null) {
+            parent.revalidate();
+            parent.repaint();
+        }
+    }
+
+    private JComponent buildModelRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+
+        modelCombo = new JComboBox<ModelOption>(modelOptions.toArray(new ModelOption[0]));
+        modelCombo.setRenderer(new ModelEntryListCellRenderer());
+        modelCombo.addActionListener(e -> modelChanged());
+        companionCombo = new JComboBox<String>(
+                companionChoices.keySet().toArray(new String[0]));
+        companionCombo.addActionListener(e -> companionChanged());
+        gpuSwitch = new ToggleSwitch(false);
+        gpuSwitch.addChangeListener(new Runnable() {
+            @Override public void run() {
+                if (!updatingControls) gpuEdited = true;
+                fieldChanged();
+            }
+        });
+        JLabel gpuLabel = new JLabel("Use GPU");
+        gpuLabel.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        gpuLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (gpuSwitch.isEnabled()) {
+                    gpuSwitch.setSelected(!gpuSwitch.isSelected());
+                }
+            }
+        });
+        installGpuButton = new JButton("Install GPU Support");
+        installGpuButton.addActionListener(e -> installGpuSupport());
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(new JLabel("Model"), gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.25;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(modelCombo, gbc);
+        manageModelsButton = new JButton("Manage models...");
+        manageModelsButton.setEnabled(true);
+        manageModelsButton.setToolTipText("Open the segmentation model manager.");
+        manageModelsButton.addActionListener(e -> openModelManager());
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(manageModelsButton, gbc);
+
+        final JButton trainingHelpButton = HelpButton.question("How to train and import custom segmentation models.");
+        trainingHelpButton.addActionListener(e -> AnalysisHelpDialog.show(
+                trainingHelpButton, AnalysisHelpCatalog.TRAIN_CUSTOM_SEGMENTATION_MODELS));
+        gbc.gridx++;
+        row.add(trainingHelpButton, gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(new JLabel("Companion"), gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.35;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(companionCombo, gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        JPanel gpuPanel = new JPanel();
+        gpuPanel.setOpaque(false);
+        gpuPanel.setLayout(new BoxLayout(gpuPanel, BoxLayout.X_AXIS));
+        gpuPanel.add(gpuSwitch);
+        gpuPanel.add(Box.createHorizontalStrut(FlashTheme.SPACE_S));
+        gpuPanel.add(gpuLabel);
+        row.add(gpuPanel, gbc);
+        gbc.gridx++;
+        row.add(installGpuButton, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        return row;
+    }
+
+    private JComponent buildDefaultsRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+        defaultsNoticeLabel = hintLabel(" ");
+        defaultsApplyButton = new JButton("Apply");
+        defaultsApplyButton.setVisible(false);
+        defaultsApplyButton.addActionListener(e -> applyPendingDefaults());
+        defaultsRevertButton = new JButton("Revert");
+        defaultsRevertButton.setVisible(false);
+        defaultsRevertButton.addActionListener(e -> revertPendingDefaults());
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(defaultsNoticeLabel, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(defaultsApplyButton, gbc);
+        gbc.gridx++;
+        row.add(defaultsRevertButton, gbc);
+        return row;
+    }
+
+    private JComponent buildDetectionRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+
+        JLabel heading = new JLabel("Detection:");
+        heading.setFont(FlashTheme.bodyMedium());
+        diameterField = createNumberField(6);
+        flowField = createNumberField(5);
+        cellprobField = createNumberField(5);
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(heading, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Diameter"), gbc);
+        gbc.gridx++;
+        row.add(diameterField, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Flow threshold"), gbc);
+        gbc.gridx++;
+        row.add(flowField, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Cell probability"), gbc);
+        gbc.gridx++;
+        row.add(cellprobField, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        return row;
+    }
+
+    private JComponent buildSizeRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+
+        JLabel heading = new JLabel("Object size:");
+        heading.setFont(FlashTheme.bodyMedium());
+        sizeMinField = createSizeField(6);
+        sizeMaxField = createSizeField(8);
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(heading, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Min"), gbc);
+        gbc.gridx++;
+        row.add(sizeMinField, gbc);
+        gbc.gridx++;
+        row.add(new JLabel("Max"), gbc);
+        gbc.gridx++;
+        row.add(sizeMaxField, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        return row;
+    }
+
+    private JComponent buildHintRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        row.setBorder(FlashTheme.pad(2, 0, 2, 0));
+
+        modelDescriptionLabel = hintLabel(" ");
+        companionHelpLabel = hintLabel(" ");
+        runtimeLabel = hintLabel(" ");
+        refreshRuntimeLabel();
+
+        GridBagConstraints gbc = rowConstraints();
+        row.add(modelDescriptionLabel, gbc);
+        gbc.gridx++;
+        row.add(hintLabel("|"), gbc);
+        gbc.gridx++;
+        row.add(companionHelpLabel, gbc);
+        gbc.gridx++;
+        row.add(hintLabel("|"), gbc);
+        gbc.gridx++;
+        row.add(runtimeLabel, gbc);
+        gbc.gridx++;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        return row;
+    }
+
+    private JComponent buildActionRow() {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+
+        previewButton = new JButton("Run Preview");
+        flash.pipeline.ui.FlashIcons.apply(previewButton, flash.pipeline.ui.FlashIcons.play());
+        previewButton.addActionListener(e -> runPreviewOnWorker());
+        showRemovedObjectsSwitch = new ToggleSwitch(false);
+        showRemovedObjectsSwitch.addChangeListener(new Runnable() {
+            @Override public void run() {
+                if (preview != null) {
+                    preview.setShowRemovedObjects(showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
+        JLabel showRemovedLabel = new JLabel("Show removed objects");
+        showRemovedLabel.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        showRemovedLabel.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (showRemovedObjectsSwitch != null && showRemovedObjectsSwitch.isEnabled()) {
+                    showRemovedObjectsSwitch.setSelected(!showRemovedObjectsSwitch.isSelected());
+                }
+            }
+        });
+        resetButton = new JButton("Reset to saved");
+        flash.pipeline.ui.FlashIcons.apply(resetButton, flash.pipeline.ui.FlashIcons.refresh());
+        resetButton.addActionListener(e -> resetToSaved());
+
+        GridBagConstraints gbc = rowConstraints();
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        row.add(Box.createHorizontalGlue(), gbc);
+        gbc.gridx++;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        row.add(showRemovedObjectsSwitch, gbc);
+        gbc.gridx++;
+        row.add(showRemovedLabel, gbc);
+        gbc.gridx++;
+        row.add(previewButton, gbc);
+        gbc.gridx++;
+        gbc.insets = new Insets(0, 2, 0, 0);
+        row.add(resetButton, gbc);
+        variationsButton = new JButton("Parameter Variations...");
+        variationsButton.addActionListener(e -> openVariationsDialog());
+        variationsButton.setEnabled(filteredSource != null);
+        variationsButton.setToolTipText("Run/prepare a preview before opening parameter variations.");
+        gbc.gridx++;
+        row.add(variationsButton, gbc);
+        return row;
+    }
+
+    private JTextField createNumberField(int columns) {
+        JTextField field = new JTextField(columns);
+        installFieldListener(field);
+        return field;
+    }
+
+    private JTextField createSizeField(int columns) {
+        JTextField field = new JTextField(columns);
+        installSizeFieldListener(field);
+        return field;
+    }
+
+    private JLabel hintLabel(String text) {
+        JLabel label = new JLabel(text == null ? "" : text);
+        label.setForeground(HELP_COLOR);
+        return label;
+    }
+
+    private GridBagConstraints rowConstraints() {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridy = 0;
+        gbc.gridx = 0;
+        gbc.insets = new Insets(0, 0, 0, 6);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.weightx = 0.0;
+        gbc.fill = GridBagConstraints.NONE;
+        return gbc;
+    }
+
+    private void installFieldListener(JTextField field) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) {
+                fieldChanged();
+            }
+
+            @Override public void removeUpdate(DocumentEvent e) {
+                fieldChanged();
+            }
+
+            @Override public void changedUpdate(DocumentEvent e) {
+                fieldChanged();
+            }
+        });
+    }
+
+    private void installSizeFieldListener(JTextField field) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) {
+                scheduleSizeFilterRefresh();
+            }
+
+            @Override public void removeUpdate(DocumentEvent e) {
+                scheduleSizeFilterRefresh();
+            }
+
+            @Override public void changedUpdate(DocumentEvent e) {
+                scheduleSizeFilterRefresh();
+            }
+        });
+    }
+
+    private void scheduleSizeFilterRefresh() {
+        if (updatingControls) return;
+        if (sizeFilterDebouncer != null) {
+            sizeFilterDebouncer.trigger();
+        } else {
+            sizeFieldChanged();
+        }
+    }
+
+    private void loadFields(Parameters parameters) {
+        updatingControls = true;
+        try {
+            selectModelKey(parameters.modelToken);
+            selectedModelKeySnapshot = parameters.modelToken;
+            companionCombo.setSelectedItem(companionChoiceLabel(companionChoices, parameters.secondChannelIndex));
+            diameterField.setText(String.valueOf(parameters.diameter));
+            flowField.setText(String.valueOf(parameters.flowThreshold));
+            cellprobField.setText(String.valueOf(parameters.cellprobThreshold));
+            gpuSwitch.setSelected(parameters.useGpu);
+            refreshModelDescriptionLabel();
+            refreshCompanionHelpLabel();
+            refreshCompanionState();
+        } finally {
+            updatingControls = false;
+        }
+    }
+
+    private void loadSizeFields(ParticleSizeStage.SizeToken token) {
+        updatingControls = true;
+        try {
+            ParticleSizeStage.SizeToken safe = token == null
+                    ? new ParticleSizeStage.SizeToken("100", "Infinity")
+                    : token;
+            if (sizeMinField != null) sizeMinField.setText(safe.minText);
+            if (sizeMaxField != null) sizeMaxField.setText(safe.maxText);
+        } finally {
+            updatingControls = false;
+        }
+    }
+
+    private void showPendingDefaults(Parameters previous, Parameters suggested, String modelName) {
+        pendingDefaultsPrevious = copyParameters(previous);
+        pendingDefaultsSuggested = copyParameters(suggested);
+        highlightDefaultField(diameterField);
+        highlightDefaultField(flowField);
+        highlightDefaultField(cellprobField);
+        if (defaultsNoticeLabel != null) {
+            defaultsNoticeLabel.setText("Defaults from "
+                    + (modelName == null || modelName.trim().isEmpty()
+                    ? suggested.modelToken : modelName)
+                    + " are pending.");
+        }
+        if (defaultsApplyButton != null) defaultsApplyButton.setVisible(true);
+        if (defaultsRevertButton != null) defaultsRevertButton.setVisible(true);
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void applyPendingDefaults() {
+        if (pendingDefaultsSuggested == null) return;
+        Parameters applied = copyParameters(pendingDefaultsSuggested);
+        savedParameters = applied;
+        selectedModelKeySnapshot = applied.modelToken;
+        parameterStore.save(formatMethod(applied));
+        clearPendingDefaults();
+        if (labelPreview != null) {
+            runPreviewOnWorker();
+        } else {
+            markPreviewStale(STALE_TEXT);
+        }
+    }
+
+    private void revertPendingDefaults() {
+        if (pendingDefaultsPrevious == null) return;
+        Parameters previous = copyParameters(pendingDefaultsPrevious);
+        loadFields(previous);
+        updateParameterValidationState();
+        selectedModelKeySnapshot = previous.modelToken;
+        clearPendingDefaults();
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void clearPendingDefaults() {
+        pendingDefaultsPrevious = null;
+        pendingDefaultsSuggested = null;
+        resetDefaultField(diameterField);
+        resetDefaultField(flowField);
+        resetDefaultField(cellprobField);
+        if (defaultsNoticeLabel != null) defaultsNoticeLabel.setText(" ");
+        if (defaultsApplyButton != null) defaultsApplyButton.setVisible(false);
+        if (defaultsRevertButton != null) defaultsRevertButton.setVisible(false);
+    }
+
+    private static boolean defaultsChanged(Parameters previous, Parameters suggested) {
+        if (previous == null || suggested == null) return false;
+        return previous.diameter != suggested.diameter
+                || previous.flowThreshold != suggested.flowThreshold
+                || previous.cellprobThreshold != suggested.cellprobThreshold;
+    }
+
+    private static void highlightDefaultField(JTextField field) {
+        if (field != null) field.setBackground(FlashTheme.FIELD_ATTENTION_BG);
+    }
+
+    private static void resetDefaultField(JTextField field) {
+        if (field != null) field.setBackground(Color.WHITE);
+    }
+
+    private void modelChanged() {
+        if (!updatingControls) {
+            ModelOption selected = selectedModelOption();
+            if (selected != null) {
+                Parameters current = collectParameters();
+                Parameters previous = new Parameters(
+                        selectedModelKeySnapshot == null ? current.modelToken : selectedModelKeySnapshot,
+                        current.secondChannelIndex,
+                        current.diameter,
+                        current.flowThreshold,
+                        current.cellprobThreshold,
+                        current.useGpu,
+                        current.dumpCellprob);
+                Parameters updated = new Parameters(
+                        selected.entry.modelKey,
+                        selected.entry.supportsSecondChannel ? current.secondChannelIndex : -1,
+                        defaultDouble(selected.entry.defaults.get("diameter"), current.diameter),
+                        defaultDouble(selected.entry.defaults.get("flowThreshold"), current.flowThreshold),
+                        defaultDouble(selected.entry.defaults.get("cellprobThreshold"), current.cellprobThreshold),
+                        current.useGpu);
+                loadFields(updated);
+                updateParameterValidationState();
+                captureCurrentPreviewForComparison();
+                if (defaultsChanged(previous, updated)) {
+                    showPendingDefaults(previous, updated, selected.entry.name);
+                } else {
+                    savedParameters = updated;
+                    parameterStore.save(formatMethod(updated));
+                    selectedModelKeySnapshot = updated.modelToken;
+                    if (labelPreview != null) {
+                        runPreviewOnWorker();
+                    } else {
+                        markPreviewStale(STALE_TEXT);
+                    }
+                }
+            }
+        }
+        refreshModelDescriptionLabel();
+        refreshCompanionState();
+    }
+
+    private void companionChanged() {
+        refreshCompanionHelpLabel();
+        fieldChanged();
+    }
+
+    private void refreshCompanionState() {
+        if (companionCombo == null) return;
+        boolean enabled = selectedModelSupportsSecondChannel() && companionCombo.getItemCount() > 1;
+        companionCombo.setEnabled(enabled);
+        if (!enabled) {
+            updatingControls = true;
+            try {
+                companionCombo.setSelectedItem("None");
+            } finally {
+                updatingControls = false;
+            }
+        }
+        refreshCompanionHelpLabel();
+        Container parent = companionCombo.getParent();
+        if (parent != null) {
+            parent.revalidate();
+            parent.repaint();
+        }
+    }
+
+    private void refreshModelDescriptionLabel() {
+        if (modelDescriptionLabel != null) {
+            ModelOption selected = selectedModelOption();
+            modelDescriptionLabel.setText(selected == null
+                    ? "Model: no Cellpose models are available."
+                    : selected.toString() + ": " + selected.description());
+        }
+    }
+
+    private void refreshCompanionHelpLabel() {
+        if (companionHelpLabel == null) return;
+        boolean enabled = selectedModelSupportsSecondChannel()
+                && companionCombo != null
+                && companionCombo.getItemCount() > 1;
+        if (!enabled) {
+            companionHelpLabel.setText("Companion: not used by selected model.");
+            return;
+        }
+        Object selected = companionCombo == null ? null : companionCombo.getSelectedItem();
+        String label = selected == null ? "None" : String.valueOf(selected);
+        if ("None".equals(label)) {
+            companionHelpLabel.setText("Companion: optional second channel; leave None if unsure.");
+        } else {
+            companionHelpLabel.setText("Companion: using " + label + " as channel 2.");
+        }
+    }
+
+    private void refreshRuntimeLabel() {
+        if (runtimeLabel == null) {
+            return;
+        }
+        runtimeLabel.setText(runtimeText(runtimeAdapter.cachedRuntimeStatus()));
+        final int requestId = ++runtimeProbeRequestId;
+        CompletableFuture<CellposeRuntime.Status> future = runtimeAdapter.probeRuntimeAsync();
+        if (future == null) {
+            return;
+        }
+        final WeakReference<CellposeParameterStage> stageRef =
+                new WeakReference<CellposeParameterStage>(this);
+        future.whenCompleteAsync(new RuntimeProbeCallback(stageRef, requestId),
+                SwingUtilities::invokeLater);
+    }
+
+    private void applyRuntimeProbeResult(int requestId, CellposeRuntime.Status status, Throwable throwable) {
+        if (!runtimeUiActive || runtimeProbeRequestId != requestId || runtimeLabel == null) {
+            return;
+        }
+        if (throwable != null) {
+            runtimeLabel.setText("Runtime: Cellpose probe failed.");
+            return;
+        }
+        runtimeLabel.setText(runtimeText(status));
+        applyRuntimeGpuDefault(status);
+    }
+
+    private void applyRuntimeGpuDefault(CellposeRuntime.Status status) {
+        if (status == null || !status.ready || gpuSwitch == null
+                || gpuEdited || savedMethodExplicitGpu) {
+            return;
+        }
+        if (gpuSwitch.isSelected() == status.gpuAvailable) {
+            return;
+        }
+        updatingControls = true;
+        try {
+            gpuSwitch.setSelected(status.gpuAvailable);
+        } finally {
+            updatingControls = false;
+        }
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private static String runtimeText(CellposeRuntime.Status status) {
+        if (status == null || status.unknown) {
+            return "Runtime: Checking Cellpose...";
+        }
+        if (status.ready) {
+            return "Runtime: Configured runtime: Cellpose "
+                    + (status.cellposeVersion.isEmpty() ? "unknown" : status.cellposeVersion)
+                    + ", GPU available=" + status.gpuAvailable;
+        }
+        return status.message == null || status.message.trim().isEmpty()
+                ? "Runtime: not checked."
+                : "Runtime: " + status.message;
+    }
+
+    private void fieldChanged() {
+        if (updatingControls) return;
+        if (!updateParameterValidationState()) {
+            setStatus(validationHint());
+            return;
+        }
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void sizeFieldChanged() {
+        if (updatingControls) return;
+        if (!updateParameterValidationState()) {
+            setStatus(validationHint());
+            return;
+        }
+        if (!sizeFieldsReadyForLivePreview()) {
+            markPreviewStale(STALE_TEXT);
+            return;
+        }
+        if (!refreshSizeFilterPreview()) {
+            markPreviewStale(STALE_TEXT);
+        }
+    }
+
+    private void resetToSaved() {
+        loadFields(savedParameters);
+        loadSizeFields(savedSize);
+        refreshCompanionState();
+        updateParameterValidationState();
+        if (!refreshSizeFilterPreview()) {
+            markPreviewStale(STALE_TEXT);
+        }
+    }
+
+    private boolean updateParameterValidationState() {
+        String hint = validationHint();
+        boolean valid = hint.length() == 0;
+        if (actions != null) {
+            actions.setPrimaryButtonEnabled(valid);
+        }
+        return valid;
+    }
+
+    private String validationHint() {
+        if (missingModelKey != null) {
+            return "Select an available Cellpose model.";
+        }
+        if (!areNumericParameterFieldsValid()) {
+            return "Enter numeric values for all Cellpose parameters.";
+        }
+        if (!ParticleSizeStage.isValidSizeFields(
+                sizeMinField == null ? null : sizeMinField.getText(),
+                sizeMaxField == null ? null : sizeMaxField.getText(),
+                filteredSource)) {
+            return "Use min and max voxel sizes, for example 100-Infinity.";
+        }
+        return "";
+    }
+
+    private boolean areNumericParameterFieldsValid() {
+        JTextField[] fields = new JTextField[]{diameterField, flowField, cellprobField};
+        for (int i = 0; i < fields.length; i++) {
+            if (!isValidNumericField(fields[i])) return false;
+        }
+        return true;
+    }
+
+    private static boolean isValidNumericField(JTextField field) {
+        if (field == null || field.getText() == null || field.getText().trim().isEmpty()) return false;
+        try {
+            double parsed = Double.parseDouble(field.getText().trim());
+            return Double.isFinite(parsed);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private void runPreviewOnWorker() {
+        if (previewWorker != null && !previewWorker.isDone()) return;
+        if (missingModelKey != null) {
+            setError("Cannot run segmentation: model missing.");
+            return;
+        }
+        if (filteredSource == null) {
+            setError("No Cellpose input image is available.");
+            return;
+        }
+        final Parameters parameters = collectParameters();
+        final ConfigQcContext previewContext = activeContext;
+        final ImagePlus previewSource = filteredSource;
+        final Set<ImagePlus> borrowedPreviewImages = borrowedPreviewImagesSnapshot();
+        final long requestEpoch = ++previewEpoch;
+        final PreviewWorkerHandoff<ImagePlus> handoff =
+                new PreviewWorkerHandoff<ImagePlus>();
+        previewWorkerCompletionFailure = null;
+        previewWorkerCompletionHandled = false;
+        previewWorkerFailureObservedInterrupt = false;
+        previewWorkerCompletionObservedInterrupt = false;
+        setPreviewState(PreviewPairPanel.PreviewState.RUNNING, "Running Cellpose preview...");
+        setButtonsEnabled(false);
+        final PreviewInputLeaseRegistry.Lease inputLease =
+                previewInputLeases.acquire(previewSource);
+        previewWorker = new SwingWorker<ImagePlus, Void>() {
+            @Override protected ImagePlus doInBackground() throws Exception {
+                if (!handoff.tryStart()) return null;
+                try {
+                    ImagePlus result = runPreviewWithCompanion(
+                            parameters, previewContext, previewSource);
+                    PreviewInputLeaseRegistry.Reservation reservation =
+                            previewInputLeases.reserve(result);
+                    handoff.setResult(result, reservation);
+                    return result;
+                } catch (Throwable failure) {
+                    restoreInterruptIfNeeded(failure);
+                    previewWorkerFailureObservedInterrupt =
+                            Thread.currentThread().isInterrupted();
+                    handoff.setFailure(failure);
+                    throwPreviewFailure(failure);
+                    return null;
+                } finally {
+                    final SwingWorker<ImagePlus, Void> completedWorker = this;
+                    handoff.markPhysicallyFinished(new Runnable() {
+                        @Override public void run() {
+                            completePreviewWorker(completedWorker, handoff, requestEpoch,
+                                    previewContext, previewSource, borrowedPreviewImages,
+                                    inputLease, parameters);
+                        }
+                    });
+                }
+            }
+
+            @Override protected void done() {
+                handoff.finishBeforeStart(null);
+                completePreviewWorker(this, handoff, requestEpoch, previewContext,
+                        previewSource, borrowedPreviewImages, inputLease, parameters);
+            }
+        };
+        final SwingWorker<ImagePlus, Void> startedWorker = previewWorker;
+        previewWorkerPreStartCompletion = new Runnable() {
+            @Override public void run() {
+                if (handoff.finishBeforeStart(null)) {
+                    completePreviewWorker(startedWorker, handoff, requestEpoch, previewContext,
+                            previewSource, borrowedPreviewImages, inputLease, parameters);
+                }
+            }
+        };
+        try {
+            previewWorkerExecutor.execute(startedWorker);
+        } catch (Throwable executeFailure) {
+            if (handoff.finishBeforeStart(executeFailure)) {
+                completePreviewWorker(startedWorker, handoff, requestEpoch, previewContext,
+                        previewSource, borrowedPreviewImages, inputLease, parameters);
+            } else {
+                throwPreviewFailure(executeFailure);
+            }
+        }
+    }
+
+    private void completePreviewWorker(SwingWorker<ImagePlus, Void> worker,
+                                       PreviewWorkerHandoff<ImagePlus> handoff,
+                                       long requestEpoch,
+                                       ConfigQcContext previewContext,
+                                       ImagePlus previewSource,
+                                       Set<ImagePlus> borrowedPreviewImages,
+                                       PreviewInputLeaseRegistry.Lease inputLease,
+                                       Parameters parameters) {
+        if (!handoff.claimPhysicalCompletion()) return;
+        boolean completionInterruptedOnEntry = Thread.interrupted();
+        boolean current = !worker.isCancelled() && isCurrentPreviewRequest(
+                worker, requestEpoch, previewContext, previewSource);
+        PreviewWorkerHandoff.PublishedResult<ImagePlus> published = handoff.takeResult();
+        ImagePlus result = published == null ? null : published.value;
+        PreviewInputLeaseRegistry.Reservation resultReservation =
+                published == null ? null : published.reservation;
+        Throwable failure = previewFailureCause(handoff.takeFailure());
+        try {
+            if (failure == null && current) {
+                installLabelPreview(result, parameters);
+            } else if (!current) {
+                failure = closeUnpublishedPreview(
+                        result, failure, borrowedPreviewImages);
+            }
+        } catch (Throwable completionFailure) {
+            failure = mergePreviewFailures(
+                    failure, previewFailureCause(completionFailure));
+        }
+        try {
+            if (resultReservation != null) {
+                ImagePlus[] pendingResultClose = current
+                        ? resultReservation.transferTo(borrowedPreviewImagesSnapshot())
+                        : resultReservation.release();
+                for (ImagePlus pending : pendingResultClose) {
+                    failure = closeUnpublishedPreview(pending, failure);
+                }
+            }
+        } catch (Throwable reservationFailure) {
+            failure = mergePreviewFailures(failure, reservationFailure);
+        }
+        try {
+            ImagePlus pendingInputClose = current
+                    ? inputLease.transferTo(borrowedPreviewImagesSnapshot())
+                    : inputLease.release();
+            if (pendingInputClose != null) {
+                failure = closeUnpublishedPreview(pendingInputClose, failure);
+            }
+        } catch (Throwable leaseFailure) {
+            failure = mergePreviewFailures(failure, leaseFailure);
+        }
+        failure = retryRetainedPreviewCleanup(failure);
+        previewWorkerCompletionFailure = failure;
+        try {
+            if (failure != null) {
+                if (isVmFatal(failure)) {
+                    throwPreviewFailure(failure);
+                }
+                if (current) {
+                    reportPreviewFailure(failure);
+                } else {
+                    logStalePreviewFailure(failure);
+                }
+            }
+        } finally {
+            if (completionInterruptedOnEntry) {
+                Thread.currentThread().interrupt();
+            } else {
+                Thread.interrupted();
+            }
+            previewWorkerCompletionObservedInterrupt =
+                    Thread.currentThread().isInterrupted();
+            previewWorkerCompletionHandled = true;
+            if (previewWorker == worker) {
+                previewWorker = null;
+                previewWorkerPreStartCompletion = null;
+            }
+            if (current) setButtonsEnabled(true);
+        }
+    }
+
+    private void runPreviewNow() throws Exception {
+        boolean restoreRunInterrupt = Thread.currentThread().isInterrupted();
+        try {
+            if (missingModelKey != null) {
+                throw new IllegalStateException("Cannot run segmentation: model missing.");
+            }
+            if (filteredSource == null) {
+                throw new IllegalStateException("No Cellpose input image is available.");
+            }
+            Parameters parameters = collectParameters();
+            if (restoreRunInterrupt) Thread.currentThread().interrupt();
+            setPreviewStatePreservingInterrupt(PreviewPairPanel.PreviewState.RUNNING,
+                    "Running Cellpose preview...");
+            try {
+                installLabelPreview(runPreviewWithCompanion(
+                        parameters, activeContext, filteredSource), parameters);
+            } catch (SegmentationRunFailureException e) {
+                reportPreviewFailure(e);
+            }
+        } finally {
+            if (restoreRunInterrupt) Thread.currentThread().interrupt();
+        }
+    }
+
+    private ImagePlus runPreviewWithCompanion(Parameters parameters,
+                                              ConfigQcContext context,
+                                              ImagePlus source) throws Exception {
+        ImagePlus companion = null;
+        ImagePlus result = null;
+        Throwable primaryFailure = null;
+        try {
+            if (parameters.secondChannelIndex >= 0) {
+                companion = previewAdapter.createFilteredCompanionSource(
+                        context, parameters.secondChannelIndex);
+            }
+            result = previewAdapter.runPreview(source, companion, parameters);
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+        }
+        if (primaryFailure == null && result == companion) {
+            return result;
+        }
+        Throwable outcome = closeUnpublishedPreview(companion, primaryFailure);
+        if (outcome != null) {
+            if (result != companion) {
+                outcome = closeUnpublishedPreview(result, outcome);
+            }
+            restoreInterruptIfNeeded(outcome);
+            throwPreviewFailure(outcome);
+        }
+        return result;
+    }
+
+    private void installLabelPreview(ImagePlus labelImage, Parameters settings) {
+        boolean restoreInstallInterrupt = Thread.interrupted();
+        try {
+        if (labelImage == null) {
+            setPreviewError("Cellpose returned no label map.");
+            return;
+        }
+        removeRetainedPreviewCleanup(labelImage);
+        boolean committed = false;
+        try {
+            int count = previewAdapter.countLabels(labelImage);
+            labelImage.setTitle("Cellpose label preview");
+            captureCurrentPreviewForComparison();
+            ImagePlus old = labelPreview;
+            labelPreview = labelImage;
+            retainOldPreviewImage(old);
+            objectStats = ObjectSizeFilterPreview.statisticsFromLabelMap(labelImage, filteredSource);
+            previewStale = false;
+            lastObjectCount = count;
+            refreshSizeFilterPreview();
+            displayedSettings = copyParameters(settings);
+            String text = objectCountText();
+            setStatus(text);
+            if (actions != null) actions.setPreviewButtonStale(false);
+            committed = true;
+            throwRetainedPreviewCleanupFailure();
+        } catch (Throwable primaryFailure) {
+            if (!committed && labelPreview == labelImage) {
+                labelPreview = null;
+                objectStats = null;
+                sizeSummary = null;
+                displayedSettings = null;
+                lastObjectCount = -1;
+                previewStale = true;
+            }
+            Throwable outcome = committed
+                    ? primaryFailure
+                    : closeUnpublishedPreview(labelImage, primaryFailure);
+            restoreInterruptIfNeeded(outcome);
+            throwPreviewFailure(outcome);
+        }
+        } finally {
+            if (restoreInstallInterrupt) Thread.currentThread().interrupt();
+        }
+    }
+
+    private void refreshSourceAndOutputPreview() {
+        if (preview != null) {
+            preview.setOriginal(currentSourceImage());
+        }
+        refreshLargePreviewModel();
+        if (labelPreview == null) return;
+
+        String text = objectCountText();
+        if (previewStale) {
+            if (preview != null) {
+                preview.setAdjusted(labelPreview);
+                preview.setAdjustedState(PreviewPairPanel.PreviewState.STALE, text);
+            }
+            if (actions != null) {
+                actions.markPreviewStale(text);
+                actions.setPreviewButtonStale(true);
+            }
+        } else {
+            if (preview != null) {
+                preview.setAdjusted(labelPreview);
+                preview.setAdjustedState(PreviewPairPanel.PreviewState.READY, text);
+            }
+            if (actions != null) {
+                actions.setAdjustedPreview(labelPreview, text);
+                actions.setPreviewButtonStale(false);
+            }
+        }
+    }
+
+    private void refreshLargePreviewModel() {
+        if (preview == null) return;
+        preview.setLargePreviewImages(rawSource, filteredSource, labelPreview);
+        preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+    }
+
+    private void captureCurrentPreviewForComparison() {
+        if (labelPreview == null) return;
+        ImagePlus snapshot = preview == null
+                ? PreviewPairPanel.duplicateForComparison(labelPreview, "Previous Cellpose preview")
+                : preview.duplicateCurrentObjectPreviewForComparison("Previous Cellpose preview");
+        if (snapshot == null) return;
+        ImagePlus old = previousLabelPreview;
+        previousLabelPreview = snapshot;
+        previousPreviewText = objectCountText();
+        previousSettings = copyParameters(displayedSettings);
+        previousSettingsSize = normalizedSizeToken(displayedSize);
+        if (preview != null) {
+            preview.setPreviousComparisonPreview(previousLabelPreview, previousPreviewText);
+            updateComparisonRestoreAction();
+        }
+        retainOldPreviewImage(old);
+        throwRetainedPreviewCleanupFailure();
+    }
+
+    private void updateComparisonRestoreAction() {
+        if (preview == null) return;
+        boolean available = previousSettings != null && previousSettingsSize != null;
+        preview.setComparisonRestoreAction(!available
+                ? null
+                : new Runnable() {
+                    @Override public void run() {
+                        restorePreviousComparisonSettings();
+                    }
+                });
+    }
+
+    private void restorePreviousComparisonSettings() {
+        if (previousSettings == null || previousSettingsSize == null) {
+            setStatus("No previous Cellpose settings are available.");
+            return;
+        }
+        loadFields(previousSettings);
+        loadSizeFields(previousSettingsSize);
+        refreshCompanionState();
+        runPreviewOnWorker();
+    }
+
+    private void openVariationsDialog() {
+        if (filteredSource == null || activeContext == null) {
+            setStatus("Wait for the filtered input to finish preparing before opening variations.");
+            return;
+        }
+        VariationEngineContext ctx = VariationEngineContext.forCellpose(
+                activeContext.getChannelName(),
+                rawSource,
+                filteredSource,
+                activeContext,
+                collectParameters(),
+                previewAdapter,
+                montageDisplayActionDelegate());
+        VariationsDialog dialog = new VariationsDialog(
+                SwingUtilities.getWindowAncestor(preview != null ? preview : previewButton),
+                ctx,
+                this::applyVariationCombo);
+        dialog.showDialog();
+    }
+
+    private MontageDisplayActionDelegate montageDisplayActionDelegate() {
+        if (preview == null) {
+            return null;
+        }
+        return new MontageDisplayActionDelegate() {
+            @Override public void adjustBrightnessContrast() {
+                preview.requestBrightnessContrastControls();
+            }
+
+            @Override public void toggleGreyLut() {
+                preview.requestGreyLutToggle();
+            }
+
+            @Override public String lutButtonText() {
+                return preview.lutToggleButton().getText();
+            }
+
+            @Override public String lutButtonTooltip() {
+                return preview.lutToggleButton().getToolTipText();
+            }
+        };
+    }
+
+    private void applyVariationCombo(ParameterCombo combo) {
+        if (combo == null) return;
+        updatingControls = true;
+        try {
+            Object model = combo.get(ParameterId.MODEL);
+            if (model != null && modelCombo != null) {
+                selectModelKey(String.valueOf(model));
+            }
+            setNumberField(diameterField, combo, ParameterId.DIAMETER);
+            setNumberField(flowField, combo, ParameterId.FLOW_THRESHOLD);
+            setNumberField(cellprobField, combo, ParameterId.CELLPROB_THRESHOLD);
+        } finally {
+            updatingControls = false;
+        }
+        refreshCompanionState();
+        runPreviewOnWorker();
+    }
+
+    private ImagePlus currentSourceImage() {
+        return rawSourceSelected() && rawSource != null ? rawSource : filteredSource;
+    }
+
+    private boolean rawSourceSelected() {
+        return showRawSource;
+    }
+
+    private void setRawSourceVisible(boolean showRaw) {
+        showRawSource = showRaw;
+        if (preview != null) {
+            preview.setSourceMode(showRaw
+                    ? PreviewPairPanel.SourceMode.RAW
+                    : PreviewPairPanel.SourceMode.FILTERED);
+        }
+        refreshSourceAndOutputPreview();
+    }
+
+    private String objectCountText() {
+        if (sizeSummary != null && sizeSummary.totalCount > 0) {
+            return sizeSummary.statusText();
+        }
+        return lastObjectCount >= 0
+                ? "Objects: " + lastObjectCount + " ready"
+                : "Objects: not previewed";
+    }
+
+    private ParticleSizeStage.SizeToken collectSizeToken() {
+        int min = ObjectsCounter3DWrapper.parseMinSizeVoxels(
+                sizeMinField == null ? null : sizeMinField.getText(), 100);
+        min = Math.max(0, min);
+        String max = normalizeMaxText(sizeMaxField == null ? null : sizeMaxField.getText());
+        return new ParticleSizeStage.SizeToken(String.valueOf(min), max);
+    }
+
+    private boolean refreshSizeFilterPreview() {
+        if (labelPreview == null || objectStats == null) {
+            refreshSizeCutoffPanelOnly();
+            return false;
+        }
+        try {
+            ParticleSizeStage.SizeToken token = collectSizeToken();
+            ParticleSizeStage.validateSizeToken(token, filteredSource);
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    objectStats, filteredSource, minSize, maxSize, maxFinite);
+            if (sizeCutoffPanel != null) sizeCutoffPanel.setSummary(sizeSummary);
+            applySizeGuideOverlay();
+            if (preview != null) {
+                preview.setObjectFilterPreview(
+                        labelPreview,
+                        sizeSummary.removedLabels(),
+                        sizeSummary,
+                        lastObjectCount);
+            }
+            previewStale = false;
+            displayedSize = normalizedSizeToken(token);
+            refreshSourceAndOutputPreview();
+            setStatus(sizeSummary.statusText());
+            if (actions != null) actions.setPreviewButtonStale(false);
+            return true;
+        } catch (RuntimeException e) {
+            setError("Enter valid min and max voxel sizes.");
+            return true;
+        }
+    }
+
+    private void refreshSizeCutoffPanelOnly() {
+        if (sizeCutoffPanel == null) return;
+        try {
+            ParticleSizeStage.SizeToken token = collectSizeToken();
+            ParticleSizeStage.validateSizeToken(token, filteredSource);
+            int minSize = ObjectsCounter3DWrapper.parseMinSizeVoxels(token.minText, 100);
+            int maxSize = ObjectsCounter3DWrapper.parseMaxSizeVoxels(token.maxText, filteredSource);
+            boolean maxFinite = isFiniteMaxToken(token.maxText);
+            sizeSummary = ObjectSizeFilterPreview.summarize(
+                    null, filteredSource, minSize, maxSize, maxFinite);
+            sizeCutoffPanel.setSummary(sizeSummary);
+            applySizeGuideOverlay();
+        } catch (RuntimeException e) {
+            sizeCutoffPanel.setSummary(null);
+            applySizeGuideOverlay(null);
+        }
+    }
+
+    private void applySizeGuideOverlay() {
+        applySizeGuideOverlay(sizeSummary);
+    }
+
+    private void applySizeGuideOverlay(ObjectSizeFilterPreview.Summary summary) {
+        if (preview != null) {
+            preview.setObjectSizeGuide(summary);
+        }
+    }
+
+    private void installGpuSupport() {
+        if (installWorker != null && !installWorker.isDone()) return;
+        if (!runtimeAdapter.nvidiaGpuLikelyAvailable()) {
+            int warn = JOptionPane.showConfirmDialog(null,
+                    "No NVIDIA GPU was detected on this system.\n\n"
+                            + "PyTorch CUDA requires a compatible NVIDIA graphics card. "
+                            + "Attempting this install may use substantial disk space without enabling GPU support.\n\n"
+                            + "Continue anyway?",
+                    "NVIDIA GPU Not Detected",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            if (warn != JOptionPane.YES_OPTION) return;
+        } else {
+            int confirm = JOptionPane.showConfirmDialog(null,
+                    "Installing GPU support downloads PyTorch with CUDA and may take a while.\n\nContinue?",
+                    "GPU Install",
+                    JOptionPane.YES_NO_OPTION);
+            if (confirm != JOptionPane.YES_OPTION) return;
+        }
+        setStatus("Installing Cellpose GPU support...");
+        installGpuButton.setEnabled(false);
+        installWorker = new SwingWorker<GpuInstallResult, Void>() {
+            @Override protected GpuInstallResult doInBackground() {
+                return runtimeAdapter.installGpuSupport();
+            }
+
+            @Override protected void done() {
+                if (isCancelled()) return;
+                try {
+                    GpuInstallResult result = get();
+                    if (result != null && result.success) {
+                        gpuSwitch.setSelected(true);
+                        markPreviewStale(STALE_TEXT);
+                        setStatus(result.message.isEmpty()
+                                ? "Cellpose GPU support installed." : result.message);
+                    } else {
+                        String message = result == null ? "GPU install failed." : result.message;
+                        setError(message + (result == null || result.details.isEmpty()
+                                ? "" : " " + result.details));
+                    }
+                } catch (Exception e) {
+                    setError("GPU install failed: " + e.getMessage());
+                } finally {
+                    if (!isCancelled()) {
+                        installGpuButton.setEnabled(true);
+                        refreshRuntimeLabel();
+                    }
+                }
+            }
+        };
+        installWorker.execute();
+    }
+
+    private Parameters collectParameters() {
+        Parameters fallback = savedParameters == null ? Parameters.defaults(defaultUseGpu) : savedParameters;
+        ModelOption model = selectedModelOption();
+        String modelKey = model == null ? fallback.modelToken : model.entry.modelKey;
+        int secondChannel = model != null && model.entry.supportsSecondChannel
+                ? selectedCompanionIndex(companionChoices, companionCombo == null ? null : companionCombo.getSelectedItem())
+                : -1;
+        return new Parameters(
+                modelKey,
+                secondChannel,
+                parse(diameterField, fallback.diameter),
+                parse(flowField, fallback.flowThreshold),
+                parse(cellprobField, fallback.cellprobThreshold),
+                gpuSwitch == null ? fallback.useGpu : gpuSwitch.isSelected(),
+                false);
+    }
+
+    private static Parameters copyParameters(Parameters parameters) {
+        if (parameters == null) return null;
+        return new Parameters(
+                parameters.modelToken,
+                parameters.secondChannelIndex,
+                parameters.diameter,
+                parameters.flowThreshold,
+                parameters.cellprobThreshold,
+                parameters.useGpu,
+                parameters.dumpCellprob);
+    }
+
+    private static ParticleSizeStage.SizeToken normalizedSizeToken(ParticleSizeStage.SizeToken token) {
+        return token == null ? null : ParticleSizeStage.parseSizeToken(token.toToken());
+    }
+
+    private boolean sizeFieldsReadyForLivePreview() {
+        return hasText(sizeMinField) && hasText(sizeMaxField);
+    }
+
+    private static boolean hasText(JTextField field) {
+        return field != null && field.getText() != null && !field.getText().trim().isEmpty();
+    }
+
+    private ModelOption selectedModelOption() {
+        Object selected = modelCombo == null ? null : modelCombo.getSelectedItem();
+        return selected instanceof ModelOption ? (ModelOption) selected : null;
+    }
+
+    private boolean selectedModelSupportsSecondChannel() {
+        ModelOption selected = selectedModelOption();
+        return selected != null && selected.entry.supportsSecondChannel;
+    }
+
+    private void markPreviewStale(String text) {
+        previewStale = true;
+        setPreviewState(PreviewPairPanel.PreviewState.STALE, text);
+        if (actions != null) actions.setPreviewButtonStale(true);
+    }
+
+    private void setPreviewState(PreviewPairPanel.PreviewState state, String text) {
+        if (preview != null) {
+            preview.setAdjustedState(state, text);
+        }
+        if (actions != null) {
+            if (state == PreviewPairPanel.PreviewState.STALE) {
+                actions.markPreviewStale(text);
+                actions.setPreviewButtonStale(true);
+            } else {
+                actions.setStatus(text);
+            }
+        }
+    }
+
+    private void setPreviewStatePreservingInterrupt(PreviewPairPanel.PreviewState state,
+                                                     String text) {
+        boolean restoreInterrupt = Thread.interrupted();
+        try {
+            setPreviewState(state, text);
+        } finally {
+            if (restoreInterrupt) Thread.currentThread().interrupt();
+        }
+    }
+
+    private void setStatus(String text) {
+        if (actions != null) {
+            actions.setStatus(text);
+        }
+    }
+
+    private void setError(String text) {
+        setPreviewState(PreviewPairPanel.PreviewState.ERROR, text);
+        setStatus(text);
+        if (actions != null) actions.setPreviewButtonStale(true);
+    }
+
+    private void setPreviewError(String text) {
+        ImagePlus old = labelPreview;
+        labelPreview = null;
+        objectStats = null;
+        sizeSummary = null;
+        previewStale = true;
+        lastObjectCount = -1;
+        if (preview != null) {
+            preview.setOriginal(currentSourceImage());
+            preview.setAdjusted(null);
+            refreshLargePreviewModel();
+        }
+        retainOldPreviewImage(old);
+        throwRetainedPreviewCleanupFailure();
+        setError(text);
+    }
+
+    private void setPreviewFailure(Throwable throwable) {
+        setPreviewError(previewFailureText("Cellpose", throwable));
+    }
+
+    private void reportPreviewFailure(Throwable primaryFailure) {
+        try {
+            setPreviewFailure(primaryFailure);
+        } catch (Throwable reportingFailure) {
+            Throwable outcome = mergePreviewFailures(primaryFailure, reportingFailure);
+            restoreInterruptIfNeeded(outcome);
+            throwPreviewFailure(outcome);
+        }
+    }
+
+    private void logStalePreviewFailure(Throwable failure) {
+        try {
+            IJ.log("Cellpose preview stopped after cancellation: " + failure);
+        } catch (ThreadDeath fatal) {
+            throw fatal;
+        } catch (VirtualMachineError fatal) {
+            throw fatal;
+        } catch (Throwable ignored) {
+            // Logging must never turn a cancelled nonfatal worker into an EDT failure.
+        }
+    }
+
+    private static String previewFailureText(String engine, Throwable throwable) {
+        SegmentationRunFailureException runnerFailure = runnerFailure(throwable);
+        String message = runnerFailure == null
+                ? rootMessage(throwable)
+                : runnerFailure.getMessage();
+        return truncatePreviewError(engine + " preview failed: " + message);
+    }
+
+    private static SegmentationRunFailureException runnerFailure(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof SegmentationRunFailureException) {
+                return (SegmentationRunFailureException) current;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        Throwable root = throwable;
+        while (current != null) {
+            root = current;
+            current = current.getCause();
+        }
+        String message = root == null ? null : root.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return root == null ? "unknown error" : root.getClass().getSimpleName();
+        }
+        return message.trim();
+    }
+
+    private static String truncatePreviewError(String text) {
+        String safe = text == null || text.trim().isEmpty()
+                ? "Segmentation preview failed."
+                : text.trim().replace('\n', ' ').replace('\r', ' ');
+        if (safe.length() <= MAX_PREVIEW_ERROR_CHARS) {
+            return safe;
+        }
+        int keep = Math.max(0, MAX_PREVIEW_ERROR_CHARS - PREVIEW_ERROR_SUFFIX.length());
+        return safe.substring(0, keep).trim() + PREVIEW_ERROR_SUFFIX;
+    }
+
+    private void setButtonsEnabled(boolean enabled) {
+        if (previewButton != null) previewButton.setEnabled(enabled);
+        if (installGpuButton != null) installGpuButton.setEnabled(enabled);
+        if (resetButton != null) resetButton.setEnabled(enabled);
+        if (variationsButton != null) variationsButton.setEnabled(enabled && filteredSource != null);
+        if (modelCombo != null) modelCombo.setEnabled(enabled);
+        if (companionCombo != null) {
+            companionCombo.setEnabled(enabled
+                    && selectedModelSupportsSecondChannel()
+                    && companionCombo.getItemCount() > 1);
+        }
+        if (manageModelsButton != null) manageModelsButton.setEnabled(enabled);
+        if (diameterField != null) diameterField.setEnabled(enabled);
+        if (flowField != null) flowField.setEnabled(enabled);
+        if (cellprobField != null) cellprobField.setEnabled(enabled);
+        if (sizeMinField != null) sizeMinField.setEnabled(enabled);
+        if (sizeMaxField != null) sizeMaxField.setEnabled(enabled);
+        if (gpuSwitch != null) gpuSwitch.setEnabled(enabled);
+        if (showRemovedObjectsSwitch != null) showRemovedObjectsSwitch.setEnabled(enabled);
+        if (preview != null) {
+            preview.setSourceModeEnabled(enabled);
+            preview.setObjectOverlayEnabled(enabled);
+        }
+    }
+
+    private void setVariationsButtonReady(boolean ready) {
+        if (variationsButton != null) {
+            variationsButton.setEnabled(ready && filteredSource != null);
+        }
+    }
+
+    private static void setNumberField(JTextField field, ParameterCombo combo, ParameterId id) {
+        Object value = combo == null ? null : combo.get(id);
+        if (field != null && value instanceof Number) {
+            field.setText(String.valueOf(((Number) value).doubleValue()));
+        }
+    }
+
+    private static String formatNumber(double value) {
+        if (!Double.isFinite(value)) return "0";
+        double rounded = Math.rint(value);
+        if (Math.abs(value - rounded) < 1.0e-9
+                && Math.abs(rounded) <= Long.MAX_VALUE) {
+            return String.valueOf((long) rounded);
+        }
+        double abs = Math.abs(value);
+        if (abs >= 1.0e9d || (abs > 0.0d && abs < 1.0e-4d)) {
+            return String.format(java.util.Locale.ROOT, "%.6g", Double.valueOf(value));
+        }
+        String text = String.format(java.util.Locale.ROOT, "%.6f", Double.valueOf(value));
+        while (text.endsWith("0")) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text.endsWith(".") ? text.substring(0, text.length() - 1) : text;
+    }
+
+    private void closePreviewWorker() {
+        previewEpoch++;
+        SwingWorker<ImagePlus, Void> worker = previewWorker;
+        Runnable preStartCompletion = previewWorkerPreStartCompletion;
+        previewWorker = null;
+        previewWorkerPreStartCompletion = null;
+        if (worker != null && !worker.isDone()) {
+            if (preStartCompletion != null) preStartCompletion.run();
+            worker.cancel(true);
+        }
+    }
+
+    private boolean isCurrentPreviewRequest(SwingWorker<ImagePlus, Void> worker,
+                                            long epoch,
+                                            ConfigQcContext context,
+                                            ImagePlus source) {
+        return previewSessionActive
+                && previewEpoch == epoch
+                && previewWorker == worker
+                && activeContext == context
+                && filteredSource == source;
+    }
+
+    private Throwable closeUnpublishedPreview(ImagePlus image, Throwable primaryFailure) {
+        return closeUnpublishedPreview(image, primaryFailure, null);
+    }
+
+    private Throwable closeUnpublishedPreview(ImagePlus image,
+                                               Throwable primaryFailure,
+                                               Set<ImagePlus> borrowedPreviewImages) {
+        if (image == null || isBorrowedPreviewImage(image)
+                || (borrowedPreviewImages != null && borrowedPreviewImages.contains(image))) {
+            return primaryFailure;
+        }
+        if (previewInputLeases.deferClose(image)) return primaryFailure;
+        try {
+            previewAdapter.close(image);
+            removeRetainedPreviewCleanup(image);
+        } catch (Throwable cleanupFailure) {
+            retainPreviewCleanup(image);
+            return mergePreviewFailures(primaryFailure, cleanupFailure);
+        }
+        return primaryFailure;
+    }
+
+    private boolean isBorrowedPreviewImage(ImagePlus image) {
+        return image == rawSource
+                || image == filteredSource
+                || image == labelPreview
+                || image == previousLabelPreview;
+    }
+
+    private Set<ImagePlus> borrowedPreviewImagesSnapshot() {
+        Set<ImagePlus> borrowed = Collections.newSetFromMap(
+                new IdentityHashMap<ImagePlus, Boolean>());
+        borrowed.add(rawSource);
+        borrowed.add(filteredSource);
+        borrowed.add(labelPreview);
+        borrowed.add(previousLabelPreview);
+        borrowed.remove(null);
+        return borrowed;
+    }
+
+    private static Throwable mergePreviewFailures(Throwable primary, Throwable cleanup) {
+        if (primary == null) return cleanup;
+        if (cleanup == null || cleanup == primary) return primary;
+        if (isVmFatal(cleanup) && !isVmFatal(primary)) {
+            addSuppressedIfDistinct(cleanup, primary);
+            return cleanup;
+        }
+        addSuppressedIfDistinct(primary, cleanup);
+        return primary;
+    }
+
+    private static void addSuppressedIfDistinct(Throwable primary, Throwable secondary) {
+        if (primary != null && secondary != null && primary != secondary) {
+            for (Throwable existing : primary.getSuppressed()) {
+                if (existing == secondary) return;
+            }
+            primary.addSuppressed(secondary);
+        }
+    }
+
+    private static Throwable previewFailureCause(Throwable failure) {
+        return failure instanceof java.util.concurrent.ExecutionException
+                && failure.getCause() != null
+                ? failure.getCause()
+                : failure;
+    }
+
+    private static void restoreInterruptIfNeeded(Throwable failure) {
+        if (containsInterruption(failure, new HashSet<Throwable>())) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static boolean containsInterruption(Throwable failure, Set<Throwable> visited) {
+        if (failure == null || !visited.add(failure)) return false;
+        if (failure instanceof InterruptedException
+                || failure instanceof java.io.InterruptedIOException) return true;
+        if (containsInterruption(failure.getCause(), visited)) return true;
+        for (Throwable suppressed : failure.getSuppressed()) {
+            if (containsInterruption(suppressed, visited)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isVmFatal(Throwable failure) {
+        return failure instanceof VirtualMachineError || failure instanceof ThreadDeath;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> void throwPreviewFailure(Throwable failure) throws T {
+        throw (T) failure;
+    }
+
+    private void retainOldPreviewImage(ImagePlus image) {
+        if (image == null || isBorrowedPreviewImage(image)) return;
+        retainPreviewCleanup(image);
+    }
+
+    private void retainPreviewCleanup(ImagePlus image) {
+        if (image == null) return;
+        if (previewInputLeases.deferClose(image)) return;
+        synchronized (retainedPreviewCleanup) {
+            retainedPreviewCleanup.add(image);
+        }
+    }
+
+    private void removeRetainedPreviewCleanup(ImagePlus image) {
+        if (image == null) return;
+        synchronized (retainedPreviewCleanup) {
+            retainedPreviewCleanup.remove(image);
+        }
+    }
+
+    private Throwable retryRetainedPreviewCleanup(Throwable primaryFailure) {
+        Throwable outcome = primaryFailure;
+        boolean restoreInterrupt = Thread.interrupted();
+        try {
+            synchronized (retainedPreviewCleanup) {
+                ImagePlus[] pending = retainedPreviewCleanup.toArray(
+                        new ImagePlus[retainedPreviewCleanup.size()]);
+                for (ImagePlus image : pending) {
+                    if (isBorrowedPreviewImage(image)) continue;
+                    if (previewInputLeases.deferClose(image)) {
+                        retainedPreviewCleanup.remove(image);
+                        continue;
+                    }
+                    try {
+                        previewAdapter.close(image);
+                        retainedPreviewCleanup.remove(image);
+                    } catch (Throwable cleanupFailure) {
+                        outcome = mergePreviewFailures(outcome, cleanupFailure);
+                    }
+                }
+            }
+        } finally {
+            if (restoreInterrupt) Thread.currentThread().interrupt();
+        }
+        return outcome;
+    }
+
+    private void throwRetainedPreviewCleanupFailure() {
+        Throwable failure = retryRetainedPreviewCleanup(null);
+        if (failure != null) {
+            restoreInterruptIfNeeded(failure);
+            throwPreviewFailure(failure);
+        }
+    }
+
+    private void closeInstallWorker() {
+        if (installWorker != null && !installWorker.isDone()) {
+            installWorker.cancel(true);
+        }
+        installWorker = null;
+    }
+
+    private void closeImages() {
+        ImagePlus label = labelPreview;
+        ImagePlus filtered = filteredSource;
+        ImagePlus raw = rawSource;
+        ImagePlus previous = previousLabelPreview;
+        labelPreview = null;
+        previousLabelPreview = null;
+        previousPreviewText = "";
+        previousSettings = null;
+        previousSettingsSize = null;
+        displayedSettings = null;
+        displayedSize = null;
+        objectStats = null;
+        sizeSummary = null;
+        rawSource = null;
+        filteredSource = null;
+        lastObjectCount = -1;
+        retainPreviewCleanup(previous);
+        retainPreviewCleanup(label);
+        retainPreviewCleanup(filtered);
+        retainPreviewCleanup(raw);
+        throwRetainedPreviewCleanupFailure();
+    }
+
+    public static Parameters parseMethod(String method) {
+        return parseMethod(method, BinConfig.DEFAULT_CELLPOSE_USE_GPU, 0, -1);
+    }
+
+    static boolean hasExplicitGpuOption(String method) {
+        if (method == null || !method.startsWith("cellpose:")) return false;
+        String[] parts = method.split(":");
+        for (int i = 1; i < parts.length; i++) {
+            if (parts[i] != null && parts[i].trim().startsWith("gpu=")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static Parameters parseMethod(String method, boolean fallbackUseGpu,
+                                         int channelCount, int primaryChannelIndex) {
+        Parameters defaults = Parameters.defaults(fallbackUseGpu);
+        if (method == null || !method.startsWith("cellpose:")) {
+            return defaults;
+        }
+        SegmentationMethod parsed = SegmentationTokenParser.parseLenient(method);
+        if (!parsed.isCellpose()) return defaults;
+        String model = SegmentationMethod.cellposeModelKey(parsed);
+        double diameter = SegmentationMethod.cellposeDiameter(parsed);
+        double flow = SegmentationMethod.cellposeFlow(parsed);
+        double cellprob = SegmentationMethod.cellposeCellprob(parsed);
+        boolean useGpu = SegmentationMethod.cellposeUseGpu(parsed);
+        int secondChannelIndex = SegmentationMethod.cellposeChan2(parsed);
+        if (secondChannelIndex < 0
+                || secondChannelIndex == primaryChannelIndex
+                || (channelCount > 0 && secondChannelIndex >= channelCount)
+                || !supportsSecondChannelForKnownModel(model)) {
+            secondChannelIndex = -1;
+        }
+        return new Parameters(model, secondChannelIndex, diameter, flow, cellprob, useGpu);
+    }
+
+    public static String formatMethod(Parameters parameters) {
+        Parameters p = parameters == null
+                ? Parameters.defaults(BinConfig.DEFAULT_CELLPOSE_USE_GPU)
+                : parameters;
+        LinkedHashMap<String, String> params = new LinkedHashMap<String, String>();
+        params.put("diameter", String.valueOf(p.diameter));
+        params.put("flow", String.valueOf(p.flowThreshold));
+        params.put("cellprob", String.valueOf(p.cellprobThreshold));
+        params.put("gpu", String.valueOf(p.useGpu));
+        if (p.secondChannelIndex >= 0) {
+            params.put("chan2", String.valueOf(p.secondChannelIndex));
+        }
+        params.put("model", normalizeModelKey(p.modelToken));
+        return SegmentationTokenParser.format(new SegmentationMethod(
+                SegmentationMethod.Engine.CELLPOSE, params, ""));
+    }
+
+    static LinkedHashMap<String, Integer> buildCompanionChoices(List<String> channelNames,
+                                                                int primaryChannelIndex) {
+        LinkedHashMap<String, Integer> choices = new LinkedHashMap<String, Integer>();
+        choices.put("None", Integer.valueOf(-1));
+        if (channelNames == null) return choices;
+        for (int i = 0; i < channelNames.size(); i++) {
+            if (i == primaryChannelIndex) continue;
+            String name = channelNames.get(i);
+            choices.put("C" + (i + 1) + " (" + (name == null ? "" : name) + ")", Integer.valueOf(i));
+        }
+        return choices;
+    }
+
+    static String companionChoiceLabel(Map<String, Integer> choices, int secondChannelIndex) {
+        if (choices == null || choices.isEmpty()) return "None";
+        for (Map.Entry<String, Integer> entry : choices.entrySet()) {
+            Integer value = entry.getValue();
+            if (value != null && value.intValue() == secondChannelIndex) {
+                return entry.getKey();
+            }
+        }
+        return "None";
+    }
+
+    static int selectedCompanionIndex(Map<String, Integer> choices, Object selectedItem) {
+        if (choices == null || choices.isEmpty() || selectedItem == null) return -1;
+        Integer value = choices.get(String.valueOf(selectedItem));
+        return value == null ? -1 : value.intValue();
+    }
+
+    private static List<ModelOption> modelOptionsFor(ConfigQcContext context) {
+        File projectDir = context == null ? null : context.getProjectDirectory();
+        File root = projectDir == null ? new File(".") : projectDir;
+        ModelCatalog catalog = ModelCatalogIO.read(root.toPath());
+        List<ModelEntry> entries = catalog.forEngine(ModelEntry.Engine.CELLPOSE);
+        List<ModelEntry> stock = new ArrayList<ModelEntry>();
+        List<ModelEntry> user = new ArrayList<ModelEntry>();
+        for (ModelEntry entry : entries) {
+            if (entry == null) continue;
+            if (entry.isStock()) stock.add(entry);
+            else user.add(entry);
+        }
+        Collections.sort(user, new Comparator<ModelEntry>() {
+            @Override public int compare(ModelEntry left, ModelEntry right) {
+                return labelFor(left).compareToIgnoreCase(labelFor(right));
+            }
+        });
+        List<ModelOption> out = new ArrayList<ModelOption>();
+        for (ModelEntry entry : stock) out.add(new ModelOption(entry, false));
+        for (int i = 0; i < user.size(); i++) {
+            out.add(new ModelOption(user.get(i), i == 0));
+        }
+        if (out.isEmpty()) {
+            out.add(new ModelOption(new ModelEntry(
+                    SegmentationMethod.DEFAULT_CELLPOSE_MODEL_KEY,
+                    "Cellpose - cyto3",
+                    "Recommended first-pass model for irregular whole-cell bodies and glial soma.",
+                    ModelEntry.Engine.CELLPOSE,
+                    ModelEntry.Source.STOCK_BUILTIN,
+                    null,
+                    null,
+                    "cyto3",
+                    null,
+                    null,
+                    defaultsMap(BinConfig.DEFAULT_CELLPOSE_DIAMETER,
+                            BinConfig.DEFAULT_CELLPOSE_FLOW_THRESHOLD,
+                            BinConfig.DEFAULT_CELLPOSE_CELLPROB_THRESHOLD),
+                    null,
+                    true), false));
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    private static Map<String, Object> defaultsMap(double diameter,
+                                                   double flow,
+                                                   double cellprob) {
+        Map<String, Object> defaults = new LinkedHashMap<String, Object>();
+        defaults.put("diameter", Double.valueOf(diameter));
+        defaults.put("flowThreshold", Double.valueOf(flow));
+        defaults.put("cellprobThreshold", Double.valueOf(cellprob));
+        return defaults;
+    }
+
+    private void selectModelKey(String modelKey) {
+        if (modelCombo == null || modelCombo.getItemCount() == 0) return;
+        String key = normalizeModelKey(modelKey);
+        int fallbackIndex = 0;
+        for (int i = 0; i < modelCombo.getItemCount(); i++) {
+            ModelOption option = modelCombo.getItemAt(i);
+            if (option != null
+                    && SegmentationMethod.DEFAULT_CELLPOSE_MODEL_KEY.equals(option.entry.modelKey)) {
+                fallbackIndex = i;
+            }
+            if (option != null && key.equals(option.entry.modelKey)) {
+                modelCombo.setSelectedIndex(i);
+                updateModelTooltip(option);
+                return;
+            }
+        }
+        modelCombo.setSelectedIndex(fallbackIndex);
+        updateModelTooltip((ModelOption) modelCombo.getSelectedItem());
+    }
+
+    private void resolveMissingModel(String modelKey) {
+        missingModelKey = null;
+        selectModelKey(modelKey);
+        selectedModelKeySnapshot = modelKey;
+        Parameters current = collectParameters();
+        parameterStore.save(formatMethod(current));
+        savedParameters = current;
+        refreshMissingModelNoticeRow();
+        updateParameterValidationState();
+        setStatus("Replacement model selected.");
+        markPreviewStale(STALE_TEXT);
+    }
+
+    private void openModelManager() {
+        File projectDir = activeContext == null ? null : activeContext.getProjectDirectory();
+        File root = projectDir == null ? new File(".") : projectDir;
+        modelManagerLauncher.show(
+                SwingUtilities.getWindowAncestor(preview != null ? preview : manageModelsButton),
+                root.toPath(),
+                ModelEntry.Engine.CELLPOSE);
+        refreshModelOptionsFromCatalog();
+    }
+
+    private static ModelManagerLauncher defaultModelManagerLauncher() {
+        return new ModelManagerLauncher() {
+            @Override public void show(Window owner, Path root, ModelEntry.Engine engine) {
+                SegmentationModelManagerDialog.showManager(owner, root, engine);
+            }
+        };
+    }
+
+    private void refreshModelOptionsFromCatalog() {
+        String selectedKey = selectedModelKeyForTest();
+        modelOptions = modelOptionsFor(activeContext);
+        if (modelCombo != null) {
+            updatingControls = true;
+            try {
+                modelCombo.removeAllItems();
+                for (int i = 0; i < modelOptions.size(); i++) {
+                    modelCombo.addItem(modelOptions.get(i));
+                }
+                selectModelKey(selectedKey);
+            } finally {
+                updatingControls = false;
+            }
+        }
+        if (!containsModelKey(modelOptions, selectedKey)) {
+            missingModelKey = selectedKey;
+            setError("Cannot run segmentation: model missing.");
+        } else {
+            missingModelKey = null;
+        }
+        refreshMissingModelNoticeRow();
+        updateParameterValidationState();
+    }
+
+    private void updateModelTooltip(ModelOption option) {
+        if (modelCombo != null) {
+            modelCombo.setToolTipText(option == null ? null : ModelEntryListCellRenderer.tooltip(option.entry));
+        }
+    }
+
+    private static boolean containsModelKey(List<ModelOption> options, String modelKey) {
+        String key = normalizeModelKey(modelKey);
+        if (options == null || key == null) return false;
+        for (ModelOption option : options) {
+            if (option != null && key.equals(option.entry.modelKey)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalizeModelKey(String modelKey) {
+        return modelKey == null || modelKey.trim().isEmpty()
+                ? SegmentationMethod.DEFAULT_CELLPOSE_MODEL_KEY
+                : SegmentationMethod.canonicalCellposeModelKey(modelKey);
+    }
+
+    private static int sanitizeSecondChannelForKnownModel(String modelKey, int secondChannelIndex) {
+        return supportsSecondChannelForKnownModel(modelKey) ? secondChannelIndex : -1;
+    }
+
+    private static boolean supportsSecondChannelForKnownModel(String modelKey) {
+        java.util.Optional<Boolean> support = CellposeModel.supportsSecondChannelFor(modelKey);
+        return !support.isPresent() || support.get().booleanValue();
+    }
+
+    private static double defaultDouble(Object value, double fallback) {
+        if (value instanceof Number) {
+            double parsed = ((Number) value).doubleValue();
+            return Double.isFinite(parsed) ? parsed : fallback;
+        }
+        if (value != null) {
+            try {
+                double parsed = Double.parseDouble(String.valueOf(value));
+                return Double.isFinite(parsed) ? parsed : fallback;
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
+    }
+
+    private static String labelFor(ModelEntry entry) {
+        if (entry == null) return "";
+        return entry.name == null || entry.name.trim().isEmpty()
+                ? entry.modelKey
+                : entry.name.trim();
+    }
+
+    private static RuntimeAdapter noopRuntimeAdapter() {
+        return new RuntimeAdapter() {
+            @Override public CellposeRuntime.Status cachedRuntimeStatus() {
+                return CellposeRuntime.Status.unknown();
+            }
+
+            @Override public CompletableFuture<CellposeRuntime.Status> probeRuntimeAsync() {
+                return CompletableFuture.completedFuture(CellposeRuntime.Status.unknown());
+            }
+
+            @Override public boolean nvidiaGpuLikelyAvailable() {
+                return false;
+            }
+
+            @Override public GpuInstallResult installGpuSupport() {
+                return new GpuInstallResult(false, "GPU install is not available here.", "");
+            }
+        };
+    }
+
+    static final class RuntimeProbeCallback
+            implements java.util.function.BiConsumer<CellposeRuntime.Status, Throwable> {
+        private final WeakReference<CellposeParameterStage> stageRef;
+        private final int requestId;
+
+        RuntimeProbeCallback(WeakReference<CellposeParameterStage> stageRef, int requestId) {
+            this.stageRef = stageRef;
+            this.requestId = requestId;
+        }
+
+        @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
+            CellposeParameterStage stage = stageRef == null ? null : stageRef.get();
+            if (stage != null) {
+                stage.applyRuntimeProbeResult(requestId, status, throwable);
+            }
+        }
+    }
+
+    private static final class ModelOption implements ModelEntryListCellRenderer.EntryAdapter {
+        final ModelEntry entry;
+        final boolean showUserSeparator;
+
+        ModelOption(ModelEntry entry, boolean showUserSeparator) {
+            this.entry = entry;
+            this.showUserSeparator = showUserSeparator;
+        }
+
+        String description() {
+            return entry == null || entry.description == null ? "" : entry.description;
+        }
+
+        @Override public String toString() {
+            return ModelEntryListCellRenderer.presentation(entry, showUserSeparator).displayText;
+        }
+
+        @Override public ModelEntry modelEntry() {
+            return entry;
+        }
+
+        @Override public boolean showUserSeparator() {
+            return showUserSeparator;
+        }
+    }
+
+    private static double parse(JTextField field, double fallback) {
+        if (field == null) return fallback;
+        return parse(field.getText(), fallback);
+    }
+
+    private static double parse(String value, double fallback) {
+        if (value == null) return fallback;
+        try {
+            double parsed = Double.parseDouble(value.trim());
+            return Double.isFinite(parsed) ? parsed : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static int parseInt(String value, int fallback) {
+        if (value == null) return fallback;
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static double sanitizeNonNegative(double value) {
+        return Double.isFinite(value) ? Math.max(0, value) : 0;
+    }
+
+    private static double sanitizePositive(double value, double fallback) {
+        if (!Double.isFinite(value) || value <= 0) return fallback;
+        return value;
+    }
+
+    private static String normalizeMaxText(String value) {
+        if (value == null) return "Infinity";
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()
+                || "infinity".equalsIgnoreCase(trimmed)
+                || "inf".equalsIgnoreCase(trimmed)) {
+            return "Infinity";
+        }
+        double parsed = Double.parseDouble(trimmed);
+        if (!Double.isFinite(parsed)) return "Infinity";
+        return String.valueOf(Math.max(0, (int) Math.round(parsed)));
+    }
+
+    private static boolean isFiniteMaxToken(String value) {
+        String normalized = normalizeMaxText(value);
+        return !"Infinity".equals(normalized);
+    }
+
+    private static SizeStore defaultSizeStore() {
+        return new SizeStore() {
+            @Override public String get() {
+                return "0-Infinity";
+            }
+
+            @Override public void set(String token) {
+            }
+        };
+    }
+}

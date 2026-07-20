@@ -1,0 +1,9 @@
+{
+  "name": "2-group paired (within animal)",
+  "description": "Paired comparison of repeated sections/images within the same animal. Uses paired t / Wilcoxon signed-rank.",
+  "libraryVersion": "1",
+  "pairedMode": "WITHIN_ANIMAL",
+  "distributionMode": "AUTO",
+  "postHocMethod": "BONFERRONI",
+  "metricFilter": null
+}

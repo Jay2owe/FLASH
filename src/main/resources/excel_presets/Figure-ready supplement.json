@@ -1,0 +1,14 @@
+{
+  "name": "Figure-ready supplement",
+  "description": "Per-metric sheets with summary statistics block, figure-ready headers, p-gradient highlight, significance stars column.",
+  "libraryVersion": "1",
+  "includeExperimentalConditionsSheet": true,
+  "includeDataSummarySheet": false,
+  "includePerMetricSheets": true,
+  "includeStatisticsSheet": true,
+  "metricSheetDetail": "summary_statistics",
+  "includeMethodsAppendix": false,
+  "significanceHighlight": "p_gradient",
+  "headerStyle": "figure_ready",
+  "significanceStars": true
+}

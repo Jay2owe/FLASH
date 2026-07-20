@@ -1,0 +1,21 @@
+{
+  "name": "How do two channels relate spatially?",
+  "description": "Use this to ask whether two signals overlap, avoid each other, or change together across the image.",
+  "libraryVersion": "1",
+  "config": {
+    "enabled": true,
+    "analyses": ["crossmark", "mi", "distance_shell"],
+    "sourceMode": "full_stack",
+    "native3d": false,
+    "overlays": true,
+    "shellWidthUm": 10,
+    "shellCount": 5,
+    "tileScalesUm": [50, 100, 250],
+    "granularityScalesUm": [2, 4, 8, 16, 32, 64],
+    "depthBinWidthUm": 10,
+    "rimDepthUm": 10,
+    "textureClassCount": 4,
+    "permutations": 199,
+    "seed": 1
+  }
+}
