@@ -210,6 +210,31 @@ If you use specific features, please also cite their upstream tools:
 - [Cellpose](https://www.cellpose.org/) (Stringer et al., *Nature Methods*, 2021, doi:10.1038/s41592-020-01018-x) for generalist cell segmentation
 - [TrackMate](https://imagej.net/plugins/trackmate/) (Tinevez et al., *Methods*, 2017, doi:10.1016/j.ymeth.2016.09.016) for tracking
 
+## Citation
+
+If you use FLASH in published work, please cite it. The **concept DOI** below
+always resolves to the latest release:
+
+> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.0.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21633367
+
+```bibtex
+@software{malcolm_flash_2026,
+  author    = {Malcolm, Jamie},
+  title     = {{FLASH}: {F}luorescence {A}utomated {S}patial {H}istology},
+  version   = {5.0.0},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.21633367},
+  url       = {https://doi.org/10.5281/zenodo.21633367}
+}
+```
+
+Where exact reproducibility matters, cite the DOI of the specific version you
+ran instead — v5.0.0 is [`10.5281/zenodo.21633368`](https://doi.org/10.5281/zenodo.21633368).
+
+GitHub's **Cite this repository** button (top right, generated from
+[`CITATION.cff`](CITATION.cff)) produces both APA and BibTeX automatically.
+
 ## Acknowledgements
 
 Developed by Jamie Malcolm in the [Brancaccio Lab](https://www.ukdri.ac.uk/labs/brancaccio-lab) at the [UK Dementia Research Institute](https://ukdri.ac.uk/centres/imperial), Imperial College London.
