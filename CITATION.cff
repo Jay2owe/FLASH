@@ -2,6 +2,7 @@ cff-version: 1.2.0
 message: "If you use FLASH in published work, please cite it as below."
 type: software
 title: "FLASH: Fluorescence Automated Spatial Histology"
+doi: "10.5281/zenodo.21633367"
 abstract: >-
   An ImageJ/Fiji plugin providing an end-to-end pipeline for fluorescence
   microscopy analysis: channel setup, ROI management, image preparation,
@@ -27,5 +28,3 @@ keywords:
   - spatial-analysis
   - morphometry
   - 3d-object-analysis
-# TODO: add `doi:` once Zenodo concept DOI is minted from the first
-# tagged GitHub Release after this BSD-3 cutover.

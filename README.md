@@ -1,5 +1,7 @@
 # FLASH
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21633367.svg)](https://doi.org/10.5281/zenodo.21633367)
+
 **FLASH** is an ImageJ/Fiji plugin for fluorescence microscopy analysis.
 
 FLASH stands for **Fluorescence Automated Spatial Histology**. It provides a modular pipeline for channel setup, ROI management, image preparation, fluorescence intensity measurement, 3D object analysis, spatial analysis, result aggregation, statistics, and Excel export.
