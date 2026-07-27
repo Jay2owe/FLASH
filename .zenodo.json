@@ -1,0 +1,31 @@
+{
+  "title": "FLASH: Fluorescence Automated Spatial Histology",
+  "description": "An ImageJ/Fiji plugin providing an end-to-end pipeline for fluorescence microscopy analysis: channel setup, ROI management, image preparation, fluorescence intensity measurement, 3D object analysis, spatial analysis, morphometry, statistics, and Excel export.",
+  "upload_type": "software",
+  "license": "BSD-3-Clause",
+  "access_right": "open",
+  "creators": [
+    {
+      "name": "Malcolm, Jamie",
+      "orcid": "0009-0008-3862-2776",
+      "affiliation": "UK Dementia Research Institute at Imperial College London"
+    }
+  ],
+  "keywords": [
+    "fiji",
+    "imagej",
+    "microscopy",
+    "fluorescence",
+    "histology",
+    "spatial-analysis",
+    "morphometry",
+    "3d-object-analysis"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Jay2owe/FLASH",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
