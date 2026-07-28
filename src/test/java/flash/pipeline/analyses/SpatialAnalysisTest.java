@@ -20,7 +20,9 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.Component;
 import java.awt.Container;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.InputStream;
 import java.io.PrintWriter;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -38,6 +40,18 @@ public class SpatialAnalysisTest {
 
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
+
+    @Test
+    public void classloadsWhenOptionalMcib3dMeasurementBaseIsMissing() throws Exception {
+        ClassLoader loader = new MissingMcib3dClassLoader(
+                SpatialAnalysis.class.getClassLoader());
+
+        Class<?> isolated = Class.forName(
+                SpatialAnalysis.class.getName(), true, loader);
+        Object analysis = isolated.getDeclaredConstructor().newInstance();
+
+        assertTrue(Analysis.class.isInstance(analysis));
+    }
 
     @Test
     public void hideImageWindowsFlagAloneDoesNotSuppressSpatialPresetDialogs() {
@@ -1063,5 +1077,63 @@ public class SpatialAnalysisTest {
             current = current.getParent();
         }
         return false;
+    }
+
+    private static final class MissingMcib3dClassLoader extends ClassLoader {
+        private static final String SPATIAL_CLASS =
+                "flash.pipeline.analyses.SpatialAnalysis";
+        private static final String MISSING_CLASS =
+                "mcib3d.geom2.measurements.MeasureAbstract";
+
+        MissingMcib3dClassLoader(ClassLoader parent) {
+            super(parent);
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve)
+                throws ClassNotFoundException {
+            synchronized (getClassLoadingLock(name)) {
+                if (MISSING_CLASS.equals(name)) {
+                    throw new ClassNotFoundException(name);
+                }
+                if (name.equals(SPATIAL_CLASS) || name.startsWith(SPATIAL_CLASS + "$")) {
+                    Class<?> loaded = findLoadedClass(name);
+                    if (loaded == null) {
+                        loaded = defineProjectClass(name);
+                    }
+                    if (resolve) {
+                        resolveClass(loaded);
+                    }
+                    return loaded;
+                }
+                return super.loadClass(name, resolve);
+            }
+        }
+
+        private Class<?> defineProjectClass(String name) throws ClassNotFoundException {
+            String resource = name.replace('.', '/') + ".class";
+            InputStream input = getParent().getResourceAsStream(resource);
+            if (input == null) {
+                throw new ClassNotFoundException(name);
+            }
+            try {
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    output.write(buffer, 0, read);
+                }
+                byte[] bytes = output.toByteArray();
+                return defineClass(name, bytes, 0, bytes.length);
+            } catch (Exception e) {
+                throw new ClassNotFoundException(name, e);
+            } finally {
+                try {
+                    input.close();
+                } catch (Exception ignored) {
+                    // Best effort in a test-only class loader.
+                }
+            }
+        }
     }
 }

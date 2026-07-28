@@ -760,7 +760,10 @@ public final class DependencyRegistry {
                 .affectedFeatures("native 3D morphology", "label-image measurements", "spatial morphometry")
                 .criticality(DependencySpec.Criticality.OPTIONAL_FEATURE)
                 .detectionStrategyLabel("Class probe")
-                .probe(classProbe("mcib3d.image3d.ImageLabeller", "mcib3d.geom2.Objects3DIntPopulation"))
+                .probe(classProbe(
+                        "mcib3d.image3d.ImageLabeller",
+                        "mcib3d.geom2.Objects3DIntPopulation",
+                        "mcib3d.geom2.measurements.MeasureAbstract"))
                 .fixerStrategy(DependencySpec.FixerStrategy.FIJI_UPDATER)
                 .approxDownloadSizeBytes(MCIB3D_CORE_BYTES)
                 .restartRequired(true)

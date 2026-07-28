@@ -6508,14 +6508,14 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         }
     }
 
-    /** Safe extraction of a measurement value from an mcib3d Measure object. */
-    private static double safeM(mcib3d.geom2.measurements.MeasureAbstract measure, String name) {
-        try {
-            Double v = measure.getValueMeasurement(name);
-            return (v != null && Double.isFinite(v)) ? v : Double.NaN;
-        } catch (Exception e) {
-            return Double.NaN;
-        }
+    /**
+     * Safe extraction of an mcib3d measurement without exposing an optional
+     * mcib3d type in this class's method signatures. Keeping the typed call in
+     * {@link Mcib3dMeasurementSupport} lets Spatial Analysis class-load when
+     * mcib3d is absent or an older Fiji installation lacks MeasureAbstract.
+     */
+    private static double safeM(Object measure, String name) {
+        return Mcib3dMeasurementSupport.value(measure, name);
     }
 
     /** Safe division returning NaN when denominator is near zero or inputs are non-finite. */

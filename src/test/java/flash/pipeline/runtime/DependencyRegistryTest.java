@@ -39,6 +39,28 @@ public class DependencyRegistryTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
+    public void mcib3dProbeRejectsRuntimeMissingMeasurementBaseClass() throws Exception {
+        final String missingClass = "mcib3d.geom2.measurements.MeasureAbstract";
+        ClassLoader loader = new ClassLoader(getClass().getClassLoader()) {
+            @Override
+            protected Class<?> loadClass(String name, boolean resolve)
+                    throws ClassNotFoundException {
+                if (missingClass.equals(name)) {
+                    throw new ClassNotFoundException(name);
+                }
+                return super.loadClass(name, resolve);
+            }
+        };
+
+        DependencyStatus status = DependencyRegistry.get(DependencyId.MCIB3D_CORE)
+                .probe(newProbeContext(loader, temp.getRoot()));
+
+        assertTrue(status.getDetailMessage(), status.isMissing());
+        assertTrue(status.getDetailMessage(),
+                status.getDetailMessage().contains(missingClass));
+    }
+
+    @Test
     public void everyDependencyIdHasExactlyOneSpec() {
         Map<DependencyId, DependencySpec> lookup = DependencyRegistry.lookup();
         assertEquals(DependencyId.values().length, lookup.size());
