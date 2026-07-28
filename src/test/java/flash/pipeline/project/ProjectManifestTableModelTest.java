@@ -145,6 +145,17 @@ public class ProjectManifestTableModelTest {
     }
 
     @Test
+    public void deferredSeriesCountShowsZeroWhenContainerIsExcluded() throws Exception {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        int index = model.addFile(touch("slide.lif"));
+        model.setValueAt(Boolean.FALSE, index, ProjectManifestTableModel.COL_INCLUDE);
+
+        model.setSeriesCount(index, 44);
+
+        assertEquals("0 of 44", model.getValueAt(index, ProjectManifestTableModel.COL_SERIES));
+    }
+
+    @Test
     public void setValueAt_persistsEditsAndFiresUpdate() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
         model.addFile(touch("Exp-A_LH_X.tif"));
@@ -442,6 +453,320 @@ public class ProjectManifestTableModelTest {
     }
 
     @Test
+    public void containerIncludeToggleCascadesToEverySeries() throws Exception {
+        ProjectManifestTableModel model = modelWithSeries("slide.lif", 4);
+
+        model.setValueAt(Boolean.FALSE, 0, ProjectManifestTableModel.COL_INCLUDE);
+
+        assertEquals(Boolean.FALSE, model.getValueAt(0, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals("0 of 4", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+        for (int row = 1; row <= 4; row++) {
+            assertEquals(Boolean.FALSE,
+                    model.getValueAt(row, ProjectManifestTableModel.COL_INCLUDE));
+        }
+
+        model.setValueAt(Boolean.TRUE, 0, ProjectManifestTableModel.COL_INCLUDE);
+
+        assertEquals("all (4)", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+        for (int row = 1; row <= 4; row++) {
+            assertEquals(Boolean.TRUE,
+                    model.getValueAt(row, ProjectManifestTableModel.COL_INCLUDE));
+        }
+    }
+
+    @Test
+    public void collapsedContainerIncludeToggleNotifiesSeriesSummaryCell() throws Exception {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        int index = model.addFile(touch("slide.lif"));
+        model.setSeriesEntries(index, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "s0"),
+                new ProjectManifestTableModel.SeriesEntry(1, "s1")));
+        final java.util.List<Integer> updatedColumns = new java.util.ArrayList<Integer>();
+        model.addTableModelListener(event -> updatedColumns.add(Integer.valueOf(event.getColumn())));
+
+        model.setValueAt(Boolean.FALSE, 0, ProjectManifestTableModel.COL_INCLUDE);
+
+        assertEquals("0 of 2", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+        assertTrue(updatedColumns.contains(Integer.valueOf(ProjectManifestTableModel.COL_INCLUDE)));
+        assertTrue(updatedColumns.contains(Integer.valueOf(ProjectManifestTableModel.COL_SERIES)));
+    }
+
+    @Test
+    public void selectingAChildReenablesContainerAndLastDeselectionDisablesIt() throws Exception {
+        ProjectManifestTableModel model = modelWithSeries("slide.lif", 3);
+        model.setValueAt(Boolean.FALSE, 0, ProjectManifestTableModel.COL_INCLUDE);
+
+        model.setValueAt(Boolean.TRUE, 2, ProjectManifestTableModel.COL_INCLUDE);
+
+        assertEquals(Boolean.TRUE, model.getValueAt(0, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals("1 of 3", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+        ProjectFile.Item selected = model.toProjectFile("P", "D:/out", "FLASH-test").items.get(0);
+        assertTrue(selected.include);
+        assertEquals(Arrays.asList(Integer.valueOf(1)), selected.series);
+
+        model.setValueAt(Boolean.FALSE, 2, ProjectManifestTableModel.COL_INCLUDE);
+
+        assertEquals(Boolean.FALSE, model.getValueAt(0, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals("0 of 3", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+    }
+
+    @Test
+    public void seriesIncludeRangeChangesOnlySiblingRowsInInclusiveRange() throws Exception {
+        ProjectManifestTableModel model = modelWithSeries("slide.lif", 6);
+        model.setValueAt(Boolean.FALSE, 0, ProjectManifestTableModel.COL_INCLUDE);
+
+        model.setSeriesIncludeRange(2, 5, true);
+
+        assertEquals(Boolean.FALSE, model.getValueAt(1, ProjectManifestTableModel.COL_INCLUDE));
+        for (int row = 2; row <= 5; row++) {
+            assertEquals(Boolean.TRUE,
+                    model.getValueAt(row, ProjectManifestTableModel.COL_INCLUDE));
+        }
+        assertEquals(Boolean.FALSE, model.getValueAt(6, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals("4 of 6", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+
+        model.setSeriesIncludeRange(5, 3, false);
+
+        assertEquals(Boolean.TRUE, model.getValueAt(2, ProjectManifestTableModel.COL_INCLUDE));
+        for (int row = 3; row <= 5; row++) {
+            assertEquals(Boolean.FALSE,
+                    model.getValueAt(row, ProjectManifestTableModel.COL_INCLUDE));
+        }
+        assertEquals("1 of 6", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+    }
+
+    @Test
+    public void setSelectedSeriesSynchronizesLoadedChildren() throws Exception {
+        ProjectManifestTableModel model = modelWithSeries("slide.lif", 3);
+
+        model.setSelectedSeries(0, Arrays.asList(Integer.valueOf(1)));
+
+        assertEquals(Boolean.TRUE, model.getValueAt(0, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.FALSE, model.getValueAt(1, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.TRUE, model.getValueAt(2, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.FALSE, model.getValueAt(3, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals("1 of 3", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+        ProjectFile.Item subset = model.toProjectFile("P", "D:/out", "FLASH-test").items.get(0);
+        assertEquals(Arrays.asList(Integer.valueOf(1)), subset.series);
+
+        model.setSelectedSeries(0, java.util.Collections.<Integer>emptyList());
+
+        assertEquals("all (3)", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+        for (int row = 1; row <= 3; row++) {
+            assertEquals(Boolean.TRUE,
+                    model.getValueAt(row, ProjectManifestTableModel.COL_INCLUDE));
+        }
+    }
+
+    @Test
+    public void excludedContainerSeedsNewlyLoadedSeriesAsExcluded() throws Exception {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        int index = model.addFile(touch("slide.lif"));
+        model.setValueAt(Boolean.FALSE, 0, ProjectManifestTableModel.COL_INCLUDE);
+
+        model.setSeriesEntries(index, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "s0"),
+                new ProjectManifestTableModel.SeriesEntry(1, "s1")));
+        model.setExpanded(0, true);
+
+        assertEquals(Boolean.FALSE, model.getValueAt(1, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.FALSE, model.getValueAt(2, ProjectManifestTableModel.COL_INCLUDE));
+    }
+
+    @Test
+    public void disabledLoadedContainerClearsRememberedChildIncludes() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.include = false;
+        item.seriesMeta.add(seriesMeta(0, "s0", true));
+        item.seriesMeta.add(seriesMeta(1, "s1", true));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+        model.setExpanded(0, true);
+
+        assertEquals(Boolean.FALSE, model.getValueAt(0, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.FALSE, model.getValueAt(1, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.FALSE, model.getValueAt(2, ProjectManifestTableModel.COL_INCLUDE));
+    }
+
+    @Test
+    public void loadedContainerWithNoSelectedChildrenBecomesDisabled() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.include = true;
+        item.seriesMeta.add(seriesMeta(0, "s0", false));
+        item.seriesMeta.add(seriesMeta(1, "s1", false));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+        model.setExpanded(0, true);
+
+        assertEquals(Boolean.FALSE, model.getValueAt(0, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals("0 of 2", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+    }
+
+    @Test
+    public void legacySeriesMetaSubsetSurvivesReplacementProbe() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.include = true;
+        item.seriesMeta.add(seriesMeta(0, "s0", true));
+        item.seriesMeta.add(seriesMeta(1, "s1", false));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+
+        model.setSeriesEntries(0, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "s0"),
+                new ProjectManifestTableModel.SeriesEntry(1, "s1")));
+        model.setExpanded(0, true);
+
+        assertEquals(Boolean.TRUE, model.getValueAt(1, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.FALSE, model.getValueAt(2, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals("1 of 2", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+    }
+
+    @Test
+    public void disabledLoadedContainerClearsExplicitSelectionWhenSeriesAreProbed() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.include = false;
+        item.series.add(Integer.valueOf(1));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+        assertTrue(model.getFile(0).selectedSeries.isEmpty());
+        ProjectFile.Item beforeProbe =
+                model.toProjectFile("P", "D:/out", "FLASH-test").items.get(0);
+        assertFalse(beforeProbe.include);
+        assertTrue(beforeProbe.series.isEmpty());
+        model.setSeriesEntries(0, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "s0"),
+                new ProjectManifestTableModel.SeriesEntry(1, "s1")));
+        model.setExpanded(0, true);
+
+        assertEquals(Boolean.FALSE, model.getValueAt(1, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.FALSE, model.getValueAt(2, ProjectManifestTableModel.COL_INCLUDE));
+    }
+
+    @Test
+    public void recheckingLoadedContainerBeforeProbeSelectsEverySeries() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.include = true;
+        item.series.add(Integer.valueOf(1));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+        model.setValueAt(Boolean.FALSE, 0, ProjectManifestTableModel.COL_INCLUDE);
+        model.setValueAt(Boolean.TRUE, 0, ProjectManifestTableModel.COL_INCLUDE);
+
+        model.setSeriesEntries(0, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "s0"),
+                new ProjectManifestTableModel.SeriesEntry(1, "s1")));
+        model.setExpanded(0, true);
+
+        assertEquals(Boolean.TRUE, model.getValueAt(1, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.TRUE, model.getValueAt(2, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals("all (2)", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+    }
+
+    @Test
+    public void replacementProbeWithNoMatchingSavedIndexDisablesContainer() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.include = true;
+        item.series.add(Integer.valueOf(99));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+        model.setSeriesEntries(0, Arrays.asList(
+                new ProjectManifestTableModel.SeriesEntry(0, "s0"),
+                new ProjectManifestTableModel.SeriesEntry(1, "s1")));
+        model.setExpanded(0, true);
+
+        assertEquals(Boolean.FALSE, model.getValueAt(0, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.FALSE, model.getValueAt(1, ProjectManifestTableModel.COL_INCLUDE));
+        assertEquals(Boolean.FALSE, model.getValueAt(2, ProjectManifestTableModel.COL_INCLUDE));
+        ProjectFile.Item saved = model.toProjectFile("P", "D:/out", "FLASH-test").items.get(0);
+        assertFalse(saved.include);
+        assertTrue(saved.series.isEmpty());
+    }
+
+    @Test
+    public void countProbeWithNoMatchingSavedIndexDisablesContainer() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.include = true;
+        item.series.add(Integer.valueOf(99));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+
+        model.setSeriesCount(0, 2);
+
+        assertEquals(Boolean.FALSE, model.getValueAt(0, ProjectManifestTableModel.COL_INCLUDE));
+        assertTrue(model.getFile(0).selectedSeries.isEmpty());
+        assertEquals("0 of 2", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+        ProjectFile.Item saved = model.toProjectFile("P", "D:/out", "FLASH-test").items.get(0);
+        assertFalse(saved.include);
+        assertTrue(saved.series.isEmpty());
+    }
+
+    @Test
+    public void partialSavedSeriesMetadataIsMergedWithFullProbe() throws Exception {
+        ProjectFile project = new ProjectFile();
+        ProjectFile.Item item = new ProjectFile.Item();
+        item.path = touch("slide.lif").getAbsolutePath();
+        item.include = true;
+        item.series.add(Integer.valueOf(5));
+        item.series.add(Integer.valueOf(2));
+        ProjectFile.SeriesItem savedFive = seriesMeta(5, "s5", true);
+        savedFive.animalId = "SavedFive";
+        item.seriesMeta.add(savedFive);
+        item.seriesMeta.add(seriesMeta(2, "s2", true));
+        project.items.add(item);
+
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        model.loadFromProjectFile(project);
+        model.setSeriesCount(0, 44);
+
+        assertTrue(model.needsSeriesEntriesProbe(0));
+        assertEquals("2 of 44", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+
+        java.util.List<ProjectManifestTableModel.SeriesEntry> entries =
+                new java.util.ArrayList<ProjectManifestTableModel.SeriesEntry>();
+        for (int series = 0; series < 44; series++) {
+            entries.add(new ProjectManifestTableModel.SeriesEntry(series, "s" + series));
+        }
+        model.setSeriesEntries(0, entries);
+        model.setExpanded(0, true);
+
+        assertFalse(model.needsSeriesEntriesProbe(0));
+        assertEquals(45, model.getRowCount());
+        assertEquals("SavedFive", model.getFile(0).series.get(5).animalId);
+        assertTrue(model.getFile(0).series.get(5).include);
+        assertTrue(model.getFile(0).series.get(2).include);
+        assertFalse(model.getFile(0).series.get(0).include);
+        assertEquals("2 of 44", model.getValueAt(0, ProjectManifestTableModel.COL_SERIES));
+    }
+
+    @Test
     public void toProjectFile_collapsesAllIncludedSeriesToAllSentinel() throws Exception {
         ProjectManifestTableModel model = new ProjectManifestTableModel();
         int idx = model.addFile(touch("slide.lif"));
@@ -555,6 +880,19 @@ public class ProjectManifestTableModelTest {
             assertTrue(file.createNewFile());
         }
         return file;
+    }
+
+    private ProjectManifestTableModel modelWithSeries(String fileName, int count) throws Exception {
+        ProjectManifestTableModel model = new ProjectManifestTableModel();
+        int index = model.addFile(touch(fileName));
+        java.util.List<ProjectManifestTableModel.SeriesEntry> entries =
+                new java.util.ArrayList<ProjectManifestTableModel.SeriesEntry>();
+        for (int series = 0; series < count; series++) {
+            entries.add(new ProjectManifestTableModel.SeriesEntry(series, "s" + series));
+        }
+        model.setSeriesEntries(index, entries);
+        model.setExpanded(0, true);
+        return model;
     }
 
     private static ProjectFile.SeriesItem seriesMeta(int index, String name, boolean include) {

@@ -109,6 +109,8 @@ public final class ProjectBuilderDialog {
     private final JTextField outputRootField;
     private final ProjectManifestTableModel model;
     private final JTable table;
+    private final SeriesIncludeRangeSelection seriesIncludeRangeSelection =
+            new SeriesIncludeRangeSelection();
     private JLabel reviewSummary;
     private JLabel conditionAxisStatus;
     private int popupColumn = -1;
@@ -144,6 +146,14 @@ public final class ProjectBuilderDialog {
         content.add(buildHeader(), BorderLayout.NORTH);
 
         table = new JTable(model) {
+            @Override
+            protected void processMouseEvent(MouseEvent event) {
+                if (handleSeriesIncludeMousePress(this, event)) {
+                    return;
+                }
+                super.processMouseEvent(event);
+            }
+
             @Override
             public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
                 Component c = super.prepareRenderer(renderer, row, column);
@@ -486,11 +496,15 @@ public final class ProjectBuilderDialog {
                 + "to set per-series details. Add a condition axis (e.g. Genotype, Timepoint) to build a "
                 + "condition matrix.");
         hint.setForeground(FlashTheme.TEXT_MUTED);
+        JLabel selectionHint = new JLabel("Selection: untick a container to clear all its series; "
+                + "Shift-click a series checkbox to tick or untick a range.");
+        selectionHint.setForeground(FlashTheme.TEXT_MUTED);
         conditionAxisStatus = new JLabel("");
         conditionAxisStatus.setForeground(FlashTheme.TEXT_MUTED);
         JPanel panel = new JPanel(new java.awt.GridLayout(0, 1, 0, 2));
         panel.setOpaque(false);
         panel.add(hint);
+        panel.add(selectionHint);
         panel.add(conditionAxisStatus);
         return panel;
     }
@@ -551,6 +565,11 @@ public final class ProjectBuilderDialog {
     private void attachTableStructureRefresh() {
         model.addTableModelListener(new TableModelListener() {
             @Override public void tableChanged(TableModelEvent e) {
+                if (e.getFirstRow() == TableModelEvent.HEADER_ROW
+                        || e.getType() != TableModelEvent.UPDATE
+                        || (e.getFirstRow() == 0 && e.getLastRow() == Integer.MAX_VALUE)) {
+                    seriesIncludeRangeSelection.reset();
+                }
                 if (e.getFirstRow() == TableModelEvent.HEADER_ROW) {
                     SwingUtilities.invokeLater(new Runnable() {
                         @Override public void run() {
@@ -560,6 +579,25 @@ public final class ProjectBuilderDialog {
                 }
             }
         });
+    }
+
+    private boolean handleSeriesIncludeMousePress(JTable source, MouseEvent event) {
+        if (event.getID() != MouseEvent.MOUSE_PRESSED
+                || !SwingUtilities.isLeftMouseButton(event)) {
+            return false;
+        }
+        int row = source.rowAtPoint(event.getPoint());
+        int column = source.columnAtPoint(event.getPoint());
+        if (column != ProjectManifestTableModel.COL_INCLUDE) {
+            return false;
+        }
+        boolean handled = seriesIncludeRangeSelection.handlePress(
+                model, row, event.isShiftDown());
+        if (handled) {
+            source.changeSelection(row, column, false, false);
+            event.consume();
+        }
+        return handled;
     }
 
     private int preferredWidthForColumn(int column) {
@@ -1025,7 +1063,8 @@ public final class ProjectBuilderDialog {
             return;
         }
         ProjectManifestTableModel.Row row = model.getFile(model.fileIndexAt(rowIndex));
-        if (row.series.isEmpty() && !populateSeriesEntries(rowIndex, row)) {
+        if (model.needsSeriesEntriesProbe(rowIndex)
+                && !populateSeriesEntries(rowIndex, row)) {
             return;
         }
         model.setExpanded(rowIndex, true);

@@ -165,8 +165,13 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
          */
         public String seriesDisplay() {
             if (!series.isEmpty()) {
-                int total = series.size();
+                int total = Math.max(series.size(), seriesCount);
                 if (total <= 1) return "1";
+                if (!include) return "0 of " + total;
+                if (series.size() < total) {
+                    if (selectedSeries.isEmpty()) return "all (" + total + ")";
+                    return selectedSeries.size() + " of " + total;
+                }
                 int included = 0;
                 for (SeriesRow s : series) {
                     if (s.include) included++;
@@ -175,6 +180,7 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             }
             if (seriesCount < 0) return "";
             if (seriesCount <= 1) return "1";
+            if (!include) return "0 of " + seriesCount;
             if (selectedSeries.isEmpty()) return "all (" + seriesCount + ")";
             return selectedSeries.size() + " of " + seriesCount;
         }
@@ -306,8 +312,13 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     public void setSeriesCount(int rowIndex, int seriesCount) {
         Row row = get(rowIndex);
         row.seriesCount = seriesCount;
+        normalizeExplicitSelectionForCount(row, seriesCount);
         int fileView = fileViewIndex(fileIndexAt(rowIndex));
+        fireTableCellUpdated(fileView, COL_INCLUDE);
         fireTableCellUpdated(fileView, COL_SERIES);
+        if (row.expanded && !row.series.isEmpty()) {
+            fireTableRowsUpdated(fileView + 1, fileView + row.series.size());
+        }
     }
 
     /** Update which series are selected for a row. Empty list = include all. */
@@ -315,10 +326,34 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         Row row = get(rowIndex);
         row.selectedSeries.clear();
         if (selected != null) {
-            row.selectedSeries.addAll(selected);
+            for (Integer index : selected) {
+                if (index != null && !row.selectedSeries.contains(index)) {
+                    row.selectedSeries.add(index);
+                }
+            }
+        }
+        row.include = true;
+        if (!row.series.isEmpty()) {
+            for (SeriesRow series : row.series) {
+                series.include = row.selectedSeries.isEmpty()
+                        || row.selectedSeries.contains(Integer.valueOf(series.index));
+            }
+            syncContainerIncludeFromSeries(row);
+            syncSelectedSeriesFromChildren(row);
         }
         int fileView = fileViewIndex(fileIndexAt(rowIndex));
+        fireTableCellUpdated(fileView, COL_INCLUDE);
         fireTableCellUpdated(fileView, COL_SERIES);
+        if (row.expanded && !row.series.isEmpty()) {
+            fireTableRowsUpdated(fileView + 1, fileView + row.series.size());
+        }
+    }
+
+    /** True when a full series-name probe is still needed before expansion. */
+    public boolean needsSeriesEntriesProbe(int rowIndex) {
+        Row row = get(rowIndex);
+        return row.series.isEmpty()
+                || (row.seriesCount >= 0 && row.series.size() < row.seriesCount);
     }
 
     /**
@@ -330,22 +365,30 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
     public void setSeriesEntries(int rowIndex, List<SeriesEntry> entries) {
         int fileIndex = fileIndexAt(rowIndex);
         Row row = rows.get(fileIndex);
+        List<SeriesRow> previous = new ArrayList<SeriesRow>(row.series);
         row.series.clear();
         if (entries != null) {
             for (SeriesEntry entry : entries) {
                 if (entry == null) continue;
-                SeriesRow series = new SeriesRow(entry.index);
-                series.name = entry.name == null ? "" : entry.name;
-                seedSeriesFromName(row, series);
-                if (!row.selectedSeries.isEmpty()) {
-                    series.include = row.selectedSeries.contains(Integer.valueOf(series.index));
+                SeriesRow series = findSeriesByIndex(previous, entry.index);
+                if (series == null) {
+                    series = new SeriesRow(entry.index);
+                    series.name = entry.name == null ? "" : entry.name;
+                    seedSeriesFromName(row, series);
+                } else if (entry.name != null && !entry.name.trim().isEmpty()) {
+                    series.name = entry.name;
                 }
+                series.include = row.include
+                        && (row.selectedSeries.isEmpty()
+                        || row.selectedSeries.contains(Integer.valueOf(series.index)));
                 row.series.add(series);
             }
             if (!entries.isEmpty()) {
                 row.seriesCount = entries.size();
             }
         }
+        syncContainerIncludeFromSeries(row);
+        syncSelectedSeriesFromChildren(row);
         rebuildVisible();
         fireTableDataChanged();
     }
@@ -393,6 +436,47 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
         row.expanded = expanded;
         rebuildVisible();
         fireTableDataChanged();
+    }
+
+    /** True when both rendered rows are sibling series under the same container. */
+    boolean canSetSeriesIncludeRange(int anchorRowIndex, int targetRowIndex) {
+        if (anchorRowIndex < 0 || targetRowIndex < 0
+                || anchorRowIndex >= visible.size() || targetRowIndex >= visible.size()) {
+            return false;
+        }
+        View anchor = visible.get(anchorRowIndex);
+        View target = visible.get(targetRowIndex);
+        return anchor.seriesPos >= 0
+                && target.seriesPos >= 0
+                && anchor.fileIndex == target.fileIndex;
+    }
+
+    /**
+     * Apply one include state to an inclusive range of sibling series rows.
+     * The parent source stays included while any child is included and becomes
+     * excluded only when every child is excluded.
+     */
+    void setSeriesIncludeRange(int anchorRowIndex, int targetRowIndex, boolean included) {
+        if (!canSetSeriesIncludeRange(anchorRowIndex, targetRowIndex)) {
+            return;
+        }
+        View anchor = visible.get(anchorRowIndex);
+        View target = visible.get(targetRowIndex);
+        Row parent = rows.get(anchor.fileIndex);
+        int first = Math.min(anchor.seriesPos, target.seriesPos);
+        int last = Math.max(anchor.seriesPos, target.seriesPos);
+        for (int pos = first; pos <= last; pos++) {
+            parent.series.get(pos).include = included;
+        }
+        syncContainerIncludeFromSeries(parent);
+        syncSelectedSeriesFromChildren(parent);
+
+        int fileView = fileViewIndex(anchor.fileIndex);
+        fireTableCellUpdated(fileView, COL_INCLUDE);
+        fireTableCellUpdated(fileView, COL_SERIES);
+        if (parent.expanded) {
+            fireTableRowsUpdated(fileView + first + 1, fileView + last + 1);
+        }
     }
 
     /** Bulk-assign a condition to a set of rendered rows (file or series level). */
@@ -1480,6 +1564,9 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 if (item.series != null) {
                     row.selectedSeries.addAll(item.series);
                 }
+                if (!row.include && isContainerSource(row.source)) {
+                    row.selectedSeries.clear();
+                }
                 if (item.seriesMeta != null && !item.seriesMeta.isEmpty()) {
                     boolean hasExplicitSeriesSelection = !row.selectedSeries.isEmpty();
                     String loadedFileCondition = nullToEmpty(item.condition);
@@ -1501,6 +1588,10 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                         row.series.add(series);
                     }
                     row.seriesCount = row.series.size();
+                    normalizeLoadedSeriesInclude(row);
+                    if (row.selectedSeries.isEmpty()) {
+                        syncSelectedSeriesFromChildren(row);
+                    }
                 }
                 rows.add(row);
             }
@@ -1687,7 +1778,13 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             fireTableCellUpdated(rowIndex, columnIndex);
             // Series include changes alter the parent's "M of N" summary.
             if (columnIndex == COL_INCLUDE) {
-                fireTableCellUpdated(fileViewIndex(fileIndexAt(rowIndex)), COL_SERIES);
+                int fileIndex = fileIndexAt(rowIndex);
+                Row parent = rows.get(fileIndex);
+                syncContainerIncludeFromSeries(parent);
+                syncSelectedSeriesFromChildren(parent);
+                int fileView = fileViewIndex(fileIndex);
+                fireTableCellUpdated(fileView, COL_INCLUDE);
+                fireTableCellUpdated(fileView, COL_SERIES);
             }
             return;
         }
@@ -1710,6 +1807,12 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             switch (columnIndex) {
                 case COL_INCLUDE:
                     row.include = value instanceof Boolean ? ((Boolean) value).booleanValue() : false;
+                    if (isContainerSource(row.source)) {
+                        row.selectedSeries.clear();
+                    }
+                    if (cascade) {
+                        for (SeriesRow s : row.series) s.include = row.include;
+                    }
                     break;
                 case COL_ANIMAL:
                     row.animalId = stringValue(value);
@@ -1732,11 +1835,14 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
             touchUserSet(row.meta, editedField);
             if (cascade) for (SeriesRow s : row.series) touchUserSet(s.meta, editedField);
         }
-        if (cascade && columnIndex != COL_INCLUDE && row.expanded) {
+        if (cascade && row.expanded) {
             // Refresh the now-cascaded series rows beneath this file.
             fireTableRowsUpdated(rowIndex, rowIndex + row.series.size());
         } else {
             fireTableCellUpdated(rowIndex, columnIndex);
+            if (cascade && columnIndex == COL_INCLUDE) {
+                fireTableCellUpdated(rowIndex, COL_SERIES);
+            }
         }
     }
 
@@ -1764,6 +1870,58 @@ public final class ProjectManifestTableModel extends AbstractTableModel {
                 break;
             default:
                 break;
+        }
+    }
+
+    private static void syncContainerIncludeFromSeries(Row parent) {
+        if (parent == null || parent.series.isEmpty()) return;
+        parent.include = false;
+        for (SeriesRow series : parent.series) {
+            if (series.include) {
+                parent.include = true;
+                return;
+            }
+        }
+    }
+
+    private static void normalizeLoadedSeriesInclude(Row parent) {
+        if (parent == null || parent.series.isEmpty()) return;
+        if (!parent.include) {
+            for (SeriesRow series : parent.series) {
+                series.include = false;
+            }
+            return;
+        }
+        syncContainerIncludeFromSeries(parent);
+    }
+
+    private static void syncSelectedSeriesFromChildren(Row parent) {
+        if (parent == null || parent.series.isEmpty()) return;
+        List<Integer> included = includedSeriesIndexesInSavedOrder(parent);
+        parent.selectedSeries.clear();
+        if (included.size() != parent.series.size()) {
+            parent.selectedSeries.addAll(included);
+        }
+    }
+
+    private static void normalizeExplicitSelectionForCount(Row parent, int seriesCount) {
+        if (parent == null || parent.selectedSeries.isEmpty() || seriesCount < 0) return;
+        List<Integer> valid = new ArrayList<Integer>();
+        for (Integer index : parent.selectedSeries) {
+            if (index != null && index.intValue() >= 0 && index.intValue() < seriesCount
+                    && !valid.contains(index)) {
+                valid.add(index);
+            }
+        }
+        parent.selectedSeries.clear();
+        parent.selectedSeries.addAll(valid);
+        if (valid.isEmpty()) {
+            parent.include = false;
+        }
+        for (SeriesRow series : parent.series) {
+            series.include = parent.include
+                    && !valid.isEmpty()
+                    && valid.contains(Integer.valueOf(series.index));
         }
     }
 
