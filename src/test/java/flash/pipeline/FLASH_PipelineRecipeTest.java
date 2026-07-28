@@ -140,6 +140,7 @@ public class FLASH_PipelineRecipeTest {
             JButton clear = findButton(quickStart, "Clear Recipe");
             JButton save = findButton(quickStart, "Save selection as recipe...");
             JButton help = findButton(quickStart, "?");
+            JButton feedback = findButton(quickStart, "Feedback");
             JLabel caption = findLabelContaining(quickStart, "Pick a recipe");
 
             assertNotNull(standard);
@@ -149,6 +150,7 @@ public class FLASH_PipelineRecipeTest {
             assertNotNull(clear);
             assertNotNull(save);
             assertNotNull(help);
+            assertNotNull(feedback);
             assertNotNull(caption);
             assertSame(standard, standard.getParent().getComponent(0));
             assertSame(findButton(quickStart, "Full pipeline").getParent(), presentation.getParent());
@@ -159,6 +161,8 @@ public class FLASH_PipelineRecipeTest {
             assertEquals(new Color(15, 87, 140), save.getForeground());
             assertEquals(save.getBackground(), help.getBackground());
             assertEquals(save.getForeground(), help.getForeground());
+            assertEquals(save.getBackground(), feedback.getBackground());
+            assertEquals(save.getForeground(), feedback.getForeground());
             assertTrue(save.isOpaque());
             assertTrue(save.isContentAreaFilled());
         } finally {

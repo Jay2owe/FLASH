@@ -25,6 +25,7 @@ import flash.pipeline.help.AnalysisHelpCatalog;
 import flash.pipeline.help.AnalysisHelpDialog;
 import flash.pipeline.help.AnalysisHelpTopic;
 import flash.pipeline.help.HelpDialog;
+import flash.pipeline.feedback.FeedbackDialog;
 import flash.pipeline.ui.HelpButton;
 import flash.pipeline.image.GpuConcurrency;
 import flash.pipeline.ui.PipelineDialog;
@@ -1236,6 +1237,12 @@ public class FLASH_Pipeline implements PlugIn {
             }
         });
         headerRow.add(helpBtn);
+        headerRow.add(Box.createHorizontalStrut(6));
+        final JButton feedbackBtn = new JButton("Feedback");
+        styleSaveRecipeButton(feedbackBtn);
+        feedbackBtn.setToolTipText("Send FLASH feedback and optionally attach diagnostic logs.");
+        feedbackBtn.addActionListener(e -> FeedbackDialog.show(pd.getWindow(), directory));
+        headerRow.add(feedbackBtn);
         headerRow.add(Box.createHorizontalGlue());
         quickColumn.add(headerRow);
         quickColumn.add(Box.createVerticalStrut(5));
