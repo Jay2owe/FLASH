@@ -7,7 +7,7 @@ runs the recorded analysis stages, and writes a success/failure receipt. Origina
 images and projects are read only. It does not generate manuscript figures.
 
 **Verified:** a recorded simulated intensity analysis replayed in Fiji using
-FLASH 4.0.0, ImageJ 1.54p99 and Java 11.0.31. All 120 measurement rows in the two
+FLASH 5.0.0, ImageJ 1.54p99 and Java 11.0.31. All 120 measurement rows in the two
 channel tables matched the original run after excluding the new run identifier.
 This verifies the API route, not the identity of the historical paper image runs.
 
