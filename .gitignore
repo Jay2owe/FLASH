@@ -72,3 +72,26 @@ __pycache__/
 
 # graphify temp/state files
 .graphify_detect.json
+
+# Local agent instructions, audit reports, and deployment configuration.
+/CLAUDE.md
+/CLAUDE_CONTEXT*.md
+/AGENTS.md
+/GEMINI.md
+/DEPLOY_CONTRACT.md
+/PUBLISHING_AUDIT.md
+/.planning/
+/.env
+/.env.*
+*.conflicted-copy.*
+*conflicted copy*
+/VERSIONING.md
+/FLASH-codex-*/
+
+# Generated demo and reproduction outputs
+demo/output/
+demo/outputs/
+reproduce/**/output/
+reproduce/**/outputs/
+__pycache__/
+*.pyc

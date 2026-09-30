@@ -34,7 +34,69 @@ Install through the Fiji updater:
 
 Manual installation is also possible by copying the built `FLASH-<version>.jar` into Fiji's `plugins/` directory, but the update site is preferred because it keeps the plugin updateable through Fiji.
 
-## Main Workflow
+### Typical installation time
+
+On a normal desktop or laptop (at least 4 CPU cores, 8 GB RAM, an SSD, and a
+stable broadband connection), allow approximately **1-5 minutes** to install
+FLASH through the updater and restart an existing Fiji installation. Allow
+approximately **5-15 minutes total** if Fiji must also be downloaded and
+installed. These are planning estimates, not measured installation benchmarks;
+download speed and updater changes affect the time. They exclude installing
+optional segmentation models, Python environments, or deconvolution engines.
+
+### System requirements and tested versions
+
+The minimal demo requires Fiji with Bio-Formats and FLASH. It runs on the CPU;
+no GPU or other non-standard hardware is required. Optional analyses have the
+additional dependencies described under **Runtime Dependencies**.
+
+The supplied demo was verified on Windows 11, with FLASH 4.0.0, Bio-Formats
+8.1.1, ImageJ 2.16.0 / 1.54p, and Java 11.0.31 in Fiji. Fiji supports Windows, macOS and Linux;
+the demo verification reported here covers Windows. The source build targets
+Java 8 bytecode, as described under **Building**.
+The original Fiji demo receipt covers 4.0.0. The published 5.0.0 binary also
+passed a [standalone numerical check](demo/public-binary-verification.json)
+using the same TIFFs, fixed options and expected results; that check does not
+exercise the Fiji graphical interface.
+
+## Small simulated demo
+
+The [`demo/`](demo/README.md) folder contains a ready-to-run artificial dataset:
+twelve 16-bit TIFF stacks, each 64 x 64 pixels, two channels and five Z slices
+(about 1 MB in total). The accompanying pixel-truth table provides known
+answers. No biological or personal data are included.
+
+Open [`demo/run_demo.ijm`](demo/run_demo.ijm) in Fiji's macro editor and choose
+**Run**. Select an empty output folder when prompted. The macro copies the
+inputs and runs whole-image fluorescence intensity analysis with fixed
+settings; see the [demo guide](demo/README.md) for expected outputs and checks.
+Expected running time is **under 2 minutes** after Fiji has started and FLASH
+is installed. This is a practical allowance for a normal desktop or laptop;
+the guide records the measured verification run separately.
+
+The verified run took **24.8 seconds** on a Windows 11 laptop with an AMD
+Ryzen 7 7730U processor, 32 GB RAM and an SSD. All 120 intensity measurements
+matched the supplied pixel truth. The [verification receipt](demo/verification.json)
+records the environment and file fingerprints.
+
+## Manuscript analysis scripts
+
+The [Soteras et al. replay guide](reproduce/soteras_2026/README.md) provides a
+script that reruns completed FLASH analyses through its public Java API using
+recorded settings, verified input files and the original plugin binary. The
+simulated intensity replay matched all 120 original measurements. Historical
+paper configurations and reference results are required to establish an exact
+paper rerun; the guide states the current limits.
+
+## Reproducible source snapshot
+
+The current tagged release is [FLASH 5.0.0](https://github.com/Jay2owe/FLASH/releases/tag/v5.0.0).
+For a fixed source snapshot, download that release's source archive or check out
+`v5.0.0`; the default branch and ImageJ update site can change over time.
+Record the FLASH version and analysis settings used with your results.
+The version-specific archive is [Zenodo record 21633368](https://doi.org/10.5281/zenodo.21633368).
+
+## Usage
 
 FLASH writes analysis outputs into a `FLASH/` folder inside the selected project directory:
 
@@ -193,23 +255,6 @@ src/main/resources/plugins.config
 src/test/java/flash/pipeline/
 ```
 
-## Citing FLASH
-
-If you use FLASH in published work, please cite it as:
-
-> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.0.0) [Computer software]. Manuscript in preparation. https://github.com/Jay2owe/FLASH
-
-A Zenodo concept DOI will be minted from the first tagged GitHub release after the BSD-3 cutover; this README will be updated with the DOI badge once available. Citation metadata is also available in [`CITATION.cff`](CITATION.cff) (use the "Cite this repository" button on GitHub).
-
-If you use specific features, please also cite their upstream tools:
-
-- [Fiji](https://fiji.sc/) (Schindelin et al., *Nature Methods*, 2012, doi:10.1038/nmeth.2019)
-- [Bio-Formats](https://www.openmicroscopy.org/bio-formats/) (Linkert et al., *J Cell Biol*, 2010, doi:10.1083/jcb.201004104)
-- [3D ImageJ Suite / mcib3d-core](https://mcib3d.frama.io/3d-suite-imagej/) (Ollion et al., *Bioinformatics*, 2013, doi:10.1093/bioinformatics/btt276) for 3D measurement
-- [StarDist](https://github.com/stardist/stardist) (Schmidt et al., MICCAI 2018; Weigert et al., WACV 2020) for star-convex segmentation
-- [Cellpose](https://www.cellpose.org/) (Stringer et al., *Nature Methods*, 2021, doi:10.1038/s41592-020-01018-x) for generalist cell segmentation
-- [TrackMate](https://imagej.net/plugins/trackmate/) (Tinevez et al., *Methods*, 2017, doi:10.1016/j.ymeth.2016.09.016) for tracking
-
 ## Citation
 
 If you use FLASH in published work, please cite it. The **concept DOI** below
@@ -234,6 +279,15 @@ ran instead — v5.0.0 is [`10.5281/zenodo.21633368`](https://doi.org/10.5281/ze
 
 GitHub's **Cite this repository** button (top right, generated from
 [`CITATION.cff`](CITATION.cff)) produces both APA and BibTeX automatically.
+
+If you use specific features, please also cite their upstream tools:
+
+- [Fiji](https://fiji.sc/) (Schindelin et al., *Nature Methods*, 2012, doi:10.1038/nmeth.2019)
+- [Bio-Formats](https://www.openmicroscopy.org/bio-formats/) (Linkert et al., *J Cell Biol*, 2010, doi:10.1083/jcb.201004104)
+- [3D ImageJ Suite / mcib3d-core](https://mcib3d.frama.io/3d-suite-imagej/) (Ollion et al., *Bioinformatics*, 2013, doi:10.1093/bioinformatics/btt276) for 3D measurement
+- [StarDist](https://github.com/stardist/stardist) (Schmidt et al., MICCAI 2018; Weigert et al., WACV 2020) for star-convex segmentation
+- [Cellpose](https://www.cellpose.org/) (Stringer et al., *Nature Methods*, 2021, doi:10.1038/s41592-020-01018-x) for generalist cell segmentation
+- [TrackMate](https://imagej.net/plugins/trackmate/) (Tinevez et al., *Methods*, 2017, doi:10.1016/j.ymeth.2016.09.016) for tracking
 
 ## Acknowledgements
 

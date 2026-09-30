@@ -1,0 +1,41 @@
+{
+  "date": "2026-09-30",
+  "claim": "Simulated recorded-run intensity replay verified; historical paper image reproduction not established.",
+  "focused_tests_passed": 2,
+  "input_stacks": 12,
+  "input_and_configuration_files": 18,
+  "matched_measurement_rows": 120,
+  "tables": [
+    {
+      "relative_path": "FLASH/Results/Tables/Intensity/DAPI.csv",
+      "matched_rows": 60,
+      "original_sha256": "469ba691d199cff8089d2551aaba3d3a40a39a7f88f5fe128f87fcfb885a264c",
+      "replay_sha256": "1c0a6799ea2b76f337dbcbda5b298e6c23cbeff8e89edc2ae3c643d89e77f2c2"
+    },
+    {
+      "relative_path": "FLASH/Results/Tables/Intensity/Signal.csv",
+      "matched_rows": 60,
+      "original_sha256": "6d36a9f2e626db155c8bc69ca45dbd86fbe7236f5bb2eb4b9183452d89100c08",
+      "replay_sha256": "fc2b04439e6393da5806bf0166132b29d7bf7907d91e7ef31c0d17a0ed7c0661"
+    }
+  ],
+  "ignored_columns": [
+    "run_id"
+  ],
+  "flash_version": "4.0.0",
+  "imagej_version": "1.54p99",
+  "java_version": "11.0.31",
+  "flash_jar_sha256": "b44aac7700515e5fd0da99f6b66911960e66dcefb69c88f406f99c1ce21bfc4c",
+  "limitations": [
+    "Only the intensity path exercised end to end.",
+    "Original paper project run records/configurations not recovered.",
+    "Fiji dependencies and external model resources are not archived by the manifest."
+  ],
+  "script_sha256": {
+    "capture_replay.py": "4ed78af8965792b8b44b6b9cc0241d0dbefb239f658625a803111a8bf2d3989c",
+    "compare_tables.py": "5a04a555ac08651e0cae27cb08e0750aa69f8f8258534bfa31622fc85731f096",
+    "README.md": "49772a233d71c550c6c39359df1687d81096741dab565cac9c47aadea8735e2c",
+    "replay_flash.groovy": "57239e8bce5a4e667a42ebae49c3d7f240a80851b616ed010fcbcb3c1c16e0b6",
+    "test_replay.py": "64a156073a27072c30d9da9f7dac9e7f2564ffa2b8480dbe1c377c52c715d004"
+  }
+}

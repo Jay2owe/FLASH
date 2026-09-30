@@ -1,0 +1,4 @@
+*.bfmemo
+AI_Exports/
+/output/
+__pycache__/

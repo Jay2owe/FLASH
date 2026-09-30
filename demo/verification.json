@@ -1,0 +1,54 @@
+{
+  "verified_on": "2026-09-30",
+  "operating_system": "Windows 11 Home (10.0.26200)",
+  "cpu": "AMD Ryzen 7 7730U (8 cores / 16 threads)",
+  "ram_gb": 32,
+  "storage": "SSD",
+  "software": {
+    "flash": "4.0.0",
+    "bio_formats": "8.1.1",
+    "imagej": "2.16.0 / 1.54p",
+    "java": "11.0.31"
+  },
+  "flash_jar_sha256": "b44aac7700515e5fd0da99f6b66911960e66dcefb69c88f406f99c1ce21bfc4c",
+  "verification_route": "Saved demo macro executed in an isolated Fiji installation through the local ImageJ script interface. Only the two folder-selection values were supplied automatically.",
+  "demo_elapsed_seconds": 24.803,
+  "timing_scope": "Input copying, macro execution and FLASH intensity outputs; excludes Fiji startup, installation and manual folder selection.",
+  "subjects": 12,
+  "channels": 2,
+  "z_slices": 5,
+  "dimensions_zyxc": [
+    5,
+    64,
+    64,
+    2
+  ],
+  "image_dataset_bytes": 1005384,
+  "measurement_rows": {
+    "DAPI": 60,
+    "Signal": 60
+  },
+  "validation": "All 120 IntDen and IntDen_Unfiltered values agree with the supplied per-slice pixel sums; TIFF dimensions, uint16 bit depth and calibration metadata checked; all TIFFs and pixel-truth table regenerate byte-for-byte.",
+  "generation_dependencies": {
+    "numpy": "2.1.0",
+    "tifffile": "2026.3.3"
+  },
+  "source_sha256": {
+    "data/pixel_truth.csv": "ebf6c2cbdf68fa6805fdab191d84ffa94ad744adcac980116b745c0e97fe07b2",
+    "data/Simulated-A01_LH_Demo.tif": "940c0ffdbd753b366be4aa068bc7c6d3c88e2374266249377d45ba130d4a1768",
+    "data/Simulated-A02_LH_Demo.tif": "fb6552acbfb5152243cc9bbf4cc4a7b28e1150c03a3c31f1e9dcbed45369639d",
+    "data/Simulated-A03_LH_Demo.tif": "89cc72d5f96249cfc270b74e91fee310f71c08abd4223afa24498a7d429f5b77",
+    "data/Simulated-A04_LH_Demo.tif": "af0fe51536dc96d25de3278ab04904258e491c297d31aaf5c0973a782f791aca",
+    "data/Simulated-A05_LH_Demo.tif": "1c2a25ee3c38cc571b0c5c3e6fef5297b3c81cdd5001b7a6b68e66656386ec2c",
+    "data/Simulated-A06_LH_Demo.tif": "a189842bb04d26f493108d61b856393b085346168bd8708ef3e106f4fc241db9",
+    "data/Simulated-B01_LH_Demo.tif": "e5845e30712aa95eb443ee69f21ae24a61f956c8f9ee5935db490eb38bd8f8c5",
+    "data/Simulated-B02_LH_Demo.tif": "ad7ce8813055190e97fa3a57f1771cd91a0c02df44aab712a821bbb5a3921fcb",
+    "data/Simulated-B03_LH_Demo.tif": "c712f820f9da946db891a864ac01651349686bfad35dbdcd5d34afb10c39c8e8",
+    "data/Simulated-B04_LH_Demo.tif": "82222012046c896c117570d582fd784648f8f15183fdf42ffeea927d855b4700",
+    "data/Simulated-B05_LH_Demo.tif": "79aefb47922cf9b4c7b22104e3e580e1f3a7b604b073246afbdc6d03f6687c17",
+    "data/Simulated-B06_LH_Demo.tif": "f32fcae56aa1e6d9866df66ad1d8ea6b02da79eabeb76db703c827838d98aef3",
+    "run_demo.ijm": "a4829da3ab4134e4ecb0b48c9531d528cd0594b6852ca5e0e3a3f0622c879f4d",
+    "generate_data.py": "8896f16da87530f1b1f34db1bc6edda8a6c4c89f6b80b525079d7c2f9ea63c8b",
+    "validate_outputs.py": "53db61258e9fb1d0dd0284ab0719ac3c5fc1d6aa01f105560dcfb6603afe3583"
+  }
+}

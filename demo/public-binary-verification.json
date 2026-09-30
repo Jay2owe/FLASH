@@ -1,0 +1,33 @@
+{
+  "verified_on": "2026-09-30",
+  "scope": "Numerical check of the published binary through the plugin entry point in a standalone headless JVM. Uses the supplied TIFFs, fixed macro options and validator; excludes Fiji GUI/menu and macro-editor integration.",
+  "binary_url": "https://sites.imagej.net/FLASH/plugins/FLASH-5.0.0.jar-20260720234307",
+  "binary_sha256": "1721d86137062c18da0b7fbaf5b35902e3ffaa3810c8b0bef09f275fb598e575",
+  "java": "openjdk version \"21.0.12\" 2026-07-21 LTS",
+  "elapsed_seconds": 19.484,
+  "validation": "All supplied numerical expected results matched.",
+  "operating_system": "Windows 11",
+  "cpu": "AMD Ryzen 7 7730U",
+  "ram_gb": 32,
+  "imagej_dependency": [
+    "ij-1.53f.jar"
+  ],
+  "dependency_source": "Maven-resolved FLASH test dependencies; no Fiji installation was changed.",
+  "source_sha256": {
+    "data/pixel_truth.csv": "ebf6c2cbdf68fa6805fdab191d84ffa94ad744adcac980116b745c0e97fe07b2",
+    "data/Simulated-A01_LH_Demo.tif": "940c0ffdbd753b366be4aa068bc7c6d3c88e2374266249377d45ba130d4a1768",
+    "data/Simulated-A02_LH_Demo.tif": "fb6552acbfb5152243cc9bbf4cc4a7b28e1150c03a3c31f1e9dcbed45369639d",
+    "data/Simulated-A03_LH_Demo.tif": "89cc72d5f96249cfc270b74e91fee310f71c08abd4223afa24498a7d429f5b77",
+    "data/Simulated-A04_LH_Demo.tif": "af0fe51536dc96d25de3278ab04904258e491c297d31aaf5c0973a782f791aca",
+    "data/Simulated-A05_LH_Demo.tif": "1c2a25ee3c38cc571b0c5c3e6fef5297b3c81cdd5001b7a6b68e66656386ec2c",
+    "data/Simulated-A06_LH_Demo.tif": "a189842bb04d26f493108d61b856393b085346168bd8708ef3e106f4fc241db9",
+    "data/Simulated-B01_LH_Demo.tif": "e5845e30712aa95eb443ee69f21ae24a61f956c8f9ee5935db490eb38bd8f8c5",
+    "data/Simulated-B02_LH_Demo.tif": "ad7ce8813055190e97fa3a57f1771cd91a0c02df44aab712a821bbb5a3921fcb",
+    "data/Simulated-B03_LH_Demo.tif": "c712f820f9da946db891a864ac01651349686bfad35dbdcd5d34afb10c39c8e8",
+    "data/Simulated-B04_LH_Demo.tif": "82222012046c896c117570d582fd784648f8f15183fdf42ffeea927d855b4700",
+    "data/Simulated-B05_LH_Demo.tif": "79aefb47922cf9b4c7b22104e3e580e1f3a7b604b073246afbdc6d03f6687c17",
+    "data/Simulated-B06_LH_Demo.tif": "f32fcae56aa1e6d9866df66ad1d8ea6b02da79eabeb76db703c827838d98aef3",
+    "run_demo.ijm": "a4829da3ab4134e4ecb0b48c9531d528cd0594b6852ca5e0e3a3f0622c879f4d",
+    "validate_outputs.py": "53db61258e9fb1d0dd0284ab0719ac3c5fc1d6aa01f105560dcfb6603afe3583"
+  }
+}

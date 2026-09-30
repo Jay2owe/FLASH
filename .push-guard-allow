@@ -1,0 +1,37 @@
+# Exact benign lines only: cloud-sync comments and fabricated privacy-redaction fixtures.
+# src/main/java/flash/pipeline/bin/BinConfigIO.java:241
+^//\ destination\ stays\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.$
+# src/main/java/flash/pipeline/decontamination/AtomicFileWriter.java:52
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ text\ output\.$
+# src/main/java/flash/pipeline/deconv/DeconvManifest.java:29
+^\*\ source\.lastModified\(\)\}\.\ On\ a\ synced\ \x44ropbox/\x4fneDrive\ tree\ that\ is\ wrong\ in\ both$
+# src/main/java/flash/pipeline/deconv/DeconvManifest.java:405
+^/\*\*\ Write\ the\ manifest\ atomically\ \(small\-file\ commit;\ \x44ropbox/\x4fneDrive\-lock\ safe\)\.\ \*/$
+# src/main/java/flash/pipeline/deconv/wizard/DeconvPresetIO.java:130
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ small\ preset\.$
+# src/main/java/flash/pipeline/io/ProjectStatusStore.java:222
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ small\ JSON\.$
+# src/main/java/flash/pipeline/qc/QcMinMaxPerConditionSelector.java:1913
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ small\ scores\.$
+# src/main/java/flash/pipeline/recipes/PipelineRecipeIO.java:126
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ small\ recipe\.$
+# src/main/java/flash/pipeline/report/HtmlReportWriter.java:176
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ HTML\ text\.$
+# src/main/java/flash/pipeline/report/StudyYamlWriter.java:706
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ small\ YAML\.$
+# src/main/java/flash/pipeline/results/IntensityDetailsWriter.java:171
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ text\ details\.$
+# src/main/java/flash/pipeline/ui/variations/state/VariationStateStore.java:125
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ small\ JSON\.$
+# src/main/java/flash/pipeline/ui/wizard/PresetIO.java:271
+^//\ locked\ against\ rename\ \(Windows\ \+\ \x44ropbox/\x4fneDrive\)\.\ Safe:\ small\ preset\.$
+# src/test/java/flash/pipeline/bin/BinConfigIOWriteAtomicTest.java:26
+^\*\ no\ leftover\ temp\.\ The\ Windows\ \+\ cloud\-sync\ \(\x44ropbox/\x4fneDrive\)\ in\-place\-rewrite$
+# src/test/java/flash/pipeline/feedback/FeedbackSupportTest.java:47
+^String\ text\ =\ "C:\\\\\x55sers\\\\Alice\\\\data\\\\image\.lif\\n"$
+# src/test/java/flash/pipeline/feedback/FeedbackSupportTest.java:48
+^\+\ "C:/\x55sers/Alice/data/image\.lif\\n"$
+# src/test/java/flash/pipeline/feedback/FeedbackSupportTest.java:51
+^String\ redacted\ =\ FeedbackDiagnostics\.redact\(text,\ "C:\\\\\x55sers\\\\Alice"\);$
+# src/test/java/flash/pipeline/feedback/FeedbackSupportTest.java:63
+^"Failure\ at\ C:\\\\\x55sers\\\\Alice\\\\data\\nalice@example\.org"\.getBytes\(StandardCharsets\.UTF_8\)\);$
