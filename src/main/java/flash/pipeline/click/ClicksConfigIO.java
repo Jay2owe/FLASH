@@ -15,7 +15,7 @@ import java.util.Map;
 
 public final class ClicksConfigIO {
     public static final String FILE_NAME = "Clicks.json";
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private ClicksConfigIO() {
     }
@@ -82,6 +82,7 @@ public final class ClicksConfigIO {
                     ? "positive"
                     : "negative");
             row.put("timestamp", Long.valueOf(click.timestampMs));
+            row.put("segmentationFingerprint", click.segmentationFingerprint);
             rows.add(row);
         }
         root.put("clicks", rows);
@@ -102,7 +103,8 @@ public final class ClicksConfigIO {
                 || verdict == null) {
             return null;
         }
-        return new ClickStore.Click(image, channel, label, z, x, y, verdict, timestamp);
+        return new ClickStore.Click(image, channel, label, z, x, y, verdict, timestamp,
+                JsonIO.stringValue(row.get("segmentationFingerprint")));
     }
 
     private static ClickStore.Verdict verdict(String raw) {

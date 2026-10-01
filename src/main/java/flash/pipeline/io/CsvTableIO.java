@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -346,6 +347,14 @@ public final class CsvTableIO {
         if (existing == null || existing.rows.size() != table.size()) {
             return false;
         }
+        List<String> sourceRunIds = new ArrayList<String>();
+        boolean hasSourceRunIds = existing.colIdx.containsKey(RunIdCsv.SOURCE_RUN_ID_COLUMN);
+        for (int row = 0; row < existing.rows.size(); row++) {
+            String sources = mergeSourceRunIds(existing.get(row, RunIdCsv.SOURCE_RUN_ID_COLUMN),
+                    existing.get(row, RunIdCsv.RUN_ID_COLUMN));
+            sourceRunIds.add(sources);
+            hasSourceRunIds |= !sources.isEmpty();
+        }
         stripRunIdColumn(existing);
         List<String> dataColumns = RunIdCsv.withoutRunId(orderedColumns);
         for (String column : dataColumns) {
@@ -359,8 +368,29 @@ public final class CsvTableIO {
                 existing.set(row, column, resultsTableValue(table, column, row));
             }
         }
+        if (hasSourceRunIds) {
+            existing.addColumn(RunIdCsv.SOURCE_RUN_ID_COLUMN);
+            for (int row = 0; row < existing.rows.size(); row++) {
+                existing.set(row, RunIdCsv.SOURCE_RUN_ID_COLUMN, sourceRunIds.get(row));
+            }
+        }
         writeChannelCsvChecked(outFile, existing, runId);
         return true;
+    }
+
+    private static String mergeSourceRunIds(String previousSources, String previousRunId) {
+        LinkedHashSet<String> ids = new LinkedHashSet<String>();
+        String combined = (previousSources == null ? "" : previousSources)
+                + ";" + (previousRunId == null ? "" : previousRunId);
+        for (String value : combined.split(";")) {
+            if (!value.trim().isEmpty()) ids.add(value.trim());
+        }
+        StringBuilder result = new StringBuilder();
+        for (String id : ids) {
+            if (result.length() > 0) result.append(';');
+            result.append(id);
+        }
+        return result.toString();
     }
 
     /**
@@ -402,6 +432,10 @@ public final class CsvTableIO {
         if (existing == null) {
             return false;
         }
+        List<String> retainedRunIds = new ArrayList<String>();
+        for (int row = 0; row < existing.rows.size(); row++) {
+            retainedRunIds.add(existing.get(row, RunIdCsv.RUN_ID_COLUMN));
+        }
         stripRunIdColumn(existing);
         List<String> dataColumns = RunIdCsv.withoutRunId(orderedColumns);
         for (String column : dataColumns) {
@@ -409,10 +443,16 @@ public final class CsvTableIO {
                 existing.addColumn(column);
             }
         }
+        existing.addColumn(RunIdCsv.RUN_ID_COLUMN);
+        for (int row = 0; row < retainedRunIds.size(); row++) {
+            existing.set(row, RunIdCsv.RUN_ID_COLUMN, retainedRunIds.get(row));
+        }
         for (int row = 0; row < table.size(); row++) {
             List<String> values = new ArrayList<String>(existing.header.size());
             for (String column : existing.header) {
-                if (dataColumns.contains(column)) {
+                if (RunIdCsv.RUN_ID_COLUMN.equals(column)) {
+                    values.add(runId == null ? "" : runId);
+                } else if (dataColumns.contains(column)) {
                     values.add(resultsTableValue(table, column, row));
                 } else {
                     values.add("");
@@ -420,7 +460,7 @@ public final class CsvTableIO {
             }
             existing.rows.add(values);
         }
-        writeChannelCsvChecked(outFile, existing, runId);
+        writeChannelCsvChecked(outFile, existing);
         return true;
     }
 

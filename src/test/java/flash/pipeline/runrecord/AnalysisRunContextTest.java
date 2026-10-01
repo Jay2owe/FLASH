@@ -3,6 +3,7 @@ package flash.pipeline.runrecord;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import flash.pipeline.io.FlashProjectLayout;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -36,11 +37,16 @@ public class AnalysisRunContextTest {
     }
 
     @Test
-    public void openWritesNothingUntilClose() throws Exception {
+    public void openRetainsRunningCheckpointBeforeClose() throws Exception {
         AnalysisRunContext context = open(projectRoot());
-        assertFalse("record file must not exist before close", context.recordFile().exists());
+        assertTrue("record checkpoint must exist before execution", context.recordFile().exists());
+        RunRecord checkpoint = RunRecordIO.readLatest(context.recordFile());
+        assertEquals(RunRecord.STATUS_RUNNING, checkpoint.status);
+        assertEquals(0L, checkpoint.finishedAtMillis);
         context.close();
-        assertTrue("record file appears after close", context.recordFile().exists());
+        RunRecord completed = RunRecordIO.readLatest(context.recordFile());
+        assertEquals(RunRecord.STATUS_OK, completed.status);
+        assertTrue(completed.finishedAtMillis > 0L);
     }
 
     @Test
@@ -107,12 +113,39 @@ public class AnalysisRunContextTest {
     }
 
     @Test
+    public void missingInputFingerprintMarksStatusWarn() throws Exception {
+        AnalysisRunContext context = open(projectRoot());
+        context.recordInputStart(new File(temp.getRoot(), "missing-input.tif"), 0, null);
+        context.close();
+
+        RunRecord record = RunRecordIO.readLatest(context.recordFile());
+        assertEquals("warn", record.status);
+        assertEquals("", record.inputs.get(0).fingerprint);
+        assertTrue(record.messages.stream().anyMatch(m -> "warn".equals(m.level)));
+    }
+
+    @Test
+    public void missingOutputFingerprintMarksStatusWarnWithoutMaskingFailure() throws Exception {
+        File root = projectRoot();
+        AnalysisRunContext context = open(root);
+        context.recordOutput(new File(temp.getRoot(), "missing-output.csv"), "csv");
+        context.close();
+        assertEquals("warn", RunRecordIO.readLatest(context.recordFile()).status);
+
+        AnalysisRunContext failed = open(root);
+        failed.error("measurement failed", new RuntimeException("measurement failed"));
+        failed.recordOutput(new File(temp.getRoot(), "missing-failed-output.csv"), "csv");
+        failed.close();
+        assertEquals("failed", RunRecordIO.readLatest(failed.recordFile()).status);
+    }
+
+    @Test
     public void closeIsIdempotent() throws Exception {
         AnalysisRunContext context = open(projectRoot());
         context.close();
         context.close();
         assertEquals("second close must not append a second snapshot",
-                1, RunRecordIO.readSnapshots(context.recordFile()).size());
+                2, RunRecordIO.readSnapshots(context.recordFile()).size());
     }
 
     @Test
@@ -188,5 +221,64 @@ public class AnalysisRunContextTest {
         RunRecord record = RunRecordIO.readLatest(context.recordFile());
         assertFalse("parameters recorded after close must be ignored",
                 record.parameters.containsKey("late"));
+    }
+
+    @Test
+    public void checkpointAtInputStartIncludesConfirmedSettingsAndConfiguration() throws Exception {
+        File root = projectRoot();
+        AnalysisRunContext context = open(root);
+        File config = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath())
+                .configurationWriteDir(), "channel-settings.json");
+        Files.createDirectories(config.getParentFile().toPath());
+        Files.write(config.toPath(), "settings chosen during setup".getBytes(StandardCharsets.UTF_8));
+        Map<String, Object> chosen = new LinkedHashMap<String, Object>();
+        chosen.put("minimumSize", 25);
+        context.recordParameters(chosen);
+        AnalysisRunContext.InputHandle input = context.recordInputStart(realFile("setup.tif"), 1, null);
+
+        RunRecord checkpoint = RunRecordIO.readLatest(context.recordFile());
+        assertEquals(RunRecord.STATUS_RUNNING, checkpoint.status);
+        assertEquals(25, ((Number) checkpoint.parameters.get("minimumSize")).intValue());
+        assertEquals(ConfigurationSnapshot.capture(root), checkpoint.extras.get(ConfigurationSnapshot.EXTRA_KEY));
+        assertEquals(1, checkpoint.inputs.size());
+        context.recordInputEnd(input, "processed", 50);
+        assertEquals("processed", RunRecordIO.readLatest(context.recordFile()).inputs.get(0).status);
+        context.close();
+    }
+
+    @Test
+    public void outputCheckpointSurvivesBeforeTerminalCloseAndCapturesNoInputConfiguration() throws Exception {
+        File root = projectRoot();
+        AnalysisRunContext context = open(root);
+        context.recordOutput(realFile("interrupted.csv"), "csv");
+        RunRecord checkpoint = RunRecordIO.readLatest(context.recordFile());
+        assertEquals(RunRecord.STATUS_RUNNING, checkpoint.status);
+        assertEquals(1, checkpoint.outputs.size());
+        assertEquals(ConfigurationSnapshot.capture(root), checkpoint.extras.get(ConfigurationSnapshot.EXTRA_KEY));
+        context.close();
+    }
+
+    @Test
+    public void noInputRunStillCapturesConfigurationAtClose() throws Exception {
+        File root = projectRoot();
+        AnalysisRunContext context = open(root);
+        context.close();
+        assertEquals(ConfigurationSnapshot.capture(root), RunRecordIO.readLatest(context.recordFile())
+                .extras.get(ConfigurationSnapshot.EXTRA_KEY));
+    }
+
+    @Test
+    public void discardRemovesOnlyItsOwnRunningRecord() throws Exception {
+        File root = projectRoot();
+        AnalysisRunContext retained = open(root);
+        retained.close();
+        AnalysisRunContext cancelled = open(root);
+        File cancelledRecord = cancelled.recordFile();
+        cancelled.discard();
+        cancelled.discard();
+        cancelled.close();
+        assertFalse(cancelledRecord.exists());
+        assertTrue(retained.recordFile().isFile());
+        assertEquals(RunRecord.STATUS_OK, RunRecordIO.readLatest(retained.recordFile()).status);
     }
 }

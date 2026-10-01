@@ -2,6 +2,9 @@ package flash.pipeline.io;
 
 import ij.IJ;
 import ij.ImagePlus;
+import flash.pipeline.intensity.spatial.CalibrationUtil;
+import ome.units.UNITS;
+import ome.units.quantity.Length;
 import loci.common.services.ServiceFactory;
 import loci.formats.meta.IMetadata;
 import loci.formats.services.OMEXMLService;
@@ -53,6 +56,9 @@ public class OmeTiffIO {
         if (bitDepth != 8 && bitDepth != 16) {
             throw new IllegalArgumentException("Only 8-bit and 16-bit supported; got bitDepth=" + bitDepth);
         }
+        if ((long) cSize * zSize * tSize != imp.getStackSize()) {
+            throw new IllegalArgumentException("Image channel/depth/time dimensions do not match its plane count.");
+        }
 
         // Build OME-XML metadata
         ServiceFactory sf = new ServiceFactory();
@@ -72,6 +78,16 @@ public class OmeTiffIO {
         meta.setPixelsSizeT(new ome.xml.model.primitives.PositiveInteger(tSize), 0);
         meta.setPixelsType(bitDepth == 8 ? ome.xml.model.enums.PixelType.UINT8 : ome.xml.model.enums.PixelType.UINT16, 0);
         meta.setPixelsBigEndian(Boolean.FALSE, 0);
+        CalibrationUtil.CanonicalCalibration calibration = CalibrationUtil.canonicalize(imp);
+        if (calibration.x().hasMicrons()) {
+            meta.setPixelsPhysicalSizeX(new Length(calibration.x().microns(), UNITS.MICROMETER), 0);
+        }
+        if (calibration.y().hasMicrons()) {
+            meta.setPixelsPhysicalSizeY(new Length(calibration.y().microns(), UNITS.MICROMETER), 0);
+        }
+        if (calibration.z().hasMicrons()) {
+            meta.setPixelsPhysicalSizeZ(new Length(calibration.z().microns(), UNITS.MICROMETER), 0);
+        }
 
         // Channels
         for (int c = 0; c < cSize; c++) {
@@ -91,9 +107,10 @@ public class OmeTiffIO {
         // TiffData + Plane entries (some Bio-Formats versions/readers require these)
         int planeCount = zSize * cSize * tSize;
         for (int p = 0; p < planeCount; p++) {
-            int theZ = p / (cSize * tSize);
-            int theC = (p / tSize) % cSize;
-            int theT = p % tSize;
+            // XYCZT: channels vary fastest, followed by depth, then time.
+            int theC = p % cSize;
+            int theZ = (p / cSize) % zSize;
+            int theT = p / (cSize * zSize);
 
             meta.setPlaneTheZ(new ome.xml.model.primitives.NonNegativeInteger(theZ), 0, p);
             meta.setPlaneTheC(new ome.xml.model.primitives.NonNegativeInteger(theC), 0, p);
@@ -108,8 +125,7 @@ public class OmeTiffIO {
         }
 
         // Write
-        OMETiffWriter writer = new OMETiffWriter();
-        try {
+        try (OMETiffWriter writer = new OMETiffWriter()) {
             writer.setMetadataRetrieve(meta);
             writer.setCompression("LZW");
             writer.setId(outFile.getAbsolutePath());
@@ -124,15 +140,10 @@ public class OmeTiffIO {
                         Object pixels = imp.getStack().getPixels(stackIndex);
                         byte[] plane = toBytes(pixels, bitDepth, planeBytes);
 
-                        int planeIndex = z * cSize * tSize + c * tSize + t;
+                        int planeIndex = (t * zSize + z) * cSize + c;
                         writer.saveBytes(planeIndex, plane);
                     }
                 }
-            }
-        } finally {
-            try {
-                writer.close();
-            } catch (Exception ignored) {
             }
         }
 
@@ -142,48 +153,39 @@ public class OmeTiffIO {
     private static byte[] toBytes(Object pixels, int bitDepth, int planeBytes) {
         if (bitDepth == 8) {
             // ImageJ uses byte[]
-            if (pixels instanceof byte[]) return (byte[]) pixels;
-            // fallback copy
-            byte[] out = new byte[planeBytes];
-            if (pixels instanceof short[]) {
-                short[] s = (short[]) pixels;
-                for (int i = 0; i < s.length && i < out.length; i++) out[i] = (byte) (s[i] & 0xff);
+            if (!(pixels instanceof byte[]) || ((byte[]) pixels).length != planeBytes) {
+                throw new IllegalArgumentException("8-bit image plane has incompatible pixels or dimensions.");
             }
-            return out;
+            return (byte[]) pixels;
         } else {
-            // 16-bit: ImageJ uses short[] little-endian in memory; OME expects bytes
-            if (pixels instanceof short[]) {
-                short[] s = (short[]) pixels;
-                ByteBuffer bb = ByteBuffer.allocate(planeBytes).order(ByteOrder.LITTLE_ENDIAN);
-                for (short value : s) bb.putShort(value);
-                return bb.array();
+            if (!(pixels instanceof short[]) || ((short[]) pixels).length != planeBytes / 2) {
+                throw new IllegalArgumentException("16-bit image plane has incompatible pixels or dimensions.");
             }
-            // fallback
-            byte[] out = new byte[planeBytes];
-            if (pixels instanceof byte[]) {
-                System.arraycopy(pixels, 0, out, 0, Math.min(((byte[]) pixels).length, out.length));
-            }
-            return out;
+            // 16-bit samples are unsigned; write their exact little-endian bit patterns.
+            short[] s = (short[]) pixels;
+            ByteBuffer bb = ByteBuffer.allocate(planeBytes).order(ByteOrder.LITTLE_ENDIAN);
+            for (short value : s) bb.putShort(value);
+            return bb.array();
         }
     }
 
     private static Color toOmeColor(String name) {
         if (name == null) return null;
         String c = name.trim().toLowerCase(Locale.ROOT);
-        // OME Color is ARGB (0..255)
+        // OME Color constructor accepts red, green, blue, alpha (0..255).
         switch (c) {
             case "red":
-                return new Color(255, 255, 0, 0);
-            case "green":
-                return new Color(255, 0, 255, 0);
-            case "blue":
                 return new Color(255, 0, 0, 255);
+            case "green":
+                return new Color(0, 255, 0, 255);
+            case "blue":
+                return new Color(0, 0, 255, 255);
             case "cyan":
-                return new Color(255, 0, 255, 255);
+                return new Color(0, 255, 255, 255);
             case "magenta":
-                return new Color(255, 255, 0, 255);
+                return new Color(255, 0, 255, 255);
             case "yellow":
-                return new Color(255, 255, 255, 0);
+                return new Color(255, 255, 0, 255);
             case "grey":
             case "gray":
             case "grays":

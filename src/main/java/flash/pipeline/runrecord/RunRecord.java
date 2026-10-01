@@ -22,6 +22,7 @@ public final class RunRecord {
     public static final String STATUS_OK = "ok";
     public static final String STATUS_WARN = "warn";
     public static final String STATUS_FAILED = "failed";
+    public static final String STATUS_RUNNING = "running";
 
     public int schemaVersion = SCHEMA_VERSION;
     public String runId = "";

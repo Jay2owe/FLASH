@@ -451,7 +451,13 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
     }
 
     private static double[] solveAndSanitize(double[][] matrix, double[] rhs) {
-        double[] coefficients = GlobalRatioCorrectionFeature.solveLeastSquares(matrix, rhs);
+        double[] coefficients = new double[rhs.length];
+        if (!solveLeastSquares(matrix, rhs, coefficients,
+                new double[rhs.length][rhs.length], new double[rhs.length])) {
+            throw new IllegalArgumentException("Full forward model could not identify independent "
+                    + "contaminant coefficients: the global fit is singular or ill-conditioned. "
+                    + "Select independent contaminant channels before correction.");
+        }
         for (int i = 0; i < coefficients.length; i++) {
             coefficients[i] = GlobalRatioCorrectionFeature.sanitizeCoefficient(coefficients[i]);
         }
@@ -961,7 +967,7 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
                 }
             }
             if (Math.abs(workMatrix[bestRow][pivot]) <= pivotTolerance) {
-                return diagonalFallback(matrix, rhs, output);
+                return false;
             }
             if (bestRow != pivot) {
                 double[] tempRow = workMatrix[pivot];
@@ -985,7 +991,7 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
 
         for (int row = n - 1; row >= 0; row--) {
             if (Math.abs(workMatrix[row][row]) <= pivotTolerance) {
-                return diagonalFallback(matrix, rhs, output);
+                return false;
             }
             double sum = workRhs[row];
             for (int col = row + 1; col < n; col++) {
@@ -994,20 +1000,6 @@ public class FullForwardModelFeature implements CorrectionPipeline.ExecutableFea
             output[row] = sum / workMatrix[row][row];
         }
         return true;
-    }
-
-    private static boolean diagonalFallback(double[][] matrix, double[] rhs, double[] output) {
-        boolean informative = false;
-        for (int i = 0; i < rhs.length; i++) {
-            double diagonal = matrix[i][i];
-            if (Math.abs(diagonal) <= PIVOT_ABSOLUTE_TOLERANCE) {
-                output[i] = 0.0;
-            } else {
-                output[i] = rhs[i] / diagonal;
-                informative = true;
-            }
-        }
-        return informative;
     }
 
     private static double pivotTolerance(double[][] matrix) {

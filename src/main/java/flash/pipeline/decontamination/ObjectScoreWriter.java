@@ -7,7 +7,6 @@ import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.results.RunIdCsv;
 import ij.ImagePlus;
-import ij.io.FileSaver;
 
 import java.io.File;
 import java.io.IOException;
@@ -133,17 +132,7 @@ public final class ObjectScoreWriter {
         if (outputFile == null) {
             throw new IllegalArgumentException("Output file is required.");
         }
-        File parent = outputFile.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
-            throw new IOException("Could not create " + parent.getAbsolutePath());
-        }
-        FileSaver saver = new FileSaver(image);
-        boolean saved = image.getStackSize() > 1
-                ? saver.saveAsTiffStack(outputFile.getAbsolutePath())
-                : saver.saveAsTiff(outputFile.getAbsolutePath());
-        if (!saved) {
-            throw new IOException("Could not save image to " + outputFile.getAbsolutePath());
-        }
+        SpectralOutputWriter.saveImage(image, outputFile);
     }
 
     public static List<Map<String, String>> buildRows(String directory,
@@ -274,6 +263,7 @@ public final class ObjectScoreWriter {
                 row.putAll(existing);
             }
             row.put("RunAction", clean(runAction));
+            SpectralOutputWriter.preserveSourceRunId(row);
             rows.add(row);
         }
         return rows;
@@ -461,7 +451,12 @@ public final class ObjectScoreWriter {
 
         List<Map<String, String>> sortedRows = new ArrayList<Map<String, String>>();
         if (rows != null) {
-            sortedRows.addAll(rows);
+            for (Map<String, String> row : rows) {
+                Map<String, String> copy = new LinkedHashMap<String, String>();
+                if (row != null) copy.putAll(row);
+                SpectralOutputWriter.preserveSourceRunId(copy);
+                sortedRows.add(copy);
+            }
         }
         if (comparator != null) {
             Collections.sort(sortedRows, comparator);

@@ -851,6 +851,9 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         }
 
         CalibrationIO.PixelCalibration cal = CalibrationIO.read(objectsDir);
+        // Spatial columns and bandwidths are expressed in microns. Retain the
+        // persisted source calibration on disk, convert this execution's copy.
+        cal = canonicalSpatialCalibration(cal);
         if (cal != null && cal.isCalibrated()) {
             IJ.log("Using calibration: " + cal.pixelWidth + " x " + cal.pixelHeight
                     + " x " + cal.pixelDepth + " " + cal.unit + "/pixel");
@@ -2655,7 +2658,8 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     }
 
     private void appendCalibratedCentroids(Map<String, ChannelData> channels,
-                                           CalibrationIO.PixelCalibration cal) {
+                                            CalibrationIO.PixelCalibration cal) {
+        cal = canonicalSpatialCalibration(cal);
         if (cal == null || !cal.isCalibrated()) return;
 
         for (ChannelData cd : channels.values()) {
@@ -3241,14 +3245,23 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         if (cal == null || !cal.isCalibrated()) return -1.0;
         switch (axis) {
             case 'x':
-                return cal.pixelWidth;
+                return cal.canonical().x().microns();
             case 'y':
-                return cal.pixelHeight;
+                return cal.canonical().y().microns();
             case 'z':
-                return cal.pixelDepth;
+                return cal.canonical().z().microns();
             default:
                 return -1.0;
         }
+    }
+
+    private static CalibrationIO.PixelCalibration canonicalSpatialCalibration(
+            CalibrationIO.PixelCalibration calibration) {
+        if (calibration == null || !calibration.isCalibrated()) return calibration;
+        return new CalibrationIO.PixelCalibration(
+                calibration.canonical().x().microns(),
+                calibration.canonical().y().microns(),
+                calibration.canonical().z().microns(), "micron");
     }
 
     private String formatStat(double value) {
@@ -4989,15 +5002,17 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                       LabelImageProvider provider) {
         setSpatialProgressPhase("density heatmaps");
         logArtifactRunPlan("Density heatmaps", SubAnalysis.DENSITY_HEATMAPS);
-        if (cal == null || !cal.isCalibrated()) {
+        if (cal == null || !cal.canonical().x().hasMicrons()
+                || !cal.canonical().y().hasMicrons()) {
             IJ.log("  Heatmaps require calibration metadata. Skipping.");
+            recordWarn("Density heatmaps skipped: physical X/Y calibration is required.");
             return;
         }
 
         // Determine image dimensions from the first available label image
         int imgWidth = 0;
         int imgHeight = 0;
-        double pixelSize = cal.pixelWidth;
+        double pixelSize = cal.canonical().x().microns();
 
         LabelImageDimensions dimensions = probeFirstLabelDimensions(directory, channels, provider);
         if (dimensions != null) {
@@ -5046,7 +5061,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 }
 
                 ImagePlus heatmap = DensityHeatmapGenerator.generate(
-                        pixelPts, imgWidth, imgHeight, pixelSize, bandwidth);
+                        pixelPts, imgWidth, imgHeight, pixelSize, cal.canonical().y().microns(), bandwidth);
                 if (heatmap == null) {
                     skipSpatialProgress("Density heatmap " + channelName + " " + section
                             + " skipped (generation returned no image)");
@@ -5122,7 +5137,14 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
             return;
         }
 
-        double pixelSize = (cal != null && cal.isCalibrated()) ? cal.pixelWidth : 1.0;
+        if (cal == null || !cal.canonical().x().hasMicrons()
+                || !cal.canonical().y().hasMicrons()) {
+            recordWarn("2D morphology skipped: physical X/Y calibration is required for micron columns.");
+            IJ.log("  2D morphology requires physical X/Y calibration. Skipping.");
+            return;
+        }
+        double pixelSize = cal.canonical().x().microns();
+        double pixelHeight = cal.canonical().y().microns();
 
         File morphDir = spatialMorphometryOutputDir(directory);
         try {
@@ -5196,7 +5218,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                 try {
                     updateSpatialProgress("extracting shape features");
                     List<MorphologyExtractor.ObjectMorphology> morphList =
-                            MorphologyExtractor.extract(labelImg, pixelSize);
+                            MorphologyExtractor.extract(labelImg, pixelSize, pixelHeight);
 
                     // Build label → morphology lookup
                     Map<Integer, MorphologyExtractor.ObjectMorphology> morphMap =
@@ -5316,6 +5338,12 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                                   LabelImageProvider provider) {
         setSpatialProgressPhase("3D morphometry");
         logArtifactRunPlan("3D shape features", SubAnalysis.SHAPE_FEATURES_3D);
+        if (!supportsPhysical3DMorphometry(cal)) {
+            String message = "3D shape features skipped: valid physical XYZ calibration with equal X/Y spacing is required by the mcib3d shape measurements.";
+            IJ.log(message);
+            recordWarn(message);
+            return;
+        }
         File imageAnalysisRoot = objectImageOutputReadRoot(directory);
         if (!imageAnalysisRoot.isDirectory()) {
             IJ.log("  Object image-output directory not found. Cannot extract 3D morphometry.");
@@ -6536,6 +6564,13 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
         } catch (NumberFormatException e) {
             return fallback;
         }
+    }
+
+    static boolean supportsPhysical3DMorphometry(CalibrationIO.PixelCalibration cal) {
+        if (cal == null || !cal.isCalibrated()) return false;
+        double x = cal.canonical().x().microns();
+        double y = cal.canonical().y().microns();
+        return Math.abs(x - y) <= Math.max(x, y) * 1e-12;
     }
 
     /** Find the Volume column by checking common naming patterns. */

@@ -55,6 +55,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
@@ -1280,25 +1281,15 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         boolean needsCorrectedImage = pipelineResult.hasInput(CorrectionFeature.InputType.CORRECTED_IMAGE);
         boolean needsMaskImage = pipelineResult.hasInput(CorrectionFeature.InputType.MASK);
 
-        Map<Integer, Map<String, String>> existingSummaryRows =
-                new LinkedHashMap<Integer, Map<String, String>>();
-        Map<Integer, List<Map<String, String>>> existingCoefficientRows =
-                new LinkedHashMap<Integer, List<Map<String, String>>>();
-        Map<Integer, List<Map<String, String>>> existingObjectRows =
-                new LinkedHashMap<Integer, List<Map<String, String>>>();
         if (skipExisting) {
-            try {
-                existingSummaryRows = SpectralOutputWriter.readPerImageSummaryRows(directory);
-                existingCoefficientRows = SpectralOutputWriter.readCoefficientRows(directory);
-                if (objectScoringGoal) {
-                    existingObjectRows = ObjectScoreWriter.readObjectRowsBySeriesIndex(directory);
-                }
-            } catch (IOException e) {
-                String message = "Could not reuse prior CSV rows for Skip Existing. "
-                        + e.getMessage();
-                IJ.log("Spectral Decontamination: " + message);
-                recordWarn(message);
-            }
+            // The legacy summaries identify a configuration and series index, but do not bind
+            // source bytes, producer code or output content. Even an identical config cannot
+            // establish that these files are the requested scientific result. Recompute until
+            // a complete verified reuse manifest exists instead of relabeling old results.
+            String message = "Skip Existing cannot verify Spectral Decontamination provenance "
+                    + "from legacy summaries; recomputing all series.";
+            IJ.log("Spectral Decontamination: " + message);
+            recordWarn(message);
         }
 
         LinkedHashMap<Integer, SpectralPreviewSelector.PreviewCandidate> candidateBySeries =
@@ -1327,35 +1318,6 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                 candidateBySeries.put(Integer.valueOf(meta.index), candidate);
             }
 
-            SpectralOutputWriter.ExpectedOutputs expectedOutputs =
-                    SpectralOutputWriter.expectedOutputs(directory, meta.index, candidate.seriesName, targetChannelName);
-            Integer seriesKey = Integer.valueOf(meta.index);
-            boolean outputsExist = SpectralOutputWriter.expectedOutputsExist(
-                    expectedOutputs, needsCorrectedImage, needsMaskImage);
-            if (objectScoringGoal) {
-                outputsExist = outputsExist && ObjectScoreWriter.objectRowsReusable(
-                        directory,
-                        existingObjectRows.get(seriesKey));
-            }
-            boolean canReuseExisting =
-                    skipExisting
-                            && outputsExist
-                            && existingSummaryRows.containsKey(seriesKey);
-            if (canReuseExisting) {
-                summaryRows.add(SpectralOutputWriter.copySummaryRow(
-                        existingSummaryRows.get(seriesKey),
-                        "skipped_existing",
-                        "Output files already existed."));
-                coefficientRows.addAll(SpectralOutputWriter.copyCoefficientRows(
-                        existingCoefficientRows.get(seriesKey),
-                        "skipped_existing"));
-                objectScoreRows.addAll(ObjectScoreWriter.copyObjectRows(
-                        existingObjectRows.get(seriesKey),
-                        "skipped_existing"));
-                batchResult.skippedCount++;
-                continue;
-            }
-
             seriesToProcess.add(Integer.valueOf(meta.index));
         }
 
@@ -1366,6 +1328,7 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         List<ImagePlus> cachedImages = null;
         DeferredImageSupplier supplier = null;
         boolean useSharedCache = imageCache != null && parallelThreads <= 1 && !seriesToProcess.isEmpty();
+        AtomicBoolean interruptedWhileWaiting = new AtomicBoolean(false);
         try {
             if (useSharedCache) {
                 cachedImages = imageCache.getImages(directory);
@@ -1417,12 +1380,14 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                     }
                     for (Future<ProcessedSeriesResult> future : futures) {
                         try {
+                            ProcessedSeriesResult completedResult =
+                                    awaitOwnedWorker(future, interruptedWhileWaiting);
                             mergeProcessedResult(
                                     batchResult,
                                     summaryRows,
                                      coefficientRows,
                                      objectScoreRows,
-                                     future.get());
+                                     completedResult);
                         } catch (Exception e) {
                             batchResult.failedCount++;
                             String message = "Spectral Decontamination worker failure: " + e.getMessage();
@@ -1458,6 +1423,11 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
         } finally {
             if (supplier != null) {
                 supplier.shutdownPrefetch();
+            }
+            if (interruptedWhileWaiting.get()) {
+                batchResult.message = "Spectral batch was interrupted while waiting for workers; "
+                        + "already submitted series were drained before finalizing outputs.";
+                recordError(batchResult.message, new InterruptedException(batchResult.message));
             }
         }
 
@@ -1527,7 +1497,9 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                         summaryRows,
                         renderedPreviews);
             }
-            batchResult.success = batchResult.failedCount == 0;
+            batchResult.success = batchResult.message.isEmpty()
+                    && batchResult.failedCount == 0
+                    && batchResult.processedCount + batchResult.skippedCount == batchResult.totalImages;
         } catch (IOException e) {
             batchResult.message = "Failed writing Spectral Decontamination outputs: " + e.getMessage();
             batchResult.success = false;
@@ -1544,7 +1516,21 @@ public class SpectralDecontaminationAnalysis implements Analysis, RunRecordAware
                 + ", cleaned object maps=" + batchResult.cleanedObjectMapCount
                 + ", objects kept=" + batchResult.objectsKeptCount
                 + ", objects removed=" + batchResult.objectsRejectedCount);
+        if (interruptedWhileWaiting.get()) Thread.currentThread().interrupt();
         return batchResult;
+    }
+
+    private static <T> T awaitOwnedWorker(Future<T> future, AtomicBoolean interrupted)
+            throws java.util.concurrent.ExecutionException {
+        while (true) {
+            try {
+                return future.get();
+            } catch (InterruptedException interruption) {
+                // Keep the cleared flag until all worker outputs and final summaries
+                // are complete; restore it before returning the batch result.
+                interrupted.set(true);
+            }
+        }
     }
 
     private ProcessedSeriesResult processSeries(String directory,

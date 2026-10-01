@@ -2391,10 +2391,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                     filterMacroOrPath = macroFile.getAbsolutePath();
                     isMacroFile = true;
                 } else {
-                    if (!compactLog) IJ.log("    - ROI mask: WARN " + macroFile.getName()
-                            + " missing; falling back to basic filter");
-                    filterMacroOrPath = basicFilterMacro;
-                    isMacroFile = false;
+                    throw new IllegalStateException("Requested ROI mask filter is missing: "
+                            + macroFile.getAbsolutePath());
                 }
             } else {
                 filterMacroOrPath = basicFilterMacro;
@@ -2450,6 +2448,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                         channelFutures.add(channelPool.submit(new Runnable() {
                             @Override
                             public void run() {
+                                ParallelContext.enterParallel();
+                                try {
                                 processOneChannel(c, channelCount, chans, channelNames,
                                         binarization, thresholds,
                                         cfg, filterSources, binDir, basicFilterMacro,
@@ -2462,6 +2462,9 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                                         allBaseSpatialResults, allMipSpatialResults, allNativeSpatialResults,
                                         allRawSpatialImages, allBinarizedSpatialImages,
                                         allBinarySpatialMasks);
+                                } finally {
+                                    ParallelContext.exitParallel();
+                                }
                             }
                         }));
                     }
@@ -2482,7 +2485,22 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                         }
                     }
                 } finally {
-                    channelPool.shutdown();
+                    for (Future<?> future : channelFutures) {
+                        if (!future.isDone()) future.cancel(true);
+                    }
+                    channelPool.shutdownNow();
+                    boolean interrupted = Thread.interrupted();
+                    try {
+                        while (!channelPool.isTerminated()) {
+                            try {
+                                channelPool.awaitTermination(100, TimeUnit.MILLISECONDS);
+                            } catch (InterruptedException e) {
+                                interrupted = true;
+                            }
+                        }
+                    } finally {
+                        if (interrupted) Thread.currentThread().interrupt();
+                    }
                 }
 
                 if (!channelFailures.isEmpty()) {
@@ -2627,7 +2645,7 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
         filteredMeasurement = filtered;
 
         // Per-channel filter dispatch:
-        //   "Bin filter"  -> load saved Cn_Filters.ijm, fall back to basic if missing
+        //   "Bin filter"  -> load required saved Cn_Filters.ijm
         //   "Basic ..."   → run basic intensity filter macro
         boolean useBinFilter = filterSources != null
                 && c < filterSources.length
@@ -2639,10 +2657,8 @@ public class IntensityAnalysisV2 implements Analysis, RunRecordAware {
                 FilterExecutor.runIjmFileThreadSafe(filtered, macroFile);
                 if (!compactLog) IJ.log("    - Filter applied: " + savedFilterChoiceLabel(c, cfg));
             } else {
-                if (!compactLog) IJ.log("    - WARN: " + macroFile.getName()
-                        + " missing; falling back to basic filter");
-                FilterExecutor.runThreadSafe(filtered, basicFilterMacro);
-                if (!compactLog) IJ.log("    - Basic background and noise removal applied");
+                throw new IllegalStateException("Requested intensity filter is missing: "
+                        + macroFile.getAbsolutePath());
             }
         } else {
             FilterExecutor.runThreadSafe(filtered, basicFilterMacro);

@@ -72,8 +72,8 @@ public class BasicCorrectionFeaturesTest {
         assertEquals("2", state.getFeatureSummaries().get(0).getValues().get("fit_pixel_count"));
     }
 
-    @Test
-    public void linearUnmixingFittedWeightsFallbackForIllConditionedContaminants() {
+    @Test(expected = IllegalArgumentException.class)
+    public void linearUnmixingRejectsIllConditionedContaminants() {
         ImagePlus source = multiChannelImage(2, 1,
                 new int[]{100, 0},
                 new int[]{10000, 10000},
@@ -92,13 +92,25 @@ public class BasicCorrectionFeaturesTest {
                         .toPipelineSettings());
 
         pipeline.execute(registry, state);
+    }
 
-        double firstWeight = Double.parseDouble(
-                state.getFeatureSummaries().get(0).getValues().get("weight_channel_2"));
-        double secondWeight = Double.parseDouble(
-                state.getFeatureSummaries().get(0).getValues().get("weight_channel_3"));
-        assertTrue("ill-conditioned fit should not emit a huge first weight", firstWeight < 1.0);
-        assertTrue("ill-conditioned fit should not emit a huge second weight", secondWeight < 1.0);
+    @Test
+    public void duplicateContaminantChannelsCannotSilentlyDoubleSubtraction() {
+        ImagePlus source = multiChannelImage(2, 2,
+                new int[]{50, 50, 100, 120},
+                new int[]{100, 100, 50, 50},
+                new int[]{100, 100, 50, 50});
+        SpectralDecontaminationConfig config = baseConfig();
+        config.setBleedThroughChannelIndexes(Arrays.asList(1, 2));
+        CorrectionPipeline.ExecutionState state = CorrectionPipeline.ExecutionState.create(source, config);
+        try {
+            new LinearUnmixingFeature().apply(state);
+            org.junit.Assert.fail("Dependent channels must not publish an over-subtracted image");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("calibrated manual weights"));
+            org.junit.Assert.assertNull(state.getCorrectedImage());
+            assertTrue(state.getFeatureSummaries().isEmpty());
+        }
     }
 
     @Test

@@ -1,6 +1,7 @@
 package flash.pipeline.ui.preview;
 
 import flash.pipeline.click.ClickStore;
+import flash.pipeline.click.SegmentationFingerprint;
 import flash.pipeline.click.ClicksConfigIO;
 import ij.IJ;
 import ij.ImagePlus;
@@ -1885,6 +1886,13 @@ public final class PreviewPairPanel extends JPanel {
         if (clear) {
             clickStore.clearForObject(clickImageName, clickChannelOneBased, label);
         } else {
+            ImagePlus labels = objectTrueLabelMap != null
+                    ? objectTrueLabelMap : largePreviewThirdImage;
+            String fingerprint = SegmentationFingerprint.of(labels);
+            if (fingerprint.isEmpty()) {
+                IJ.log("[FLASH] Cannot capture object selection without the original label map.");
+                return;
+            }
             ClickStore.Verdict verdict = positive
                     ? ClickStore.Verdict.POSITIVE
                     : ClickStore.Verdict.NEGATIVE;
@@ -1896,7 +1904,7 @@ public final class PreviewPairPanel extends JPanel {
                     x,
                     y,
                     verdict,
-                    System.currentTimeMillis()));
+                    System.currentTimeMillis(), fingerprint));
         }
         scheduleClickWrite(markClickWriteNeeded());
         applyClickOverlayMarkers();

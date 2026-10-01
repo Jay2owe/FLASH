@@ -61,7 +61,7 @@ public class CellposeDatasetPackagerTest {
         store.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
         store.add(click("Image1", 2, 2, ClickStore.Verdict.NEGATIVE));
 
-        CellposeDatasetPackager.PackagingResult result = new CellposeDatasetPackager().packageDataset(
+        CellposeDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(
                 root, "negative", 2, store,
                 provider("Image1", rawStack(3, 2, 1)),
                 provider("Image1", labelStack(3, 2, new int[][][] {
@@ -101,6 +101,12 @@ public class CellposeDatasetPackagerTest {
         Path commandPath = result.outputDir.resolve("train_command.txt");
         assertTrue(Files.isRegularFile(metadataPath));
         assertTrue(Files.isRegularFile(commandPath));
+        Map<String, Object> selections = JsonIO.parseObject(text(result.outputDir.resolve(
+                flash.pipeline.click.training.TrainingSelectionSnapshot.FILE_NAME)));
+        assertEquals(2, JsonIO.asList(selections.get("clicks")).size());
+        assertEquals(64, JsonIO.stringValue(JsonIO.asObject(
+                JsonIO.asList(selections.get("clicks")).get(0))
+                .get("segmentationFingerprint")).length());
 
         String command = text(commandPath).trim();
         assertTrue(command.startsWith("python -m cellpose --train --dir \""));
@@ -145,7 +151,7 @@ public class CellposeDatasetPackagerTest {
         ClickStore store = new ClickStore();
         store.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
 
-        CellposeDatasetPackager.PackagingResult result = new CellposeDatasetPackager().packageDataset(
+        CellposeDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(
                 root, "per-z", 2, store,
                 provider("Image1", rawStack(2, 2, 3)),
                 provider("Image1", labelStack(2, 2, new int[][][] {
@@ -185,7 +191,7 @@ public class CellposeDatasetPackagerTest {
         ClickStore channelTwoStore = new ClickStore();
         channelTwoStore.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
         CellposeDatasetPackager.PackagingResult channelTwoResult =
-                new CellposeDatasetPackager().packageDataset(
+                flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(
                         root, "channel-two", 2, channelTwoStore,
                         provider("Image1", raw),
                         provider("Image1", labels),
@@ -195,7 +201,7 @@ public class CellposeDatasetPackagerTest {
         ClickStore channelOneStore = new ClickStore();
         channelOneStore.add(click("Image1", 1, 1, ClickStore.Verdict.POSITIVE));
         CellposeDatasetPackager.PackagingResult channelOneResult =
-                new CellposeDatasetPackager().packageDataset(
+                flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(
                         root, "channel-one", 1, channelOneStore,
                         provider("Image1", raw),
                         provider("Image1", labels),
@@ -221,7 +227,7 @@ public class CellposeDatasetPackagerTest {
                 .trainingDatasetsRoot().toPath().resolve("Cellpose");
 
         try {
-            new CellposeDatasetPackager().packageDataset(root, "timed", 1, store,
+            flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(root, "timed", 1, store,
                     provider("Timed", raw), provider("Timed", labels), "cyto3");
             fail("Expected T=2 training geometry rejection.");
         } catch (IOException expected) {
@@ -248,7 +254,7 @@ public class CellposeDatasetPackagerTest {
                 .trainingDatasetsRoot().toPath().resolve("Cellpose");
 
         try {
-            new CellposeDatasetPackager().packageDataset(root, "multi-label", 1, store,
+            flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(root, "multi-label", 1, store,
                     provider("MultiLabel", rawStack(2, 1, 1)),
                     provider("MultiLabel", labels), "cyto3");
             fail("Expected C=2 label geometry rejection.");
@@ -275,7 +281,7 @@ public class CellposeDatasetPackagerTest {
         store.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
 
         try {
-            new CellposeDatasetPackager().packageDataset(
+            flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(
                     root, "atomic", 2, store,
                     provider("Image1", rawStack(2, 2, 1)),
                     new ImagePlusProvider() {
@@ -304,8 +310,7 @@ public class CellposeDatasetPackagerTest {
             store.add(click("Wide", 1, label, ClickStore.Verdict.POSITIVE));
         }
 
-        CellposeDatasetPackager.PackagingResult result = new CellposeDatasetPackager()
-                .packageDataset(root, "wide", 1, store,
+        CellposeDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(root, "wide", 1, store,
                         provider("Wide", rawStack(3, 1, 1)),
                         provider("Wide", wideLabelImage("wide-labels", oracle)),
                         "cyto3");
@@ -344,7 +349,7 @@ public class CellposeDatasetPackagerTest {
                 .trainingDatasetsRoot().toPath().resolve("Cellpose");
 
         try {
-            new CellposeDatasetPackager().packageDataset(root, "late-invalid", 1, store,
+            flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(root, "late-invalid", 1, store,
                     provider(raw), provider(labels), "cyto3");
             fail("Expected fractional label rejection.");
         } catch (IOException expected) {
@@ -389,7 +394,7 @@ public class CellposeDatasetPackagerTest {
     private CellposeDatasetPackager.PackagingResult packageOneImage(Path root,
                                                                    String session,
                                                                    ClickStore store) throws IOException {
-        return new CellposeDatasetPackager().packageDataset(
+        return flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(
                 root, session, 2, store,
                 provider("Image1", rawStack(3, 2, 1)),
                 provider("Image1", labelStack(3, 2, new int[][][] {

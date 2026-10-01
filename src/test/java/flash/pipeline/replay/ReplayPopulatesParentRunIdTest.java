@@ -5,6 +5,7 @@ import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
 import flash.pipeline.runrecord.AnalysisRunContext;
+import flash.pipeline.runrecord.ConfigurationSnapshot;
 import flash.pipeline.runrecord.InputFingerprinter;
 import flash.pipeline.runrecord.RunRecord;
 import flash.pipeline.runrecord.RunRecordIO;
@@ -65,7 +66,7 @@ public class ReplayPopulatesParentRunIdTest {
         assertEquals(parent.runId, child.parentRunId);
     }
 
-    private RunRecord parentRecord(File projectRoot, File input) {
+    private RunRecord parentRecord(File projectRoot, File input) throws Exception {
         RunRecord record = new RunRecord();
         record.runId = "PARENT03";
         record.analysis = "ThreeDObjectAnalysis";
@@ -76,6 +77,8 @@ public class ReplayPopulatesParentRunIdTest {
         record.outputRoot = projectRoot.getAbsolutePath();
         record.parameters = new LinkedHashMap<String, Object>();
         record.parameters.put("doVolumetric", Boolean.TRUE);
+        record.extras.put(ConfigurationSnapshot.EXTRA_KEY, ConfigurationSnapshot.capture(projectRoot));
+        record.extras.put("flashArtifactFingerprint", flash.pipeline.runrecord.EnvironmentSnapshot.flashArtifactFingerprint());
 
         RunRecord.InputItem item = new RunRecord.InputItem();
         item.path = input.getAbsolutePath();

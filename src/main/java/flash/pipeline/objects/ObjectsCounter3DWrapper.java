@@ -2,6 +2,7 @@ package flash.pipeline.objects;
 
 import Utilities.Counter3D;
 import flash.pipeline.image.ImageOps;
+import flash.pipeline.intensity.spatial.CalibrationUtil;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.Prefs;
@@ -109,6 +110,8 @@ public final class ObjectsCounter3DWrapper {
     ) {
         if (img == null) throw new IllegalArgumentException("img is null");
 
+        validateVolumeAxes(img);
+
         // Counter3D consults Prefs to decide whether to build/show the masked image.
         // We set it explicitly to ensure deterministic behavior.
         Prefs.set("3D-OC-Options_showMaskedImg.boolean", wantMaskedImage);
@@ -118,18 +121,17 @@ public final class ObjectsCounter3DWrapper {
             Prefs.set("3D-OC-Options_redirectTo.string", redirectToTitle);
         }
 
-        // Counter3D will throw NPE in prepareImgArrayForRedirect() if redirect is true but the
-        // redirect image is not found. In the original plugin this is guarded before running.
-        boolean safeRedirect = redirect;
-        if (safeRedirect) {
+        // A requested redirect is part of the analysis input, not an optional fallback.
+        if (redirect) {
             String redirTitle = Prefs.get("3D-OC-Options_redirectTo.string", "none");
             ImagePlus redir = (redirTitle == null || "none".equalsIgnoreCase(redirTitle)) ? null : WindowManager.getImage(redirTitle);
             if (redir == null) {
-                safeRedirect = false;
+                throw new IllegalArgumentException("Requested object-intensity redirect image is unavailable: " + redirTitle);
             }
+            validateRedirectDimensions(img, redir);
         }
 
-        Counter3D oc = new Counter3D(img, threshold, minSize, maxSize, excludeOnEdges, safeRedirect);
+        Counter3D oc = new Counter3D(img, threshold, minSize, maxSize, excludeOnEdges, redirect);
 
         // Build a macro-compatible statistics table WITHOUT calling Counter3D.showStatistics(),
         // to avoid UI windows and global ResultsTable state.
@@ -194,6 +196,7 @@ public final class ObjectsCounter3DWrapper {
         if (img == null) throw new IllegalArgumentException("img is null");
 
         // 1. Create a binary (thresholded) copy — mcib3d ImageLabeller labels all non-zero voxels
+        validateRedirectDimensions(img, redirectImage);
         ImagePlus thresholded = thresholdCopy(img, threshold);
 
         // 2. Connected component labelling via mcib3d ImageLabeller
@@ -216,6 +219,9 @@ public final class ObjectsCounter3DWrapper {
             mcib3d.geom2.Objects3DIntPopulationComputation popComp =
                     new mcib3d.geom2.Objects3DIntPopulationComputation(population);
             population = popComp.getExcludeBorders(labelledIH, false);
+            // mcib3d filters the population only; its label image is unchanged.
+            // Keep the published map and redirected mask in the same population.
+            retainPopulationLabels(labelledImp, population);
         }
 
         int nbObjects = population.getNbObjects();
@@ -223,8 +229,8 @@ public final class ObjectsCounter3DWrapper {
         // 4. Build statistics table with the same columns as the legacy method
         Calibration cal = img.getCalibration();
         mcib3d.image3d.ImageHandler convergenceIH =
-                (redirectImage != null) ? mcib3d.image3d.ImageHandler.wrap(redirectImage) : null;
-        ResultsTable stats = buildNativeStatisticsTable(population, cal, convergenceIH);
+                mcib3d.image3d.ImageHandler.wrap(redirectImage != null ? redirectImage : img);
+        ResultsTable stats = buildNativeStatisticsTable(population, cal, convergenceIH, labelledImp);
 
         // 5. Objects map
         ImagePlus objectsMap = null;
@@ -246,6 +252,22 @@ public final class ObjectsCounter3DWrapper {
 
         boolean foundObjects = nbObjects > 0;
         return new Result(stats, objectsMap, masked, foundObjects);
+    }
+
+    private static void retainPopulationLabels(ImagePlus labels,
+                                               mcib3d.geom2.Objects3DIntPopulation population) {
+        Set<Integer> retained = new HashSet<Integer>();
+        for (mcib3d.geom2.Object3DInt object : population.getObjects3DInt()) {
+            retained.add(Integer.valueOf((int) object.getLabel()));
+        }
+        ImageStack stack = labels.getStack();
+        for (int slice = 1; slice <= stack.getSize(); slice++) {
+            ImageProcessor processor = stack.getProcessor(slice);
+            for (int pixel = 0; pixel < processor.getPixelCount(); pixel++) {
+                int label = labelFromPixel(processor.getf(pixel));
+                if (label > 0 && !retained.contains(Integer.valueOf(label))) processor.setf(pixel, 0.0f);
+            }
+        }
     }
 
     /**
@@ -279,6 +301,7 @@ public final class ObjectsCounter3DWrapper {
             boolean wantMaskedImage
     ) {
         if (labelImage == null) throw new IllegalArgumentException("labelImage is null");
+        validateRedirectDimensions(labelImage, redirectImage);
 
         ImagePlus filteredLabelImage = filterLabelImageBySize(labelImage, minSize, maxSize);
         boolean closeFiltered = filteredLabelImage != labelImage;
@@ -296,7 +319,7 @@ public final class ObjectsCounter3DWrapper {
             Calibration cal = filteredLabelImage.getCalibration();
             mcib3d.image3d.ImageHandler convergenceIH =
                     (redirectImage != null) ? mcib3d.image3d.ImageHandler.wrap(redirectImage) : null;
-            ResultsTable stats = buildNativeStatisticsTable(population, cal, convergenceIH);
+            ResultsTable stats = buildNativeStatisticsTable(population, cal, convergenceIH, filteredLabelImage);
 
             // Objects map
             ImagePlus objectsMap = null;
@@ -411,14 +434,20 @@ public final class ObjectsCounter3DWrapper {
     private static ResultsTable buildNativeStatisticsTable(
             mcib3d.geom2.Objects3DIntPopulation population,
             Calibration cal,
-            mcib3d.image3d.ImageHandler convergenceIH) {
+            mcib3d.image3d.ImageHandler convergenceIH,
+            ImagePlus labels) {
 
         ResultsTable rt = new ResultsTable();
         if (population == null || population.getNbObjects() == 0) return rt;
 
-        String unit = cal == null ? "pixel" : cal.getUnit();
-        double voxelVol = 1.0;
-        if (cal != null) voxelVol = cal.pixelWidth * cal.pixelHeight * cal.pixelDepth;
+        CalibrationUtil.CanonicalCalibration physical = canonicalCalibration(cal);
+        boolean calibrated = physical.isFullyPhysical();
+        String unit = calibrated ? "micron" : "pixel";
+        double sx = calibrated ? physical.x().microns() : 1.0;
+        double sy = calibrated ? physical.y().microns() : 1.0;
+        double sz = calibrated ? physical.z().microns() : 1.0;
+        double voxelVol = sx * sy * sz;
+        Map<Integer, Double> surfaces = contactSurfaces(labels, sx, sy, sz);
 
         String volCol = "Volume (" + unit + "^3)";
         String surfCol = "Surface (" + unit + "^2)";
@@ -434,13 +463,13 @@ public final class ObjectsCounter3DWrapper {
             rt.setValue(volCol, i, volumePix * voxelVol);
 
             // Surface (calibrated)
-            mcib3d.geom2.measurements.MeasureSurface ms = new mcib3d.geom2.measurements.MeasureSurface(obj);
-            double surfUnit = ms.getSurfaceContactUnit();
+            Double measuredSurface = surfaces.get(Integer.valueOf((int) obj.getLabel()));
+            double surfUnit = measuredSurface == null ? Double.NaN : measuredSurface.doubleValue();
             rt.setValue(surfCol, i, surfUnit);
 
             // Intensity measurements — use redirect image if provided
-            double intDen = 0;
-            double mean = 0;
+            double intDen = Double.NaN;
+            double mean = Double.NaN;
             if (convergenceIH != null) {
                 mcib3d.geom2.measurements.MeasureIntensity mi =
                         new mcib3d.geom2.measurements.MeasureIntensity(obj);
@@ -455,7 +484,11 @@ public final class ObjectsCounter3DWrapper {
             rt.setValue("Mean", i, mean);
 
             // Centre of mass — uses redirect image for intensity-weighted centre
-            double comX = 0, comY = 0, comZ = 0;
+            mcib3d.geom2.measurements.MeasureCentroid centroid =
+                    new mcib3d.geom2.measurements.MeasureCentroid(obj);
+            double comX = centroid.getValueMeasurement(mcib3d.geom2.measurements.MeasureCentroid.CX_PIX);
+            double comY = centroid.getValueMeasurement(mcib3d.geom2.measurements.MeasureCentroid.CY_PIX);
+            double comZ = centroid.getValueMeasurement(mcib3d.geom2.measurements.MeasureCentroid.CZ_PIX);
             if (convergenceIH != null) {
                 try {
                     mcib3d.geom2.measurements.MeasureCenterOfMass mcom =
@@ -484,7 +517,7 @@ public final class ObjectsCounter3DWrapper {
             rt.setValue("XM", i, comX);
             rt.setValue("YM", i, comY);
             rt.setValue("ZM", i, comZ);
-            writeBoundingBoxValues(rt, i, obj.getBoundingBox(), voxelVol, cal != null);
+            writeBoundingBoxValues(rt, i, obj.getBoundingBox(), calibrated ? voxelVol : Double.NaN, calibrated);
 
             // Label: pixel value in the label image (used by CPC colocalization)
             rt.setValue("Label", i, (int) obj.getLabel());
@@ -499,11 +532,12 @@ public final class ObjectsCounter3DWrapper {
      * This replicates Counter3D's "Masked image" output.
      */
     private static ImagePlus buildMaskedImage(ImagePlus redirectImage, ImagePlus labelledImage) {
+        validateRedirectDimensions(labelledImage, redirectImage);
         ImagePlus masked = ImageOps.duplicateThreadSafe(redirectImage);
         masked.setTitle("Masked image");
         ImageStack maskedStack = masked.getStack();
         ImageStack labelStack = labelledImage.getStack();
-        int nSlices = Math.min(maskedStack.size(), labelStack.size());
+        int nSlices = labelStack.size();
         for (int s = 1; s <= nSlices; s++) {
             ImageProcessor mp = maskedStack.getProcessor(s);
             ImageProcessor lp = labelStack.getProcessor(s);
@@ -514,6 +548,58 @@ public final class ObjectsCounter3DWrapper {
             }
         }
         return masked;
+    }
+
+    private static void validateRedirectDimensions(ImagePlus labels, ImagePlus redirect) {
+        validateVolumeAxes(labels);
+        if (redirect != null) validateVolumeAxes(redirect);
+        if (redirect != null && (labels.getWidth() != redirect.getWidth()
+                || labels.getHeight() != redirect.getHeight()
+                || labels.getStackSize() != redirect.getStackSize())) {
+            throw new IllegalArgumentException("Object labels and intensity redirect must have identical dimensions.");
+        }
+    }
+
+    private static void validateVolumeAxes(ImagePlus image) {
+        if (image.getNChannels() != 1 || image.getNFrames() != 1) {
+            throw new IllegalArgumentException("3D object counting requires one channel and one time point; "
+                    + "channel or time planes cannot be interpreted as Z slices.");
+        }
+    }
+
+    private static CalibrationUtil.CanonicalCalibration canonicalCalibration(Calibration cal) {
+        return CalibrationUtil.canonicalize(cal == null ? Double.NaN : cal.pixelWidth,
+                cal == null ? Double.NaN : cal.pixelHeight,
+                cal == null ? Double.NaN : cal.pixelDepth, cal == null ? null : cal.getUnit());
+    }
+
+    // mcib3d stores only one XY scale; count exposed voxel faces to preserve independent X/Y scales.
+    private static Map<Integer, Double> contactSurfaces(ImagePlus labels, double sx, double sy, double sz) {
+        Map<Integer, Double> result = new HashMap<Integer, Double>();
+        ImageStack stack = labels.getStack();
+        int width = labels.getWidth(), height = labels.getHeight(), depth = stack.getSize();
+        for (int z = 0; z < depth; z++) {
+            ImageProcessor current = stack.getProcessor(z + 1);
+            ImageProcessor previous = z == 0 ? null : stack.getProcessor(z);
+            ImageProcessor next = z + 1 == depth ? null : stack.getProcessor(z + 2);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int label = labelFromPixel(current.getf(x, y));
+                    if (label <= 0) continue;
+                    double surface = 0.0;
+                    if (x == 0 || labelFromPixel(current.getf(x - 1, y)) != label) surface += sy * sz;
+                    if (x + 1 == width || labelFromPixel(current.getf(x + 1, y)) != label) surface += sy * sz;
+                    if (y == 0 || labelFromPixel(current.getf(x, y - 1)) != label) surface += sx * sz;
+                    if (y + 1 == height || labelFromPixel(current.getf(x, y + 1)) != label) surface += sx * sz;
+                    if (previous == null || labelFromPixel(previous.getf(x, y)) != label) surface += sx * sy;
+                    if (next == null || labelFromPixel(next.getf(x, y)) != label) surface += sx * sy;
+                    Integer key = Integer.valueOf(label);
+                    Double accumulated = result.get(key);
+                    result.put(key, (accumulated == null ? 0.0 : accumulated.doubleValue()) + surface);
+                }
+            }
+        }
+        return result;
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -671,8 +757,10 @@ public final class ObjectsCounter3DWrapper {
             rt.setValue("B-width", i, boundWidth);
             rt.setValue("B-height", i, boundHeight);
             rt.setValue("B-depth", i, boundDepth);
+            CalibrationUtil.CanonicalCalibration physical = canonicalCalibration(cal);
             writeBoundingBoxVolume(rt, i, (long) Math.max(0, boundWidth) * (long) Math.max(0, boundHeight)
-                    * (long) Math.max(0, boundDepth), voxelVol, cal != null);
+                    * (long) Math.max(0, boundDepth), physical.x().microns() * physical.y().microns()
+                    * physical.z().microns(), physical.isFullyPhysical());
 
             // Label: Counter3D uses 1-based sequential labels
             rt.setValue("Label", i, i + 1);
@@ -705,7 +793,7 @@ public final class ObjectsCounter3DWrapper {
             table.setValue("B-height", row, 0);
             table.setValue("B-depth", row, 0);
             table.setValue("B-volume (voxels)", row, 0);
-            table.setValue("B-volume (micron^3)", row, 0);
+            table.setValue("B-volume (micron^3)", row, calibrated ? 0.0 : Double.NaN);
             return;
         }
         int width = Math.max(0, box.xmax - box.xmin + 1);
@@ -722,15 +810,15 @@ public final class ObjectsCounter3DWrapper {
 
     /**
      * Writes {@code B-volume (voxels)} (the box width*height*depth) and {@code B-volume (micron^3)}
-     * (voxel volume * calibrated voxel size). When calibration is missing the micron column mirrors
-     * the voxel count (1.0 scale); this is logged once and never crashes.
+     * (voxel volume * micron voxel size). Missing physical calibration is represented by NaN.
      */
     private static void writeBoundingBoxVolume(ResultsTable table, int row, long boxVoxels,
                                                double voxelVolume, boolean calibrated) {
-        double calibratedVoxel = voxelVolume > 0 ? voxelVolume : 1.0;
+        double calibratedVoxel = calibrated && Double.isFinite(voxelVolume) && voxelVolume > 0
+                ? voxelVolume : Double.NaN;
         if (!calibrated && WARNED_NO_BB_CALIBRATION.compareAndSet(false, true)) {
             try {
-                ij.IJ.log("FLASH: bounding-box micron volume uncalibrated; reporting voxel counts (1.0 scale).");
+                ij.IJ.log("FLASH: bounding-box micron volume unavailable because physical calibration is missing.");
             } catch (Throwable ignored) {
                 // logging is best-effort; never let it break table construction
             }

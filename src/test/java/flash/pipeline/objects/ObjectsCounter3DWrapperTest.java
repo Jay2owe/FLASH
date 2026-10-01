@@ -11,6 +11,7 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
 
 public class ObjectsCounter3DWrapperTest {
@@ -119,9 +120,9 @@ public class ObjectsCounter3DWrapperTest {
         assertEquals(3.0, stats.getValue("B-width", 0), 0.0);
         assertEquals(3.0, stats.getValue("B-height", 0), 0.0);
         assertEquals(3.0, stats.getValue("B-depth", 0), 0.0);
-        // B-volume = width*height*depth; uncalibrated image -> micron column mirrors voxels (1.0 scale).
+        // Uncalibrated voxel counts cannot be reported as a physical volume.
         assertEquals(27.0, stats.getValue("B-volume (voxels)", 0), 0.0);
-        assertEquals(27.0, stats.getValue("B-volume (micron^3)", 0), 0.0);
+        assertTrue(Double.isNaN(stats.getValue("B-volume (micron^3)", 0)));
     }
 
     @Test

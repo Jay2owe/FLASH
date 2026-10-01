@@ -3,11 +3,9 @@ package flash.pipeline.intensity.spatial;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.PriorityQueue;
 
 /**
  * Mean source-channel intensity in Euclidean shells around the partner user-threshold mask.
@@ -107,46 +105,8 @@ public final class DistanceShell2DAnalysis implements IntensitySpatialPairAnalys
     }
 
     private static double[] distanceToPartnerMask(PairPlane2D plane) {
-        final double[] distances = new double[plane.width * plane.height];
-        java.util.Arrays.fill(distances, Double.POSITIVE_INFINITY);
-        PriorityQueue<Node> queue = new PriorityQueue<Node>(Math.max(1, plane.count),
-                new Comparator<Node>() {
-                    @Override
-                    public int compare(Node a, Node b) {
-                        return Double.compare(a.distance, b.distance);
-                    }
-                });
-
-        for (int i = 0; i < plane.partnerMask.length; i++) {
-            if (plane.valid[i] && plane.partnerMask[i]) {
-                distances[i] = 0.0;
-                queue.add(new Node(i, 0.0));
-            }
-        }
-
-        int[] dx = {-1, 0, 1, -1, 1, -1, 0, 1};
-        int[] dy = {-1, -1, -1, 0, 0, 1, 1, 1};
-        while (!queue.isEmpty()) {
-            Node node = queue.poll();
-            if (node.distance > distances[node.index]) continue;
-            int x = node.index % plane.width;
-            int y = node.index / plane.width;
-            for (int i = 0; i < dx.length; i++) {
-                int xx = x + dx[i];
-                int yy = y + dy[i];
-                if (xx < 0 || xx >= plane.width || yy < 0 || yy >= plane.height) continue;
-                int next = yy * plane.width + xx;
-                if (!plane.valid[next]) continue;
-                double stepX = dx[i] * plane.pixelWidthUm;
-                double stepY = dy[i] * plane.pixelHeightUm;
-                double candidate = node.distance + Math.sqrt(stepX * stepX + stepY * stepY);
-                if (candidate < distances[next]) {
-                    distances[next] = candidate;
-                    queue.add(new Node(next, candidate));
-                }
-            }
-        }
-        return distances;
+        return ExactEuclideanDistance.toMask(plane.partnerMask, plane.valid,
+                plane.width, plane.height, 1, plane.pixelWidthUm, plane.pixelHeightUm, 1.0);
     }
 
     private static double shellWidth(IntensitySpatialConfig config) {
@@ -165,13 +125,4 @@ public final class DistanceShell2DAnalysis implements IntensitySpatialPairAnalys
         return Math.max(1, value);
     }
 
-    private static final class Node {
-        final int index;
-        final double distance;
-
-        private Node(int index, double distance) {
-            this.index = index;
-            this.distance = distance;
-        }
-    }
 }

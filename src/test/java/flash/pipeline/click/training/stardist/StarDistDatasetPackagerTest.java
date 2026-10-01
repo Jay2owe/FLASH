@@ -47,8 +47,7 @@ public class StarDistDatasetPackagerTest {
         ClickStore clicks = new ClickStore();
         clicks.add(click("Image1", 2, 2, ClickStore.Verdict.NEGATIVE));
 
-        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
-                .packageDataset(root, "session", 2, clicks,
+        StarDistDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "session", 2, clicks,
                         provider(raw), provider(labels));
 
         assertEquals(root.resolve("FLASH").resolve("Config").resolve("Training Datasets")
@@ -57,6 +56,13 @@ public class StarDistDatasetPackagerTest {
         assertFalse(Files.exists(root.resolve("Configuration")));
         assertEquals(1, result.imagesWritten);
         assertEquals(1, result.negativeLabelsRemoved);
+        Map<String, Object> selections = JsonIO.parseObject(new String(Files.readAllBytes(
+                result.outputDir.resolve(flash.pipeline.click.training.TrainingSelectionSnapshot.FILE_NAME)),
+                StandardCharsets.UTF_8));
+        assertEquals(1, JsonIO.asList(selections.get("clicks")).size());
+        assertEquals(64, JsonIO.stringValue(JsonIO.asObject(
+                JsonIO.asList(selections.get("clicks")).get(0))
+                .get("segmentationFingerprint")).length());
         ImagePlus exported = open(result.outputDir.resolve("labels")
                 .resolve("Image1_C2_z001.tif"));
         assertEquals(1, pixel(exported, 0, 0));
@@ -74,8 +80,7 @@ public class StarDistDatasetPackagerTest {
         ClickStore clicks = new ClickStore();
         clicks.add(click("Image1", 2, 2, ClickStore.Verdict.POSITIVE));
 
-        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
-                .packageDataset(root, "session", 2, clicks,
+        StarDistDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "session", 2, clicks,
                         provider(raw), provider(labels));
 
         assertEquals(1, result.positiveLabelsRetained);
@@ -100,8 +105,7 @@ public class StarDistDatasetPackagerTest {
         clicks.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
         clicks.add(click("Image1", 2, 2, ClickStore.Verdict.NEGATIVE));
 
-        Path output = new StarDistDatasetPackager()
-                .packageDataset(root, "session", 2, clicks,
+        Path output = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "session", 2, clicks,
                         provider(raw), provider(labels))
                 .outputDir;
 
@@ -154,8 +158,7 @@ public class StarDistDatasetPackagerTest {
         clicks.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
         clicks.add(click("Image2", 1, 2, ClickStore.Verdict.NEGATIVE));
 
-        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
-                .packageDataset(root, "session", 2, clicks,
+        StarDistDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "session", 2, clicks,
                         provider(raw), provider(labels));
 
         assertEquals(1, result.imagesWritten);
@@ -180,7 +183,7 @@ public class StarDistDatasetPackagerTest {
         clicks.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
 
         try {
-            new StarDistDatasetPackager().packageDataset(root, "session", 2, clicks,
+            flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "session", 2, clicks,
                     provider(raw),
                     new ImagePlusProvider() {
                         @Override
@@ -212,8 +215,7 @@ public class StarDistDatasetPackagerTest {
             clicks.add(click("Wide", 1, label, ClickStore.Verdict.POSITIVE));
         }
 
-        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
-                .packageDataset(root, "wide", 1, clicks, provider(raw), provider(labels));
+        StarDistDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "wide", 1, clicks, provider(raw), provider(labels));
         ImagePlus exported = open(result.outputDir.resolve("labels")
                 .resolve("Wide_C1_z001.tif"));
         try {
@@ -260,7 +262,7 @@ public class StarDistDatasetPackagerTest {
                 .trainingDatasetsRoot().toPath().resolve("StarDist");
 
         try {
-            new StarDistDatasetPackager().packageDataset(root, "late", 1, clicks,
+            flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "late", 1, clicks,
                     provider(raw), provider(labels));
             fail("Expected fractional label rejection.");
         } catch (java.io.IOException expected) {
@@ -321,8 +323,7 @@ public class StarDistDatasetPackagerTest {
         clicks.add(clickAt(imageName, 2, 3, 1, 80.0, 160.0,
                 ClickStore.Verdict.POSITIVE));
 
-        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
-                .packageDataset(root, "session", 2, clicks,
+        StarDistDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "session", 2, clicks,
                         provider(raw), provider(labels), 64);
 
         assertEquals(3, result.imagesWritten);
@@ -369,7 +370,7 @@ public class StarDistDatasetPackagerTest {
             }));
             clicks.add(click(name, 2, source, ClickStore.Verdict.POSITIVE));
         }
-        Path dataset = new StarDistDatasetPackager().packageDataset(root, "split-session",
+        Path dataset = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "split-session",
                 2, clicks, provider(raw), provider(labels)).outputDir;
 
         StarDistLocalTrainingService.TrainingArtifacts first =
@@ -406,7 +407,7 @@ public class StarDistDatasetPackagerTest {
                 }));
         ClickStore oneClicks = new ClickStore();
         oneClicks.add(click("OnlySource", 2, 1, ClickStore.Verdict.POSITIVE));
-        Path oneDataset = new StarDistDatasetPackager().packageDataset(oneRoot,
+        Path oneDataset = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(oneRoot,
                 "one-session", 2, oneClicks, provider(oneRaw), provider(oneLabels)).outputDir;
         StarDistLocalTrainingService.TrainingArtifacts one =
                 StarDistLocalTrainingService.prepareTrainingArtifacts(oneDataset, "model",
@@ -560,8 +561,7 @@ public class StarDistDatasetPackagerTest {
         clicks.add(clickAt(imageName, 2, 1, 1, 5.0, 5.0,
                 ClickStore.Verdict.POSITIVE));
 
-        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
-                .packageDataset(root, "session", 2, clicks,
+        StarDistDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "session", 2, clicks,
                         provider(raw), provider(labels), 64);
 
         assertEquals(1, result.tileCount);
@@ -589,8 +589,7 @@ public class StarDistDatasetPackagerTest {
         ClickStore clicks = new ClickStore();
         clicks.add(click("Image1", 2, 1, ClickStore.Verdict.POSITIVE));
 
-        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
-                .packageDataset(root, "session", 2, clicks,
+        StarDistDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "session", 2, clicks,
                         provider(raw), provider(labels), 0);
 
         assertEquals(1, result.imagesWritten);

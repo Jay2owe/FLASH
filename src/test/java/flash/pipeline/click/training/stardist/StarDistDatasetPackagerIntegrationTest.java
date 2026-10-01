@@ -42,8 +42,7 @@ public class StarDistDatasetPackagerIntegrationTest {
         clicks.add(StarDistDatasetPackagerTest.click("Image2", 2, 4, ClickStore.Verdict.POSITIVE));
         clicks.add(StarDistDatasetPackagerTest.click("Image2", 2, 6, ClickStore.Verdict.NEGATIVE));
 
-        StarDistDatasetPackager.PackagingResult result = new StarDistDatasetPackager()
-                .packageDataset(root, "synthetic-bin", 2, clicks,
+        StarDistDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.stardist(root, "synthetic-bin", 2, clicks,
                         StarDistDatasetPackagerTest.provider(raw),
                         StarDistDatasetPackagerTest.provider(labels));
 

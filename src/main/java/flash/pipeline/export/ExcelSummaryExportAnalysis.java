@@ -187,8 +187,15 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             return;
         }
 
-        CsvData objData = objectsCsv != null ? parseMasterCsv(objectsCsv) : null;
-        CsvData intData = intensitiesCsv != null ? parseMasterCsv(intensitiesCsv) : null;
+        CsvData objData;
+        CsvData intData;
+        try {
+            objData = objectsCsv != null ? parseMasterCsv(objectsCsv) : null;
+            intData = intensitiesCsv != null ? parseMasterCsv(intensitiesCsv) : null;
+        } catch (IOException e) {
+            IJ.log("Excel export stopped: master data could not be read completely. " + e.getMessage());
+            return;
+        }
 
         Set<String> allAnimals = new LinkedHashSet<String>();
         if (objData != null) allAnimals.addAll(objData.animals);
@@ -804,7 +811,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         }
     }
 
-    private CsvData parseMasterCsv(File csvFile) {
+    private CsvData parseMasterCsv(File csvFile) throws IOException {
         CsvData result = new CsvData();
         int unparseable = 0;
         AnalysisRunContext.InputHandle inputHandle = recordInputStart(csvFile);
@@ -863,6 +870,7 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             IJ.log("Error reading " + csvFile.getName() + ": " + e.getMessage());
             inputStatus = "failed";
             recordError("Error reading " + csvFile.getName(), e);
+            throw e;
         } finally {
             recordInputEnd(inputHandle, inputStatus, inputStarted);
         }

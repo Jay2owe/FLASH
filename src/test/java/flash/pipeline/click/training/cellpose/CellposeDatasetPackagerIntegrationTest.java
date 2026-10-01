@@ -52,7 +52,7 @@ public class CellposeDatasetPackagerIntegrationTest {
         store.add(click("ImageA", 2, 2, ClickStore.Verdict.NEGATIVE));
         store.add(click("ImageB", 2, 1, ClickStore.Verdict.POSITIVE));
 
-        CellposeDatasetPackager.PackagingResult result = new CellposeDatasetPackager().packageDataset(
+        CellposeDatasetPackager.PackagingResult result = flash.pipeline.click.training.VerifiedDatasetFixtures.cellpose(
                 root, "integration", 2, store,
                 new ImagePlusProvider() {
                     @Override

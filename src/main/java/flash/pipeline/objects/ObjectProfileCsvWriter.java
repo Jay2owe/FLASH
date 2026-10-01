@@ -113,9 +113,12 @@ public final class ObjectProfileCsvWriter {
                     writeCurve(w, animal, hemisphere, region, roi, r, pf, ProfileAggregator.ANGULAR, pf.angularRaw, pf.angularNorm);
                 }
             }
+            w.flush();
+            if (w.checkError()) throw new IOException("Failed while appending object profiles: " + file);
         } finally {
             w.close();
         }
+        if (w.checkError()) throw new IOException("Failed while closing object profiles: " + file);
     }
 
     /** Write (overwrite) the aggregated mean±SEM file from a populated aggregator. */
@@ -124,8 +127,9 @@ public final class ObjectProfileCsvWriter {
         List<ProfileAggregator.AggregatedProfile> aggs = agg.results();
         if (aggs.isEmpty()) return;
         if (dir != null) dir.mkdirs();
-        PrintWriter w = open(new File(dir, AGGREGATE_FILE), false);
-        try {
+        CsvSupport.writeAtomically(new File(dir, AGGREGATE_FILE), new CsvSupport.WriterAction() {
+            @Override
+            public void write(PrintWriter w) throws IOException {
             w.println(AGGREGATE_HEADER);
             for (ProfileAggregator.AggregatedProfile a : aggs) {
                 for (int i = 0; i < a.mean.length; i++) {
@@ -136,9 +140,8 @@ public final class ObjectProfileCsvWriter {
                             + "," + i + "," + num(a.x[i]) + "," + num(a.mean[i]) + "," + num(a.sem[i]) + "," + a.n[i]);
                 }
             }
-        } finally {
-            w.close();
-        }
+            }
+        });
     }
 
     private static void writeCurve(PrintWriter w, String animal, String hemisphere, String region,

@@ -77,7 +77,7 @@ public final class ObjectDecontaminationScorer {
                     : CorrectionImageOps.singleChannelPlanePixels(correctedTargetImage, plane);
 
             for (int pixel = 0; pixel < targetPixels.length; pixel++) {
-                int label = labels.get(pixel);
+                int label = checkedLabel(labels, pixel);
                 if (label <= 0) {
                     continue;
                 }
@@ -97,7 +97,7 @@ public final class ObjectDecontaminationScorer {
                 for (int i = 0; i < bleedPixels.length; i++) {
                     int value = bleedPixels[i][pixel] & 0xffff;
                     accumulator.addBleed(i, value);
-                    if (value >= bleedThresholds[i]) {
+                    if (value > 0 && value >= bleedThresholds[i]) {
                         highBleedPixel = true;
                     }
                 }
@@ -109,7 +109,7 @@ public final class ObjectDecontaminationScorer {
                 for (int i = 0; i < autofluorescencePixels.length; i++) {
                     int value = autofluorescencePixels[i][pixel] & 0xffff;
                     accumulator.addAutofluorescence(i, value);
-                    if (value >= autofluorescenceThresholds[i]) {
+                    if (value > 0 && value >= autofluorescenceThresholds[i]) {
                         highAutofluorescencePixel = true;
                     }
                 }
@@ -134,6 +134,7 @@ public final class ObjectDecontaminationScorer {
         if (labelMap == null) {
             throw new IllegalArgumentException("Object label image is required.");
         }
+        validateLabelDomain(labelMap);
         ImagePlus cleaned = duplicateStack(labelMap, "cleaned_objects");
         cleaned.setTitle("cleaned_objects");
 
@@ -154,8 +155,8 @@ public final class ObjectDecontaminationScorer {
             ImageProcessor processor = stack.getProcessor(slice);
             int size = processor.getWidth() * processor.getHeight();
             for (int pixel = 0; pixel < size; pixel++) {
-                if (rejectedLabels.contains(Integer.valueOf(processor.get(pixel)))) {
-                    processor.set(pixel, 0);
+                if (rejectedLabels.contains(Integer.valueOf(checkedLabel(processor, pixel)))) {
+                    processor.setf(pixel, 0.0f);
                 }
             }
         }
@@ -183,6 +184,9 @@ public final class ObjectDecontaminationScorer {
     }
 
     private static void validateLabelMap(ImagePlus labelMap, ImagePlus sourceImage) {
+        if (labelMap.getBitDepth() != 8 && labelMap.getBitDepth() != 16 && labelMap.getBitDepth() != 32) {
+            throw new IllegalArgumentException("Object label image must use scalar integer labels.");
+        }
         if (Math.max(1, labelMap.getNChannels()) != 1) {
             throw new IllegalArgumentException("Object label image must have exactly one channel.");
         }
@@ -190,10 +194,9 @@ public final class ObjectDecontaminationScorer {
                 || labelMap.getHeight() != sourceImage.getHeight()) {
             throw new IllegalArgumentException("Object label image dimensions do not match the source image.");
         }
-        int labelPlanes = Math.max(1, labelMap.getNSlices()) * Math.max(1, labelMap.getNFrames());
-        int sourcePlanes = CorrectionImageOps.planeCount(sourceImage);
-        if (labelPlanes != sourcePlanes) {
-            throw new IllegalArgumentException("Object label image plane count does not match the source image.");
+        if (labelMap.getNSlices() != sourceImage.getNSlices()
+                || labelMap.getNFrames() != sourceImage.getNFrames()) {
+            throw new IllegalArgumentException("Object label image Z/time dimensions do not match the source image.");
         }
     }
 
@@ -202,8 +205,30 @@ public final class ObjectDecontaminationScorer {
                 || image.getHeight() != sourceImage.getHeight()) {
             throw new IllegalArgumentException(label + " dimensions do not match the source image.");
         }
-        if (CorrectionImageOps.planeCount(image) != CorrectionImageOps.planeCount(sourceImage)) {
-            throw new IllegalArgumentException(label + " plane count does not match the source image.");
+        if (image.getNSlices() != sourceImage.getNSlices()
+                || image.getNFrames() != sourceImage.getNFrames()) {
+            throw new IllegalArgumentException(label + " Z/time dimensions do not match the source image.");
+        }
+    }
+
+    private static int checkedLabel(ImageProcessor processor, int pixel) {
+        // FloatProcessor.get() exposes IEEE bits, not the numerical label value.
+        float value = processor.getf(pixel);
+        if (Float.isNaN(value) || Float.isInfinite(value) || value < 0.0f
+                || value > 16_777_216.0f || value != Math.floor(value)) {
+            throw new IllegalArgumentException("Object labels must be finite, non-negative integers "
+                    + "within ImageJ's exact label range (0-16777216).");
+        }
+        return (int) value;
+    }
+
+    private static void validateLabelDomain(ImagePlus image) {
+        if (image.getBitDepth() != 8 && image.getBitDepth() != 16 && image.getBitDepth() != 32) {
+            throw new IllegalArgumentException("Object label image must use scalar integer labels.");
+        }
+        for (int slice = 1; slice <= image.getStackSize(); slice++) {
+            ImageProcessor processor = image.getStack().getProcessor(slice);
+            for (int pixel = 0; pixel < processor.getPixelCount(); pixel++) checkedLabel(processor, pixel);
         }
     }
 

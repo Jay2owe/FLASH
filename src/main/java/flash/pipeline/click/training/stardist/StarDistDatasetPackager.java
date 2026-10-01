@@ -3,8 +3,10 @@ package flash.pipeline.click.training.stardist;
 import flash.pipeline.bin.BinConfig;
 import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.click.ClickStore;
+import flash.pipeline.click.SegmentationFingerprint;
 import flash.pipeline.click.ClicksConfigIO;
 import flash.pipeline.click.training.ImagePlusProvider;
+import flash.pipeline.click.training.TrainingSelectionSnapshot;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.ui.wizard.JsonIO;
@@ -210,6 +212,9 @@ public final class StarDistDatasetPackager {
 
             writeReadme(tempDir, channelOneBased, channelName, tiled, tileSize);
             writeSampleManifest(tempDir, safeSessionName, sampleProvenance);
+            List<ClickStore.Click> exportedClicks = new ArrayList<ClickStore.Click>();
+            for (PreparedImage prepared : preparedImages) exportedClicks.addAll(prepared.clicks);
+            TrainingSelectionSnapshot.write(tempDir, exportedClicks);
             writeMetadata(tempDir, root, outputDir, channelOneBased, channelName, originalImagesWritten,
                     trainingImagesWritten, positiveLabelsRetained, negativeLabelsRemoved,
                     tiled, tileSize, tileCount);
@@ -249,6 +254,7 @@ public final class StarDistDatasetPackager {
                 requireImage(rawImage, "Raw", imageName);
                 requireImage(labelImage, "StarDist label", imageName);
                 requireTrainingPairGeometry(rawImage, labelImage, channelOneBased, imageName);
+                SegmentationFingerprint.requireMatching(clicks, labelImage);
                 Correction correction = correctLabels(labelImage, clicks);
                 PreparedImage item = new PreparedImage(imageName, clicks, rawImage, correction);
                 prepared.add(item);
@@ -897,6 +903,7 @@ public final class StarDistDatasetPackager {
         counts.put("negative", Integer.valueOf(negativeLabelsRemoved));
         root.put("objectCount", counts);
         root.put("sourceClicksJsonPath", sourceClicksPath(projectRoot, finalOutputDir));
+        root.put("trainingSelectionsSnapshot", TrainingSelectionSnapshot.FILE_NAME);
         root.put("recommendedNotebook", RECOMMENDED_NOTEBOOK);
         root.put("tileMode", tiled ? "tiled" : "whole");
         if (tiled) {

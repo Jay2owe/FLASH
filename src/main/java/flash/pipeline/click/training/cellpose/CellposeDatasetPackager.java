@@ -5,8 +5,10 @@ import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cellpose.CellposeModelResolver;
 import flash.pipeline.cellpose.CellposeRuntime;
 import flash.pipeline.click.ClickStore;
+import flash.pipeline.click.SegmentationFingerprint;
 import flash.pipeline.click.ClicksConfigIO;
 import flash.pipeline.click.training.ImagePlusProvider;
+import flash.pipeline.click.training.TrainingSelectionSnapshot;
 import flash.pipeline.io.FlashProjectLayout;
 import flash.pipeline.naming.ChannelFilenameCodec;
 import flash.pipeline.segmentation.SegmentationMethod;
@@ -133,6 +135,9 @@ public final class CellposeDatasetPackager {
         try {
             Files.createDirectory(tempDir);
             Counters counters = writeImagePairs(tempDir, channelOneBased, preparedImages);
+            List<ClickStore.Click> exportedClicks = new ArrayList<ClickStore.Click>();
+            for (ImageClicks grouped : groupedClicks) exportedClicks.addAll(grouped.clicks);
+            TrainingSelectionSnapshot.write(tempDir, exportedClicks);
 
             writeMetadata(tempDir, root, outputDir, channelOneBased, channelName,
                     pretrainedModel, trainCommand, counters);
@@ -187,6 +192,7 @@ public final class CellposeDatasetPackager {
             } else {
                 grouped.negativeLabels.add(Integer.valueOf(click.label));
             }
+            grouped.clicks.add(click);
         }
         return new ArrayList<ImageClicks>(byImage.values());
     }
@@ -233,6 +239,7 @@ public final class CellposeDatasetPackager {
             ImagePlus raw = rawImageProvider.get(clicks.imageName);
             ImagePlus labels = labelImageProvider.get(clicks.imageName);
             validateImagePair(clicks.imageName, raw, labels);
+            SegmentationFingerprint.requireMatching(clicks.clicks, labels);
             int slices = sliceCount(raw);
             for (int z = 1; z <= slices; z++) {
                 rawSliceProcessor(raw, channelOneBased, z);
@@ -517,6 +524,7 @@ public final class CellposeDatasetPackager {
         root.put("baseModel", baseModel);
         root.put("trainCommand", trainCommand);
         root.put("sourceClicksJsonPath", sourceClicksPath(projectRoot, finalOutputDir));
+        root.put("trainingSelectionsSnapshot", TrainingSelectionSnapshot.FILE_NAME);
         Files.write(outputDir.resolve("metadata.json"),
                 Collections.singletonList(JsonIO.write(root)),
                 StandardCharsets.UTF_8);
@@ -668,6 +676,7 @@ public final class CellposeDatasetPackager {
 
     private static final class ImageClicks {
         final String imageName;
+        final List<ClickStore.Click> clicks = new ArrayList<ClickStore.Click>();
         final Set<Integer> positiveLabels = new LinkedHashSet<Integer>();
         final Set<Integer> negativeLabels = new LinkedHashSet<Integer>();
 

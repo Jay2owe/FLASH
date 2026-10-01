@@ -82,13 +82,15 @@ public final class OrientationManifestIO {
     }
 
     public static List<OrientationManifestRow> readIfExists(String directory) {
-        File manifest = getExistingFile(directory);
-        if (manifest == null || !manifest.isFile()) return new ArrayList<OrientationManifestRow>();
+        File manifest = getFile(directory);
+        if (!manifest.exists()) return new ArrayList<OrientationManifestRow>();
 
         try {
             return read(manifest);
         } catch (IOException e) {
-            return new ArrayList<OrientationManifestRow>();
+            throw new IllegalStateException("Could not read image orientation manifest "
+                    + manifest.getAbsolutePath()
+                    + "; refusing filename fallback because it can change animal identity or image orientation.", e);
         }
     }
 
@@ -101,12 +103,21 @@ public final class OrientationManifestIO {
         CsvSupport.RecordReader csv = CsvSupport.openRecordReader(manifest);
         try {
             CsvSupport.Record header = csv.readRecord();
-            if (header == null) return rows;
+            if (header == null) throw new IOException("Image orientation manifest has no header: " + manifest);
+            String[] headerFields = CsvSupport.parseRecord(header.text);
+            if (!Arrays.asList(headerFields).equals(HEADER)) {
+                throw new IOException("Image orientation manifest has an unexpected column header: " + manifest);
+            }
 
             CsvSupport.Record record;
             while ((record = csv.readRecord()) != null) {
                 if (CsvSupport.isBlankRecord(record.text)) continue;
                 String[] fields = CsvSupport.parseRecord(record.text);
+                if (fields.length != HEADER.size()) {
+                    throw new IOException("Image orientation manifest row at line " + record.startLineNumber
+                            + " has " + fields.length + " columns; expected " + HEADER.size());
+                }
+                validateConfirmedRow(fields, record.startLineNumber);
                 OrientationManifestRow row = parseRow(fields);
                 if (row != null) {
                     rows.add(row);
@@ -175,6 +186,28 @@ public final class OrientationManifestIO {
                 OrientationManifestRow.DecisionSource.fromCsv(field(fields, 12)),
                 OrientationManifestRow.ConfirmationState.fromCsv(field(fields, 13)),
                 field(fields, 14));
+    }
+
+    private static void validateConfirmedRow(String[] fields, int line) throws IOException {
+        if (!OrientationManifestRow.parseYesNo(field(fields, 13))) return;
+        String rotation = field(fields, 8);
+        if (!Arrays.asList("0", "90", "180", "270").contains(rotation)) {
+            throw new IOException("Confirmed orientation row at line " + line
+                    + " has an invalid rotation: " + rotation);
+        }
+        for (int column : new int[]{9, 10}) {
+            String value = field(fields, column).toLowerCase(java.util.Locale.ROOT);
+            if (!Arrays.asList("yes", "no", "true", "false", "1", "0").contains(value)) {
+                throw new IOException("Confirmed orientation row at line " + line
+                        + " has an invalid flip value: " + value);
+            }
+        }
+        try {
+            if (Integer.parseInt(field(fields, 2)) < 1) throw new NumberFormatException();
+        } catch (NumberFormatException failure) {
+            throw new IOException("Confirmed orientation row at line " + line
+                    + " has an invalid series index: " + field(fields, 2));
+        }
     }
 
     private static List<String> toFields(OrientationManifestRow row) {

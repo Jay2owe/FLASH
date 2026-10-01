@@ -17,9 +17,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -27,7 +29,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Asynchronous image saving utility. Queues save operations on a background
  * writer thread so the main processing pipeline can continue without waiting
- * for disk I/O.
+ * for disk I/O until the bounded save backlog is full. Producers then wait
+ * before copying their images so a slow disk cannot grow retained stacks
+ * without limit.
  *
  * <p>During analysis a single writer thread processes save jobs. When the
  * analysis finishes and calls {@link #waitForAllWithProgress(int)}, the writer
@@ -36,10 +40,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * next batch.</p>
  */
 public class AsyncImageSaver {
+    // Admission happens before copying: bounding only the executor queue would
+    // still let every blocked producer retain another full image on the heap.
+    static final int MAX_IN_FLIGHT_SAVES = 5;
+    private static final Semaphore SAVE_SLOTS = new Semaphore(MAX_IN_FLIGHT_SAVES, true);
     private static final ThreadPoolExecutor IO_POOL;
     static {
         IO_POOL = new ThreadPoolExecutor(1, 1, 60L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<Runnable>());
+                new LinkedBlockingQueue<Runnable>(MAX_IN_FLIGHT_SAVES));
         IO_POOL.allowCoreThreadTimeOut(true);
     }
 
@@ -76,11 +84,12 @@ public class AsyncImageSaver {
 
     /**
      * Saves the image as TIFF asynchronously. The image is duplicated
-     * immediately so the caller can close/reuse the original.
+     * after a save slot becomes available and before this method returns, so
+     * the caller can then close/reuse the original.
      */
     public static void saveAsTiffAsync(ImagePlus imp, String path) {
         logFirstSave();
-        final ImagePlus copy = ImageOps.duplicateThreadSafe(imp);
+        final ImagePlus copy = copyAfterAdmission(imp);
         submitPending(new Runnable() {
             @Override
             public void run() {
@@ -95,11 +104,12 @@ public class AsyncImageSaver {
 
     /**
      * Saves the image as PNG asynchronously. The image is duplicated
-     * immediately so the caller can close/reuse the original.
+     * after a save slot becomes available and before this method returns, so
+     * the caller can then close/reuse the original.
      */
     public static void saveAsPngAsync(ImagePlus imp, String path) {
         logFirstSave();
-        final ImagePlus copy = ImageOps.duplicateThreadSafe(imp);
+        final ImagePlus copy = copyAfterAdmission(imp);
         submitPending(new Runnable() {
             @Override
             public void run() {
@@ -116,7 +126,11 @@ public class AsyncImageSaver {
         PendingSave save = new PendingSave(task, imageToClose, target);
         Future<?> future;
         try {
-            future = IO_POOL.submit(save);
+            synchronized (pending) {
+                future = IO_POOL.submit(save);
+                save.setFuture(future);
+                pending.add(save);
+            }
         } catch (RuntimeException rejection) {
             save.closeImage(rejection);
             throw rejection;
@@ -124,9 +138,44 @@ public class AsyncImageSaver {
             save.closeImage(rejection);
             throw rejection;
         }
-        save.setFuture(future);
-        synchronized (pending) {
-            pending.add(save);
+    }
+
+    private static ImagePlus copyAfterAdmission(ImagePlus image) {
+        acquireSaveSlot();
+        try {
+            return ImageOps.duplicateThreadSafe(image);
+        } catch (RuntimeException failure) {
+            SAVE_SLOTS.release();
+            throw failure;
+        } catch (Error failure) {
+            SAVE_SLOTS.release();
+            throw failure;
+        }
+    }
+
+    private static void acquireSaveSlot() {
+        try {
+            while (true) {
+                if (AnalysisCancellation.wasCancelRequestedInActiveScope()) {
+                    throw new CancellationException("Analysis cancelled while waiting for an image-save slot");
+                }
+                if (IO_POOL.isShutdown()) {
+                    throw new java.util.concurrent.RejectedExecutionException("Image saver is shut down");
+                }
+                if (SAVE_SLOTS.tryAcquire(100L, TimeUnit.MILLISECONDS)) {
+                    if (AnalysisCancellation.wasCancelRequestedInActiveScope()) {
+                        SAVE_SLOTS.release();
+                        throw new CancellationException("Analysis cancelled before image copying");
+                    }
+                    return;
+                }
+            }
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            CancellationException interrupted = new CancellationException(
+                    "Interrupted while waiting for an image-save slot");
+            interrupted.initCause(failure);
+            throw interrupted;
         }
     }
 
@@ -137,6 +186,7 @@ public class AsyncImageSaver {
 
     /** Package-private: submit a named synthetic save job (test seam). */
     static void submitTask(String target, Runnable task) {
+        acquireSaveSlot();
         submitPending(task, null, target);
     }
 
@@ -149,10 +199,12 @@ public class AsyncImageSaver {
 
     /** Package-private: reset all state for test isolation. */
     static void resetForTest() {
+        List<PendingSave> toCancel;
         synchronized (pending) {
-            cancelAll(pending);
+            toCancel = new ArrayList<PendingSave>(pending);
             pending.clear();
         }
+        cancelAll(toCancel);
         IO_POOL.purge();
         IO_POOL.setCorePoolSize(1);
         IO_POOL.setMaximumPoolSize(1);
@@ -312,7 +364,7 @@ public class AsyncImageSaver {
      */
     public static void waitForAllWithProgress(int drainThreads) {
         if (AnalysisCancellation.wasCancelRequestedInActiveScope()) {
-            cancelPendingSaves("Analysis cancelled; queued image saves will not block the main UI.");
+            cancelPendingSaves("Analysis cancelled; queued saves cancelled and running writes drained.");
             return;
         }
 
@@ -556,7 +608,7 @@ public class AsyncImageSaver {
 
         IJ.log("[FLASH] " + reason);
         IJ.log("[FLASH] Image-save cleanup: cancelled " + counts.queued
-                + " queued, released " + counts.running
+                + " queued, finished " + counts.running
                 + " running, already finished " + counts.finished + ".");
         IJ.showStatus("Image saving cancelled.");
         IJ.showProgress(1.0);
@@ -582,6 +634,25 @@ public class AsyncImageSaver {
                 counts.finished++;
             }
         }
+        // Future.cancel marks its future done before a running writer has
+        // finished. The run receipt must stay open until actual owned work
+        // and image cleanup have completed, including writers ignoring interrupts.
+        boolean interrupted = false;
+        try {
+            for (PendingSave save : saves) {
+                boolean complete = false;
+                while (!complete) {
+                    try {
+                        complete = save.completed.await(100L, TimeUnit.MILLISECONDS);
+                        if (!complete) IJ.showStatus("Finishing cancelled image writes...");
+                    } catch (InterruptedException interruption) {
+                        interrupted = true;
+                    }
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
+        }
         return counts;
     }
 
@@ -604,6 +675,9 @@ public class AsyncImageSaver {
         private final AtomicBoolean started = new AtomicBoolean(false);
         private final AtomicBoolean finished = new AtomicBoolean(false);
         private final AtomicBoolean closed = new AtomicBoolean(false);
+        private final AtomicBoolean slotReleased = new AtomicBoolean(false);
+        private final CountDownLatch completed = new CountDownLatch(1);
+        private boolean cancelledBeforeStart;
         private volatile Future<?> future;
 
         PendingSave(Runnable task, ImagePlus imageToClose, String target) {
@@ -627,7 +701,10 @@ public class AsyncImageSaver {
 
         @Override
         public void run() {
-            started.set(true);
+            synchronized (this) {
+                if (cancelledBeforeStart) return;
+                started.set(true);
+            }
             Throwable primaryFailure = null;
             try {
                 if (task != null) {
@@ -640,24 +717,19 @@ public class AsyncImageSaver {
                 primaryFailure = failure;
                 throw failure;
             } finally {
-                finished.set(true);
-                closeImage(primaryFailure);
+                finishAndClose(primaryFailure);
             }
         }
 
         boolean cancelQueuedBeforeInterrupt() {
-            if (started.get() || finished.get()) {
-                return false;
+            synchronized (this) {
+                if (started.get() || finished.get()) return false;
+                cancelledBeforeStart = true;
+                Future<?> f = future;
+                if (f != null) f.cancel(false);
             }
-            Future<?> f = future;
-            if (f != null) {
-                f.cancel(false);
-            }
-            if (!started.get()) {
-                closeImage();
-                return true;
-            }
-            return false;
+            finishAndClose(null);
+            return true;
         }
 
         CancelResult cancelAfterQueuedPass() {
@@ -673,8 +745,17 @@ public class AsyncImageSaver {
             if (wasStarted || started.get()) {
                 return CancelResult.RUNNING;
             }
-            closeImage();
+            finishAndClose(null);
             return CancelResult.QUEUED;
+        }
+
+        private void finishAndClose(Throwable primaryFailure) {
+            try {
+                closeImage(primaryFailure);
+            } finally {
+                finished.set(true);
+                completed.countDown();
+            }
         }
 
         private void closeImage() {
@@ -682,6 +763,14 @@ public class AsyncImageSaver {
         }
 
         private void closeImage(Throwable primaryFailure) {
+            try {
+                closeOwnedImage(primaryFailure);
+            } finally {
+                if (slotReleased.compareAndSet(false, true)) SAVE_SLOTS.release();
+            }
+        }
+
+        private void closeOwnedImage(Throwable primaryFailure) {
             if (imageToClose != null && closed.compareAndSet(false, true)) {
                 Throwable cleanupFailure = null;
                 try {

@@ -13,6 +13,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
@@ -263,6 +264,7 @@ public final class SpectralOutputWriter {
             row.putAll(existing);
         }
         row.put("RunAction", clean(runAction));
+        preserveSourceRunId(row);
         if (message != null && !message.trim().isEmpty()) {
             row.put("Message", message.trim());
         }
@@ -279,9 +281,17 @@ public final class SpectralOutputWriter {
             LinkedHashMap<String, String> row = new LinkedHashMap<String, String>();
             row.putAll(existing);
             row.put("RunAction", clean(runAction));
+            preserveSourceRunId(row);
             rows.add(row);
         }
         return rows;
+    }
+
+    static void preserveSourceRunId(Map<String, String> row) {
+        if (row == null || !"skipped_existing".equals(clean(row.get("RunAction")))) return;
+        if (clean(row.get(RunIdCsv.SOURCE_RUN_ID_COLUMN)).isEmpty()) {
+            row.put(RunIdCsv.SOURCE_RUN_ID_COLUMN, clean(row.get(RunIdCsv.RUN_ID_COLUMN)));
+        }
     }
 
     public static void writePerImageSummary(String directory,
@@ -378,7 +388,22 @@ public final class SpectralOutputWriter {
         return file;
     }
 
-    private static void saveImage(ImagePlus image, File outputFile) throws IOException {
+    interface ImageSaveAction {
+        boolean save(ImagePlus image, File stagedFile) throws IOException;
+    }
+
+    static void saveImage(ImagePlus image, File outputFile) throws IOException {
+        saveImage(image, outputFile, new ImageSaveAction() {
+            @Override public boolean save(ImagePlus value, File stagedFile) {
+                FileSaver saver = new FileSaver(value);
+                return value.getStackSize() > 1
+                        ? saver.saveAsTiffStack(stagedFile.getAbsolutePath())
+                        : saver.saveAsTiff(stagedFile.getAbsolutePath());
+            }
+        });
+    }
+
+    static void saveImage(ImagePlus image, File outputFile, ImageSaveAction action) throws IOException {
         if (image == null) {
             throw new IllegalArgumentException("image must not be null");
         }
@@ -389,12 +414,46 @@ public final class SpectralOutputWriter {
         if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
             throw new IOException("Could not create " + parent.getAbsolutePath());
         }
-        FileSaver saver = new FileSaver(image);
-        boolean saved = image.getStackSize() > 1
-                ? saver.saveAsTiffStack(outputFile.getAbsolutePath())
-                : saver.saveAsTiff(outputFile.getAbsolutePath());
-        if (!saved) {
-            throw new IOException("Could not save image to " + outputFile.getAbsolutePath());
+        Path target = outputFile.toPath().toAbsolutePath();
+        Path staged = Files.createTempFile(target.getParent(), ".spectral-image-", ".tif");
+        try {
+            if (!action.save(image, staged.toFile()) || Files.size(staged) == 0L) {
+                throw new IOException("Could not save image to " + outputFile.getAbsolutePath());
+            }
+            validateStagedTiff(image, staged);
+            // Publish only a completed save; failed writes must leave the previous result intact.
+            flash.pipeline.io.IoUtils.moveReplacing(staged, target);
+        } finally {
+            Files.deleteIfExists(staged);
+        }
+    }
+
+    private static void validateStagedTiff(ImagePlus source, Path staged) throws IOException {
+        ImagePlus reopened = new ij.io.Opener().openImage(staged.toString());
+        if (reopened == null) throw new IOException("Could not reopen staged TIFF " + staged);
+        try {
+            if (reopened.getWidth() != source.getWidth() || reopened.getHeight() != source.getHeight()
+                    || reopened.getStackSize() != source.getStackSize()
+                    || reopened.getBitDepth() != source.getBitDepth()
+                    || reopened.getNChannels() != source.getNChannels()
+                    || reopened.getNSlices() != source.getNSlices()
+                    || reopened.getNFrames() != source.getNFrames()) {
+                throw new IOException("Staged TIFF dimensions or pixel type differ from source " + staged);
+            }
+            for (int slice = 1; slice <= source.getStackSize(); slice++) {
+                ij.process.ImageProcessor expected = source.getStack().getProcessor(slice);
+                ij.process.ImageProcessor actual = reopened.getStack().getProcessor(slice);
+                for (int pixel = 0; pixel < expected.getPixelCount(); pixel++) {
+                    if (Float.floatToIntBits(expected.getf(pixel))
+                            != Float.floatToIntBits(actual.getf(pixel))) {
+                        throw new IOException("Staged TIFF pixel content differs from source " + staged);
+                    }
+                }
+            }
+        } finally {
+            reopened.changes = false;
+            reopened.close();
+            reopened.flush();
         }
     }
 
@@ -482,7 +541,12 @@ public final class SpectralOutputWriter {
 
         List<Map<String, String>> sortedRows = new ArrayList<Map<String, String>>();
         if (rows != null) {
-            sortedRows.addAll(rows);
+            for (Map<String, String> row : rows) {
+                Map<String, String> copy = new LinkedHashMap<String, String>();
+                if (row != null) copy.putAll(row);
+                preserveSourceRunId(copy);
+                sortedRows.add(copy);
+            }
         }
         if (comparator != null) {
             Collections.sort(sortedRows, comparator);

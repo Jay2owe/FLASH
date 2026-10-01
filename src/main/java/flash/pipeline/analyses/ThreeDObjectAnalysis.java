@@ -134,7 +134,6 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -394,7 +393,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 }
             };
     private static final String OBJECT_PRESET_PLACEHOLDER = "(choose preset)";
-    private final AtomicBoolean calibrationWritten = new AtomicBoolean(false);
+    private CalibrationIO.SharedCalibrationTracker calibrationTracker =
+            new CalibrationIO.SharedCalibrationTracker();
     private boolean useDeconvolvedInput = true;
     // Per-run per-channel routing for this analysis's ANALYSIS group, built once by
     // DeconvRoutingResolver before the input supplier is wrapped (Stage 15). Replaces the whole-image
@@ -892,6 +892,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     @Override
     public void execute(String directory) {
         clearRetainedSpatialLabels();
+        calibrationTracker = new CalibrationIO.SharedCalibrationTracker();
 
         if (!FeatureDependencyGate.gate(DependencyId.BIO_FORMATS_RUNTIME,
                 "3D Object Analysis", "Bio-Formats image loading")) {
@@ -1404,6 +1405,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         File outDir = objectCsvWriteDir(directory);
         //noinspection ResultOfMethodCallIgnored
         outDir.mkdirs();
+        if (extendExistingObjectData) calibrationTracker.seedFromExisting(outDir);
 
         File objectAnalysisDetailsDir = ObjectAnalysisDetailsWriter.analysisDetailsWriteDir(new File(directory));
         //noinspection ResultOfMethodCallIgnored
@@ -1562,6 +1564,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         analysisStartTime);
             }
         } finally {
+            recordOutputIfExists(new File(outDir, "calibration.properties"), "properties");
             objectProgressReporter.finish("3D Object image and ROI processing finished");
             objectProgressReporter = AnalysisProgressReporter.disabled();
             objectImageProgress.remove();
@@ -3011,6 +3014,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
 
         ExecutorService prefetcher = Executors.newSingleThreadExecutor();
         Future<ImagePlus> nextImage = null;
+        final java.util.concurrent.atomic.AtomicReference<ImagePlus> prefetchedOwner =
+                new java.util.concurrent.atomic.AtomicReference<ImagePlus>();
+        try {
 
         for (int i = 0; i < totalImages; i++) {
             beginObjectImageProgress(i + 1, totalImages, "image " + (i + 1), "loading");
@@ -3021,6 +3027,10 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             if (nextImage != null) {
                 try {
                     imp = nextImage.get();
+                    prefetchedOwner.compareAndSet(imp, null);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("3D Object Analysis loading interrupted", e);
                 } catch (Exception e) {
                     String message = "ERROR: Failed to load prefetched image " + (i + 1) + ": " + e.getMessage();
                     IJ.log(message);
@@ -3034,6 +3044,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 IJ.log("Loading image " + (i + 1) + "/" + totalImages + "...");
                 try {
                     imp = supplier.openSeries(i);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("3D Object Analysis loading interrupted", e);
                 } catch (Exception e) {
                     String message = "ERROR: Failed to open image " + (i + 1) + ": " + e.getMessage();
                     IJ.log(message);
@@ -3046,13 +3059,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 completeObjectImageProgress("image " + (i + 1) + " skipped (not loaded)");
                 continue;
             }
+            try {
             imp = applyConfiguredZSliceSubset(cfg, i, imp, "3D Object Analysis");
-
-            // Write calibration from the first successfully-loaded image
-            if (calibrationWritten.compareAndSet(false, true)) {
-                CalibrationIO.writeFromImage(outDir, imp);
-                recordOutputIfExists(new File(outDir, "calibration.properties"), "properties");
-            }
 
             // Start loading next image while processing this one
             if (i + 1 < totalImages) {
@@ -3060,7 +3068,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 nextImage = prefetcher.submit(new Callable<ImagePlus>() {
                     @Override
                     public ImagePlus call() throws Exception {
-                        return supplier.openSeries(nextIdx);
+                        ImagePlus loaded = supplier.openSeries(nextIdx);
+                        prefetchedOwner.set(loaded);
+                        return loaded;
                     }
                 });
             }
@@ -3099,6 +3109,8 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
             logOrientationResolution(metadata);
             updateObjectProgress("orientation");
             OrientationOps.applyTransform(imp, metadata);
+            // Aggregate tables use coordinates measured after orientation.
+            calibrationTracker.register(outDir, imp);
 
             // Determine if the count-once-assign-per-ROI optimisation can be used.
             // Requires: all channels use centroid filtering, multiple ROI sets,
@@ -3146,11 +3158,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 recordError("3D Object Analysis failed while processing image " + (i + 1), ex);
                 failObjectImageProgress("image " + (i + 1) + " failed");
             } finally {
-                imp.changes = false;
-                imp.close();
-                imp.flush();
-                closeAllNoPrompt();
-
                 long elapsed = System.currentTimeMillis() - analysisStartTime;
                 long avgPerImage = elapsed / (i + 1);
                 long remainingMs = avgPerImage * (totalImages - (i + 1));
@@ -3164,8 +3171,42 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 }
 
             }
+            } finally {
+                if (imp != null) {
+                    imp.changes = false;
+                    imp.close();
+                    imp.flush();
+                }
+                // Close only this analysis's images. Global Close All can discard
+                // unrelated images or an importer's newly opened prefetched image.
+                clearRegistry();
+            }
         }
-        prefetcher.shutdown();
+        } finally {
+            boolean interrupted = Thread.interrupted();
+            if (nextImage != null) nextImage.cancel(true);
+            prefetcher.shutdownNow();
+            try {
+                // Future cancellation can hide a returned image, so ownership
+                // lives in prefetchedOwner until transfer or physical shutdown.
+                while (!prefetcher.isTerminated()) {
+                    try {
+                        prefetcher.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                        prefetcher.shutdownNow();
+                    }
+                }
+                ImagePlus abandoned = prefetchedOwner.getAndSet(null);
+                if (abandoned != null) {
+                    abandoned.changes = false;
+                    abandoned.close();
+                    abandoned.flush();
+                }
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
+        }
     }
 
     // ── Parallel image processing ──
@@ -3184,11 +3225,17 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         final AtomicInteger completed = new AtomicInteger(0);
         final List<Throwable> failures =
                 Collections.synchronizedList(new ArrayList<Throwable>());
+        if (total <= 0) {
+            loader.close();
+            return;
+        }
         int effectiveThreads = Math.min(nThreads, total);
 
         ExecutorService pool = Executors.newFixedThreadPool(effectiveThreads);
         List<Future<?>> futures = new ArrayList<Future<?>>();
+        boolean workersObserved = false;
 
+        try {
         for (int t = 0; t < effectiveThreads; t++) {
             final int workerNum = t + 1;
             futures.add(pool.submit(new Runnable() {
@@ -3209,6 +3256,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         int scnIndex = idx + 1;
                         String imgTitle = imp == null ? "<null image>" : imp.getTitle();
                         String partLabel = imgTitle;
+                        try {
                         beginObjectImageProgress(scnIndex, total, partLabel,
                                 "worker " + workerNum + " loaded image");
                         imp = applyConfiguredZSliceSubset(cfg, idx, imp, "3D Object Analysis");
@@ -3217,12 +3265,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         if (imp == null) {
                             completeObjectImageProgress("image " + scnIndex + " skipped (not loaded)");
                             continue;
-                        }
-
-                        // Write calibration from the first image (thread-safe)
-                        if (calibrationWritten.compareAndSet(false, true)) {
-                            CalibrationIO.writeFromImage(outDir, imp);
-                            recordOutputIfExists(new File(outDir, "calibration.properties"), "properties");
                         }
 
                         ParallelContext.enterParallel();
@@ -3236,7 +3278,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             localChannelTables.put(chName, new ij.measure.ResultsTable());
                         }
 
-                        try {
                             ResolvedImageMetadata metadata = ImageOrientationResolver.resolve(
                                     directory, imgTitle, idx + 1);
                             NameParts parts = metadata.toNameParts();
@@ -3267,6 +3308,7 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                             logOrientationResolution(metadata);
                             updateObjectProgress("orientation");
                             OrientationOps.applyTransform(imp, metadata);
+                            calibrationTracker.register(outDir, imp);
 
                             // Check if count-once optimisation applies (incl. heap budget)
                             boolean allCentroid = true;
@@ -3399,7 +3441,29 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                 recordError("Parallel processing error: " + msg, cause);
             }
         }
-        pool.shutdown();
+        workersObserved = true;
+        } finally {
+            boolean interrupted = Thread.interrupted();
+            if (!workersObserved || interrupted) {
+                for (Future<?> future : futures) future.cancel(true);
+                pool.shutdownNow();
+            } else {
+                pool.shutdown();
+            }
+            try {
+                while (!pool.isTerminated()) {
+                    try {
+                        pool.awaitTermination(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                        pool.shutdownNow();
+                    }
+                }
+                loader.close();
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
+        }
         if (!failures.isEmpty()) {
             throw buildParallelFailure("3D Object Analysis failed for "
                     + failures.size() + " image(s)", failures);
@@ -3465,24 +3529,29 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
     }
 
     /** Process length extraction with explicit channel tables (for parallel use). */
+    static double processVoxelLengthScaleMicrons(Calibration cal) {
+        if (cal == null) return Double.NaN;
+        CalibrationIO.PixelCalibration physical = new CalibrationIO.PixelCalibration(
+                cal.pixelWidth, cal.pixelHeight, cal.pixelDepth, cal.getUnit());
+        if (!physical.isCalibrated()) return Double.NaN;
+        return Math.cbrt(physical.canonical().x().microns())
+                * Math.cbrt(physical.canonical().y().microns())
+                * Math.cbrt(physical.canonical().z().microns());
+    }
+
     private void processLengthExtractionWithTables(BinConfig cfg, Map<String, ij.measure.ResultsTable> channelTables,
                                                     ImagePlus imp, int scnIndex, String animalName,
                                                     String hemisphere, String region, String roiLabel,
                                                     boolean[] processChannels, int nuclearMarkerIndex) {
         if (!compactLog) IJ.log("  > Process Length Extraction");
         Calibration cal = imp.getCalibration();
-        double pixelWidth = (cal != null) ? cal.pixelWidth : 1.0;
-        double pixelHeight = (cal != null) ? cal.pixelHeight : 1.0;
-        double pixelDepth = (cal != null) ? cal.pixelDepth : 1.0;
         // Per-voxel skeleton length scale. For isotropic XY (pixelWidth==pixelHeight==pixelDepth)
         // this is just pixelWidth. For anisotropic stacks, fall back to the geometric mean of
         // all three calibration axes — closer to a direction-agnostic mean voxel step than any
         // single axis would give. TODO: switch to Object3DInt.getMeasure(LIGNE3D) for true
         // step-direction-weighted skeleton length.
-        double voxelLengthScale = pixelWidth;
-        if (pixelWidth != pixelHeight || pixelWidth != pixelDepth) {
-            voxelLengthScale = Math.cbrt(pixelWidth * pixelHeight * pixelDepth);
-        }
+        double voxelLengthScale = processVoxelLengthScaleMicrons(cal);
+        recordWarn("Process Length is a skeleton-voxel-count approximation using the geometric mean voxel spacing in microns; it is not a direction-weighted path length. Missing physical XYZ calibration produces unavailable length values.");
 
         for (int c = 0; c < cfg.numChannels(); c++) {
             if (!processChannels[c]) continue;
@@ -7955,17 +8024,6 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
         } catch (NumberFormatException e) {
             return null;
         }
-    }
-
-    private void closeAllNoPrompt() {
-        int[] ids = WindowManager.getIDList();
-        if (ids != null) {
-            for (int id : ids) {
-                ImagePlus imp = WindowManager.getImage(id);
-                if (imp != null) imp.changes = false;
-            }
-        }
-        IJ.run("Close All");
     }
 
     /** Closes all image windows and non-Log text windows, leaving the Log window visible. */

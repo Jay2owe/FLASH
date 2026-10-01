@@ -8,6 +8,8 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -133,6 +135,39 @@ public class OrientationManifestIOTest {
     }
 
     @Test
+    public void malformedExistingManifestRefusesFilenameFallback() throws Exception {
+        File root = temp.newFolder("broken-orientation");
+        File manifest = OrientationManifestIO.getFile(root.getAbsolutePath());
+        Files.createDirectories(manifest.getParentFile().toPath());
+        Files.write(manifest.toPath(), "ImageKey,SourceFile\nKEY,\"unterminated\n"
+                .getBytes(StandardCharsets.UTF_8));
+        try {
+            flash.pipeline.naming.ImageOrientationResolver.resolve(root.getAbsolutePath(),
+                    "Exp-Mouse1_LH_SCN", 1);
+            org.junit.Assert.fail("malformed persisted orientation must not silently relabel an image");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("refusing filename fallback"));
+            assertTrue(expected.getCause() instanceof java.io.IOException);
+        }
+    }
+
+    @Test
+    public void truncatedConfirmedRowFailsInsteadOfDefaultingTransforms() throws Exception {
+        File root = temp.newFolder("truncated-orientation");
+        File manifest = OrientationManifestIO.getFile(root.getAbsolutePath());
+        OrientationManifestIO.saveRows(root.getAbsolutePath(), Arrays.asList(row("KEY", "valid")));
+        String header = Files.readAllLines(manifest.toPath(), StandardCharsets.UTF_8).get(0);
+        Files.write(manifest.toPath(), (header + "\nKEY,source.tif,1,Name,Display,Animal,LH\n")
+                .getBytes(StandardCharsets.UTF_8));
+        try {
+            OrientationManifestIO.readIfExists(root.getAbsolutePath());
+            org.junit.Assert.fail("truncated row must fail");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getCause().getMessage().contains("expected 15"));
+        }
+    }
+
+    @Test
     public void read_skipsBlankRowsAndRowsWithoutImageKey() throws Exception {
         File dir = temp.newFolder("malformed");
         File manifest = OrientationManifestIO.getFile(dir.getAbsolutePath());
@@ -164,7 +199,7 @@ public class OrientationManifestIOTest {
         PrintWriter pw = CsvSupport.newWriter(manifest);
         try {
             pw.println("ImageKey,SourceFile,SeriesIndex,OriginalName,DisplayName,AnimalName,Hemisphere,Region,RotateDegrees,FlipHorizontal,FlipVertical,ViewPolicy,DecisionSource,Confirmed,Notes");
-            pw.println("KEY,source.tif,0,Original,Display,Animal,rh,SCN,270,true,1,standardize_to_right,folder alias,true,normalised");
+            pw.println("KEY,source.tif,1,Original,Display,Animal,rh,SCN,270,true,1,standardize_to_right,folder alias,true,normalised");
             pw.println("BADROT,source.tif,bad,Original,Display,Animal,bad,SCN,45,false,no,bad,bad,false,safe defaults");
         } finally {
             pw.close();
@@ -208,6 +243,25 @@ public class OrientationManifestIOTest {
         assertEquals(2, byKey.size());
         assertEquals("second", byKey.get("KEY").notes);
         assertEquals("third", byKey.get("OTHER").notes);
+    }
+
+    @Test
+    public void invalidConfirmedTransformFailsRatherThanBecomingZeroRotation() throws Exception {
+        File root = temp.newFolder("bad-confirmed-transform");
+        File manifest = OrientationManifestIO.getFile(root.getAbsolutePath());
+        OrientationManifestIO.saveRows(root.getAbsolutePath(), Arrays.asList(row("KEY", "valid")));
+        String header = Files.readAllLines(manifest.toPath(), StandardCharsets.UTF_8).get(0);
+        for (String transform : new String[]{"45,No,No", "0,garbled,No"}) {
+            Files.write(manifest.toPath(), (header
+                    + "\nKEY,source.tif,1,Original,Display,Animal,LH,SCN," + transform
+                    + ",ManualOnly,Manual,Yes,invalid\n").getBytes(StandardCharsets.UTF_8));
+            try {
+                OrientationManifestIO.readIfExists(root.getAbsolutePath());
+                org.junit.Assert.fail("confirmed transform must not silently change");
+            } catch (IllegalStateException expected) {
+                assertTrue(expected.getCause().getMessage().contains("invalid"));
+            }
+        }
     }
 
     private static OrientationManifestRow row(String key, String notes) {

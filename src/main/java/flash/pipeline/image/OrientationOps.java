@@ -3,6 +3,7 @@ package flash.pipeline.image;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
+import ij.measure.Calibration;
 import ij.process.ImageProcessor;
 import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
@@ -163,6 +164,7 @@ public final class OrientationOps {
             newStack.addSlice(labels[i], rotatedSlices[i]);
         }
         setStackPreservingDimensions(imp, newStack, oldStack.getSize());
+        rotateCalibration(imp, oldW, oldH, false);
     }
 
     /** Flip all slices horizontally. Thread-safe. */
@@ -173,6 +175,9 @@ public final class OrientationOps {
             ImageProcessor ip = stack.getProcessor(s);
             ip.flipHorizontal();
         }
+        Calibration calibration = imp.getCalibration().copy();
+        calibration.xOrigin = imp.getWidth() - 1 - calibration.xOrigin;
+        imp.setCalibration(calibration);
     }
 
     /** Flip all slices vertically. Thread-safe. */
@@ -183,6 +188,9 @@ public final class OrientationOps {
             ImageProcessor ip = stack.getProcessor(s);
             ip.flipVertical();
         }
+        Calibration calibration = imp.getCalibration().copy();
+        calibration.yOrigin = imp.getHeight() - 1 - calibration.yOrigin;
+        imp.setCalibration(calibration);
     }
 
     private static void rotateClockwise(ImagePlus imp, int normalizedDegrees) {
@@ -250,6 +258,20 @@ public final class OrientationOps {
             newStack.addSlice(labels[i], rotatedSlices[i]);
         }
         setStackPreservingDimensions(imp, newStack, oldStack.getSize());
+        rotateCalibration(imp, oldW, oldH, true);
+    }
+
+    private static void rotateCalibration(ImagePlus imp, int oldWidth,
+                                          int oldHeight, boolean clockwise) {
+        Calibration calibration = imp.getCalibration().copy();
+        double oldPixelWidth = calibration.pixelWidth;
+        double oldXOrigin = calibration.xOrigin;
+        double oldYOrigin = calibration.yOrigin;
+        calibration.pixelWidth = calibration.pixelHeight;
+        calibration.pixelHeight = oldPixelWidth;
+        calibration.xOrigin = clockwise ? oldHeight - 1 - oldYOrigin : oldYOrigin;
+        calibration.yOrigin = clockwise ? oldXOrigin : oldWidth - 1 - oldXOrigin;
+        imp.setCalibration(calibration);
     }
 
     private static void setStackPreservingDimensions(ImagePlus imp,

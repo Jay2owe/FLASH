@@ -18,9 +18,17 @@ public final class ClickStore {
         public final double y;
         public final Verdict verdict;
         public final long timestampMs;
+        /** Pixel and geometry identity of the original segmentation at capture time. */
+        public final String segmentationFingerprint;
 
         public Click(String imageName, int channelOneBased, int label, int z,
                      double x, double y, Verdict verdict, long timestampMs) {
+            this(imageName, channelOneBased, label, z, x, y, verdict, timestampMs, "");
+        }
+
+        public Click(String imageName, int channelOneBased, int label, int z,
+                     double x, double y, Verdict verdict, long timestampMs,
+                     String segmentationFingerprint) {
             this.imageName = imageName == null ? "" : imageName;
             this.channelOneBased = channelOneBased;
             this.label = label;
@@ -29,6 +37,8 @@ public final class ClickStore {
             this.y = y;
             this.verdict = verdict == null ? Verdict.NEGATIVE : verdict;
             this.timestampMs = timestampMs;
+            this.segmentationFingerprint = segmentationFingerprint == null
+                    ? "" : segmentationFingerprint;
         }
     }
 

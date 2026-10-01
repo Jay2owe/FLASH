@@ -42,6 +42,24 @@ public class ExcelSummaryExportAnalysisTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
+    public void malformedMasterTailCannotReplaceCompleteWorkbookWithPartialData() throws Exception {
+        File dir = temp.newFolder("excel-malformed-master");
+        createMinimalProject(dir);
+        ExcelSummaryExportAnalysis analysis = configuredMetricAnalysis();
+        analysis.execute(dir.getAbsolutePath());
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
+        File workbook = layout.summaryWorkbookWriteFile();
+        assertTrue(workbook.isFile());
+        byte[] previous = Files.readAllBytes(workbook.toPath());
+        File master = new File(layout.tablesProjectSummaryWriteDir(),
+                FlashProjectLayout.MASTER_OBJECTS_FILENAME);
+        Files.write(master.toPath(), "AnimalName,GFAP_Count\nMouse1,999\n\"unterminated"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        analysis.execute(dir.getAbsolutePath());
+        assertArrayEquals(previous, Files.readAllBytes(workbook.toPath()));
+    }
+
+    @Test
     public void hideImageWindowsFlagAloneDoesNotSuppressExportConfigDialog() {
         assertTrue(ExcelSummaryExportAnalysis.canShowGuiDialog(false, false, false));
         assertFalse(ExcelSummaryExportAnalysis.canShowGuiDialog(true, false, false));
@@ -539,14 +557,18 @@ public class ExcelSummaryExportAnalysisTest {
 
     private static Set<String> sxssfTempFiles(Path root) throws IOException {
         Set<String> files = new HashSet<String>();
-        if (!Files.exists(root)) return files;
-        java.util.stream.Stream<Path> stream = Files.walk(root);
-        try {
-            stream.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().startsWith("poi-sxssf-sheet"))
-                    .forEach(path -> files.add(path.toAbsolutePath().normalize().toString()));
-        } finally {
-            stream.close();
+        // POI's default strategy puts sheet files directly under poifiles.
+        // Traversing all Windows temp trees also visits unrelated inaccessible
+        // agent/application folders and makes cleanup checks fail spuriously.
+        Path poiDirectory = root.resolve("poifiles");
+        try (java.nio.file.DirectoryStream<Path> stream = Files.newDirectoryStream(
+                poiDirectory, "poi-sxssf-sheet*")) {
+            for (Path path : stream) {
+                files.add(path.toAbsolutePath().normalize().toString());
+            }
+        } catch (java.nio.file.NoSuchFileException absentDirectory) {
+            // No POI directory has been created yet; access and enumeration
+            // failures in an existing POI directory still fail the test.
         }
         return files;
     }

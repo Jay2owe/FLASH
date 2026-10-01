@@ -239,8 +239,8 @@ public class AnalysisRunCoordinatorTest {
             RunRecord record = RunRecordIO.readLatest(latestRecordFile(project));
             assertEquals("warn", record.status);
             assertEquals(1, record.outputs.size());
-            assertTrue(record.messages.get(record.messages.size() - 1).text
-                    .contains("cancelled"));
+            assertTrue(record.messages.stream().anyMatch(message ->
+                    message.text.contains("cancelled")));
         } finally {
             scope.close();
         }

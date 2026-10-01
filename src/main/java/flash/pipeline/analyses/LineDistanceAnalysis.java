@@ -1073,12 +1073,16 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
 
         // Read pixel calibration from file written by 3D Object Analysis
         CalibrationIO.PixelCalibration cal = CalibrationIO.read(objectsDir);
-        double pixelSize;
-        if (cal != null && cal.isCalibrated()) {
-            pixelSize = cal.pixelWidth;
-            IJ.log("  Using calibration: " + pixelSize + " " + cal.unit + "/pixel");
+        double pixelWidth;
+        double pixelHeight;
+        if (cal != null && cal.canonical().x().hasMicrons()
+                && cal.canonical().y().hasMicrons()) {
+            pixelWidth = cal.canonical().x().microns();
+            pixelHeight = cal.canonical().y().microns();
+            IJ.log("  Using calibration: " + pixelWidth + " x " + pixelHeight + " micron/pixel");
         } else {
-            pixelSize = 1.0;
+            pixelWidth = 1.0;
+            pixelHeight = 1.0;
             recordWarn("No calibration found; line distances will be in pixels.");
             IJ.log("  Warning: no calibration found - distances will be in pixels.");
         }
@@ -1208,7 +1212,7 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
                         skipped++;
                         continue;
                     }
-                    java.awt.Polygon polygon = lineRoi.getPolygon();
+                    ij.process.FloatPolygon polygon = lineRoi.getFloatPolygon();
                     if (polygon == null || polygon.npoints < 2) {
                         cd.set(r, distCol, "Inf");
                         skipped++;
@@ -1225,13 +1229,12 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
                     }
 
                     // Compute min perpendicular distance to line segments
-                    double minDistPx = minDistToPolyline(
+                    double distance = minDistToPolyline(
                             objXPx, objYPx,
                             polygon.xpoints, polygon.ypoints,
-                            polygon.npoints);
+                            polygon.npoints, pixelWidth, pixelHeight);
 
-                    double distMicrons = minDistPx * pixelSize;
-                    cd.set(r, distCol, CsvTableIO.formatDist(distMicrons));
+                    cd.set(r, distCol, CsvTableIO.formatDist(distance));
                     computed++;
                 }
 
@@ -1364,15 +1367,19 @@ public class LineDistanceAnalysis implements Analysis, RunRecordAware {
      * distance across all segments.
      */
     private static double minDistToPolyline(double px, double py,
-                                            int[] xpoints, int[] ypoints,
-                                            int npoints) {
+                                            float[] xpoints, float[] ypoints,
+                                            int npoints, double pixelWidth, double pixelHeight) {
+        // Scale both the point and segments before projecting: anisotropic
+        // pixels change the nearest point as well as the distance.
+        px *= pixelWidth;
+        py *= pixelHeight;
         double minDist = Double.MAX_VALUE;
 
         for (int i = 0; i < npoints - 1; i++) {
-            double x1 = xpoints[i];
-            double y1 = ypoints[i];
-            double x2 = xpoints[i + 1];
-            double y2 = ypoints[i + 1];
+            double x1 = xpoints[i] * pixelWidth;
+            double y1 = ypoints[i] * pixelHeight;
+            double x2 = xpoints[i + 1] * pixelWidth;
+            double y2 = ypoints[i + 1] * pixelHeight;
 
             double segDx = x2 - x1;
             double segDy = y2 - y1;

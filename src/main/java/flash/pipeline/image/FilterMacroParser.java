@@ -236,12 +236,14 @@ public final class FilterMacroParser {
             String t = line.trim();
             if (t.isEmpty()) continue;
 
-            // Skip line-level comments. Block-comment bodies are not stripped — by
-            // convention bundled presets use only //-style comments.
-            if (t.startsWith("//") || t.startsWith("/*") || t.startsWith("*")) continue;
+            if (t.startsWith("//")) continue;
+            // Only a complete, comment-only block can be skipped safely. An
+            // unclosed block must force macro execution, including its body.
+            if (t.startsWith("/*") && t.indexOf("*/") == t.length() - 2) continue;
 
             Matcher m = RUN_PATTERN.matcher(t);
-            if (!m.find()) {
+            if (!m.find() || !t.substring(0, m.start()).trim().isEmpty()
+                    || !isStatementEnd(t.substring(m.end()))) {
                 // Anything else (selectWindow, imageCalculator, close, rename,
                 // assignments, etc.) is opaque to this parser — keep the line as
                 // UNKNOWN so the caller falls back to the legacy macro path.
@@ -263,5 +265,11 @@ public final class FilterMacroParser {
             }
         }
         return ops;
+    }
+
+    private static boolean isStatementEnd(String suffix) {
+        String tail = suffix.trim();
+        if (tail.startsWith(";")) tail = tail.substring(1).trim();
+        return tail.isEmpty() || tail.startsWith("//");
     }
 }

@@ -8,6 +8,8 @@ import ij.process.ImageProcessor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -46,7 +48,8 @@ public final class ImageCalcOps {
      */
     public static ImagePlus andStackThreadSafe(ImagePlus a, ImagePlus b) {
         if (a == null || b == null) return null;
-        int nSlices = Math.min(a.getStackSize(), b.getStackSize());
+        requireMatchingGeometry(a, b);
+        int nSlices = a.getStackSize();
         final ImageProcessor[] sliceResults = new ImageProcessor[nSlices];
 
         if (nSlices < PARALLEL_THRESHOLD) {
@@ -68,6 +71,7 @@ public final class ImageCalcOps {
         }
         ImagePlus out = new ImagePlus("AND_result", result);
         out.setCalibration(b.getCalibration().copy());
+        copyDimensions(b, out);
         return out;
     }
 
@@ -95,7 +99,8 @@ public final class ImageCalcOps {
      */
     public static ImagePlus subtractStackThreadSafe(ImagePlus a, ImagePlus b) {
         if (a == null || b == null) return null;
-        int nSlices = Math.min(a.getStackSize(), b.getStackSize());
+        requireMatchingGeometry(a, b);
+        int nSlices = a.getStackSize();
         final ImageProcessor[] sliceResults = new ImageProcessor[nSlices];
 
         if (nSlices < PARALLEL_THRESHOLD) {
@@ -117,7 +122,24 @@ public final class ImageCalcOps {
         }
         ImagePlus out = new ImagePlus("Subtract_result", result);
         out.setCalibration(a.getCalibration().copy());
+        copyDimensions(a, out);
         return out;
+    }
+
+    private static void requireMatchingGeometry(ImagePlus a, ImagePlus b) {
+        if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()
+                || a.getStackSize() != b.getStackSize()
+                || a.getNChannels() != b.getNChannels()
+                || a.getNSlices() != b.getNSlices()
+                || a.getNFrames() != b.getNFrames()) {
+            throw new IllegalArgumentException("Cannot combine images with different pixel or C/Z/T dimensions: "
+                    + a.getTitle() + " and " + b.getTitle());
+        }
+    }
+
+    private static void copyDimensions(ImagePlus source, ImagePlus target) {
+        target.setDimensions(source.getNChannels(), source.getNSlices(), source.getNFrames());
+        target.setOpenAsHyperStack(source.getOpenAsHyperStack());
     }
 
     private static ImageProcessor subtractSlice(ImagePlus a, ImagePlus b, int slice) {
@@ -149,8 +171,9 @@ public final class ImageCalcOps {
     private static void parallelProcessSlices(int nSlices, final SliceTask task) {
         int nThreads = Math.min(nSlices, Runtime.getRuntime().availableProcessors());
         ExecutorService exec = Executors.newFixedThreadPool(nThreads);
+        List<Future<?>> futures = new ArrayList<Future<?>>();
+        boolean completed = false;
         try {
-            List<Future<?>> futures = new ArrayList<Future<?>>();
             for (int s = 1; s <= nSlices; s++) {
                 final int slice = s;
                 futures.add(exec.submit(new Runnable() {
@@ -163,12 +186,36 @@ public final class ImageCalcOps {
             for (Future<?> f : futures) {
                 try {
                     f.get();
-                } catch (Exception e) {
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Parallel image calc interrupted", e);
+                } catch (ExecutionException e) {
                     throw new RuntimeException("Parallel image calc failed", e);
                 }
             }
+            completed = true;
         } finally {
-            exec.shutdown();
+            boolean interrupted = Thread.interrupted();
+            if (completed) {
+                exec.shutdown();
+            } else {
+                for (Future<?> future : futures) future.cancel(true);
+                exec.shutdownNow();
+            }
+            try {
+                // Callers may close inputs immediately after failure or cancellation.
+                // Wait until no worker can still read them.
+                while (!exec.isTerminated()) {
+                    try {
+                        exec.awaitTermination(100, TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                        exec.shutdownNow();
+                    }
+                }
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
         }
     }
 }

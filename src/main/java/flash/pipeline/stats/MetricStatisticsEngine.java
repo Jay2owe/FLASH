@@ -610,29 +610,50 @@ public final class MetricStatisticsEngine {
         if (n < 8) return Double.MAX_VALUE;
 
         double mean = mean(data);
-        double std = stdDev(data, mean);
-        if (std == 0) return 0.0;
-
-        double m3 = 0, m4 = 0;
+        double m2 = 0, m3 = 0, m4 = 0;
         for (double x : data) {
             double d = x - mean;
+            m2 += d * d;
             m3 += d * d * d;
             m4 += d * d * d * d;
         }
+        m2 /= n;
         m3 /= n;
         m4 /= n;
-        double skewness = m3 / (std * std * std);
-        double kurtosis = m4 / (std * std * std * std) - 3.0;
+        if (m2 == 0.0) return 0.0; // Preserve the constant-sample routing contract.
+        double sampleSize = n;
+        double skewness = m3 / Math.pow(m2, 1.5);
+        double kurtosis = m4 / (m2 * m2);
 
-        double seSkew = Math.sqrt(6.0 * (n - 2) / ((n + 1.0) * (n + 3.0)));
-        double seKurt = Math.sqrt(24.0 * n * (n - 2) * (n - 3)
-                / ((n + 1.0) * (n + 1.0) * (n + 3.0) * (n + 5.0)));
+        // D'Agostino's transformed skew statistic; raw skew/SE is not this test.
+        double y = skewness * Math.sqrt((sampleSize + 1.0) * (sampleSize + 3.0)
+                / (6.0 * (sampleSize - 2.0)));
+        double beta2 = 3.0 * (sampleSize * sampleSize + 27.0 * sampleSize - 70.0)
+                * (sampleSize + 1.0) * (sampleSize + 3.0)
+                / ((sampleSize - 2.0) * (sampleSize + 5.0)
+                * (sampleSize + 7.0) * (sampleSize + 9.0));
+        double w2 = Math.sqrt(2.0 * (beta2 - 1.0)) - 1.0;
+        double delta = 1.0 / Math.sqrt(0.5 * Math.log(w2));
+        double alpha = Math.sqrt(2.0 / (w2 - 1.0));
+        double ratio = Math.abs(y / alpha);
+        double z1 = Math.copySign(delta * Math.log(ratio + Math.hypot(ratio, 1.0)), y);
 
-        if (seSkew == 0 || seKurt == 0) return 0.0;
-
-        double z1 = skewness / seSkew;
-        double z2 = kurtosis / seKurt;
-
+        // Anscombe-Glynn transformed kurtosis statistic, combined with skew as K^2.
+        double expectedKurtosis = 3.0 * (sampleSize - 1.0) / (sampleSize + 1.0);
+        double varianceKurtosis = 24.0 * sampleSize * (sampleSize - 2.0) * (sampleSize - 3.0)
+                / ((sampleSize + 1.0) * (sampleSize + 1.0)
+                * (sampleSize + 3.0) * (sampleSize + 5.0));
+        double x = (kurtosis - expectedKurtosis) / Math.sqrt(varianceKurtosis);
+        double sqrtBeta1 = 6.0 * (sampleSize * sampleSize - 5.0 * sampleSize + 2.0)
+                / ((sampleSize + 7.0) * (sampleSize + 9.0))
+                * Math.sqrt(6.0 * (sampleSize + 3.0) * (sampleSize + 5.0)
+                / (sampleSize * (sampleSize - 2.0) * (sampleSize - 3.0)));
+        double a = 6.0 + 8.0 / sqrtBeta1
+                * (2.0 / sqrtBeta1 + Math.sqrt(1.0 + 4.0 / (sqrtBeta1 * sqrtBeta1)));
+        double denominator = 1.0 + x * Math.sqrt(2.0 / (a - 4.0));
+        if (denominator == 0.0) return Double.NaN;
+        double z2 = (1.0 - 2.0 / (9.0 * a)
+                - Math.cbrt((1.0 - 2.0 / a) / denominator)) / Math.sqrt(2.0 / (9.0 * a));
         return z1 * z1 + z2 * z2;
     }
 

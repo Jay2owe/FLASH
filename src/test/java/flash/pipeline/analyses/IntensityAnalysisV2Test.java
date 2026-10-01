@@ -1604,6 +1604,31 @@ public class IntensityAnalysisV2Test {
     }
 
     @Test
+    public void missingRequestedSavedFilterCannotPublishRowsUsingBasicFallback() throws Exception {
+        File dir = temp.newFolder("missing-saved-filter");
+        File binDir = new File(dir, ".bin");
+        assertTrue(binDir.mkdirs());
+        File outputRoot = FlashProjectLayout.forDirectory(dir.getAbsolutePath()).tablesIntensityWriteDir();
+        assertTrue(outputRoot.mkdirs());
+        String[] channelNames = {"DAPI"};
+        IntensityAnalysisV2.IntensityOutputPlan plan = IntensityAnalysisV2.buildOutputPlan(
+                outputRoot, channelNames, false, -1, IntensitySpatialConfig.disabled(), 1, false);
+        Object tables = newOutputTables(plan);
+        try {
+            invokeRunIntensityMeasurementsForThisImage(new IntensityAnalysisV2(),
+                    new NameParts("", "SyntheticMouse", "LH", "SCN"),
+                    new ImagePlus[]{syntheticImage(8, 8)}, 1, new boolean[]{false},
+                    new String[]{"0"}, channelNames, -1, plan, tables, 1, null,
+                    intensityConfig("DAPI", "0"), new String[]{"Bin filter"}, binDir, "", null);
+            fail("A requested saved filter must not silently fall back");
+        } catch (InvocationTargetException expected) {
+            assertTrue(expected.getCause() instanceof IllegalStateException);
+            assertTrue(expected.getCause().getMessage().contains("Requested intensity filter is missing"));
+        }
+        assertEquals(0, tableFor(tables, IntensitySpatialOutputKey.base("DAPI")).size());
+    }
+
+    @Test
     public void parallelChannelThresholdFailureAbortsBeforePartialRowsAreMerged() throws Exception {
         File dir = temp.newFolder("parallel-channel-failure");
         File binDir = new File(dir, ".bin");

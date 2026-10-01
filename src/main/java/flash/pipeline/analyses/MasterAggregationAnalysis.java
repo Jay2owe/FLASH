@@ -13,6 +13,7 @@ import flash.pipeline.bin.BinConfigIO;
 import flash.pipeline.cli.CLIConfig;
 import flash.pipeline.intelligence.AnalysisStatusScanner;
 import flash.pipeline.intensity.spatial.IntensitySpatialOutputMode;
+import flash.pipeline.intensity.spatial.CalibrationUtil;
 import flash.pipeline.io.CalibrationIO;
 import flash.pipeline.io.ConditionManifestIO;
 import flash.pipeline.io.CsvSupport;
@@ -626,17 +627,18 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         // Load pixel calibration from file written by 3D Object Analysis
         CalibrationIO.PixelCalibration cal = CalibrationIO.readFromDirectory(directory);
         if (cal != null && cal.isCalibrated()) {
-            pixelSize = cal.pixelWidth;
-            calibrationPixelWidth = cal.pixelWidth;
-            calibrationPixelHeight = cal.pixelHeight;
-            calibrationPixelDepth = cal.pixelDepth;
-            fallbackStackDepth = cal.hasStackDepth() ? cal.stackDepth : Double.NaN;
+            pixelSize = cal.canonical().x().microns();
+            calibrationPixelWidth = cal.canonical().x().microns();
+            calibrationPixelHeight = cal.canonical().y().microns();
+            calibrationPixelDepth = cal.canonical().z().microns();
+            fallbackStackDepth = cal.hasStackDepth()
+                    ? CalibrationUtil.canonicalize(cal.stackDepth, cal.unit).microns() : Double.NaN;
             calibrationLoaded = true;
-            calibrationUnit = cal.unit;
-            IJ.log("Calibration: " + pixelSize + " " + cal.unit + "/pixel, pixel depth: "
-                    + calibrationPixelDepth + " " + cal.unit
+            calibrationUnit = "micron";
+            IJ.log("Calibration: " + calibrationPixelWidth + " x " + calibrationPixelHeight
+                    + " micron/pixel, pixel depth: " + calibrationPixelDepth + " micron"
                     + (cal.hasStackDepth()
-                    ? ", fallback stack depth: " + fallbackStackDepth + " " + cal.unit
+                    ? ", fallback stack depth: " + fallbackStackDepth + " micron"
                     : ", fallback stack depth unavailable"));
         } else {
             pixelSize = 1.0;
@@ -1286,6 +1288,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                 colIdx.put(header[i].trim(), i);
             }
             Integer sourceRunIdCol = colIdx.get(RunIdCsv.RUN_ID_COLUMN);
+            Integer lineageCol = colIdx.get(RunIdCsv.SOURCE_RUN_ID_COLUMN);
             if (sourceRunIdCol == null) {
                 recordMissingSourceRunId(csvFile);
             }
@@ -1354,6 +1357,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                 list.add(row);
                 groupKeyToAnimal.put(groupKey, animal);
                 addSourceRunId(sourceRunIdsByGroup, groupKey, safeGet(row, sourceRunIdCol));
+                addSourceRunId(sourceRunIdsByGroup, groupKey, safeGet(row, lineageCol));
 
                 String sectionKey = resolveSectionKey(row, scnCol, roiCol, regionCol);
                 if (!sectionKey.isEmpty()) {
@@ -1417,7 +1421,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                     if (!Double.isNaN(intDen)) { intDenSum  += intDen; intDenN++; }
                     if (!Double.isNaN(mean))   { meanSum    += mean; meanN++;   }
                     if (!Double.isNaN(xm))     { xmSum += xm * pixelSize; xmN++; }
-                    if (!Double.isNaN(ym))     { ymSum += ym * pixelSize; ymN++; }
+                    if (!Double.isNaN(ym))     { ymSum += ym * calibrationPixelHeight; ymN++; }
 
                     if (!Double.isNaN(vol) && !Double.isNaN(surf) && vol != 0) {
                         saToVolRatioSum += surf / vol;
@@ -1754,7 +1758,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
     private Double derivePixelArea(int rowIndex, double areaUm2, List<SeriesMeta> seriesMetas) {
         SeriesMeta meta = getSeriesMeta(seriesMetas, rowIndex);
         if (hasUsablePixelCalibration(meta)) {
-            return areaUm2 / (meta.pixelWidth * meta.pixelHeight);
+            return areaUm2 / (CalibrationUtil.canonicalize(meta.pixelWidth, meta.unit).microns()
+                    * CalibrationUtil.canonicalize(meta.pixelHeight, meta.unit).microns());
         }
         if (hasPersistedPhysicalCalibration()) {
             return areaUm2 / (calibrationPixelWidth * calibrationPixelHeight);
@@ -1765,7 +1770,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
     private Double convertPixelAreaToUm2(int rowIndex, double areaPixel, List<SeriesMeta> seriesMetas) {
         SeriesMeta meta = getSeriesMeta(seriesMetas, rowIndex);
         if (hasUsablePixelCalibration(meta)) {
-            return areaPixel * meta.pixelWidth * meta.pixelHeight;
+            return areaPixel * CalibrationUtil.canonicalize(meta.pixelWidth, meta.unit).microns()
+                    * CalibrationUtil.canonicalize(meta.pixelHeight, meta.unit).microns();
         }
         if (hasPersistedPhysicalCalibration()) {
             return areaPixel * calibrationPixelWidth * calibrationPixelHeight;
@@ -1776,7 +1782,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
     private StackDepthResolution resolveStackDepth(int rowIndex, List<SeriesMeta> seriesMetas) {
         SeriesMeta meta = getSeriesMeta(seriesMetas, rowIndex);
         if (hasUsableSeriesStackDepth(meta)) {
-            return new StackDepthResolution(meta.pixelDepth * meta.nSlices, "area_x_series_stack_depth");
+            return new StackDepthResolution(CalibrationUtil.canonicalize(meta.pixelDepth, meta.unit).microns()
+                    * meta.nSlices, "area_x_series_stack_depth");
         }
         if (!Double.isNaN(fallbackStackDepth) && fallbackStackDepth > 0) {
             return new StackDepthResolution(fallbackStackDepth, "area_x_persisted_stack_depth");
@@ -1797,15 +1804,13 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
 
     private static boolean hasUsablePixelCalibration(SeriesMeta meta) {
         return meta != null
-                && meta.isCalibrated()
-                && meta.pixelWidth > 0
-                && meta.pixelHeight > 0;
+                && CalibrationUtil.canonicalize(meta.pixelWidth, meta.unit).hasMicrons()
+                && CalibrationUtil.canonicalize(meta.pixelHeight, meta.unit).hasMicrons();
     }
 
     private static boolean hasUsableSeriesStackDepth(SeriesMeta meta) {
         return meta != null
-                && meta.isCalibrated()
-                && meta.pixelDepth > 0
+                && CalibrationUtil.canonicalize(meta.pixelDepth, meta.unit).hasMicrons()
                 && meta.nSlices > 0;
     }
 
@@ -2053,6 +2058,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                 colIdx.put(header[i].trim(), i);
             }
             Integer sourceRunIdCol = colIdx.get(RunIdCsv.RUN_ID_COLUMN);
+            Integer lineageCol = colIdx.get(RunIdCsv.SOURCE_RUN_ID_COLUMN);
             if (sourceRunIdCol == null) {
                 recordMissingSourceRunId(csvFile);
             }
@@ -2085,6 +2091,8 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
                 groupKeyToAnimal.put(groupKey, animal);
                 addSourceRunId(buckets.get(classified.mode).sourceRunIdsByGroup,
                         groupKey, safeGet(row, sourceRunIdCol));
+                addSourceRunId(buckets.get(classified.mode).sourceRunIdsByGroup,
+                        groupKey, safeGet(row, lineageCol));
             }
 
             Map<String, LinkedHashMap<String, Double>> animalMetrics =
@@ -2524,7 +2532,7 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
     private static boolean skipObjectSummaryMetricColumn(String rawHeader, String normalizedHeader) {
         if (rawHeader == null || rawHeader.trim().isEmpty()) return true;
         String h = rawHeader.trim();
-        if (RunIdCsv.RUN_ID_COLUMN.equals(h)) return true;
+        if (RunIdCsv.RUN_ID_COLUMN.equals(h) || RunIdCsv.SOURCE_RUN_ID_COLUMN.equals(h)) return true;
         if ("Animal Name".equals(h) || "AnimalName".equals(h)
                 || AggregationConditionSupport.CONDITION_COLUMN.equals(h)
                 || "ROI".equals(h) || "ROI Set".equals(h)
@@ -2908,7 +2916,9 @@ public class MasterAggregationAnalysis implements Analysis, RunRecordAware {
         }
         String cleaned = sourceRunId == null ? "" : sourceRunId.trim();
         if (!cleaned.isEmpty()) {
-            values.add(cleaned);
+            for (String id : cleaned.split(";")) {
+                if (!id.trim().isEmpty()) values.add(id.trim());
+            }
         }
     }
 

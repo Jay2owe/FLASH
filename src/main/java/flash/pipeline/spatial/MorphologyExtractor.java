@@ -81,8 +81,17 @@ public final class MorphologyExtractor {
      * @return list of per-object morphology features
      */
     public static List<ObjectMorphology> extract(ImagePlus labelImage, double pixelSize) {
+        return extract(labelImage, pixelSize, pixelSize);
+    }
+
+    /** Measures geometry using independently calibrated X and Y axes in microns. */
+    public static List<ObjectMorphology> extract(ImagePlus labelImage,
+                                                double pixelWidth, double pixelHeight) {
         if (labelImage == null) return new ArrayList<ObjectMorphology>();
-        if (pixelSize <= 0 || Double.isNaN(pixelSize) || Double.isInfinite(pixelSize)) pixelSize = 1.0;
+        if (!Double.isFinite(pixelWidth) || pixelWidth <= 0.0
+                || !Double.isFinite(pixelHeight) || pixelHeight <= 0.0) {
+            throw new IllegalArgumentException("Morphology calibration requires positive finite X and Y scales.");
+        }
 
         int w = labelImage.getWidth();
         int h = labelImage.getHeight();
@@ -115,7 +124,6 @@ public final class MorphologyExtractor {
         for (Map.Entry<Integer, Set<Long>> entry : footprints.entrySet()) {
             int label = entry.getKey();
             Set<Long> packed = entry.getValue();
-            if (packed.size() < 3) continue;
             List<int[]> pixels = new ArrayList<int[]>(packed.size());
             for (Long p : packed) {
                 long key = p.longValue();
@@ -123,7 +131,7 @@ public final class MorphologyExtractor {
                 int y = (int) (key / w);
                 pixels.add(new int[]{x, y});
             }
-            results.add(measureObject(label, pixels, w, h, pixelSize));
+            results.add(measureObject(label, pixels, pixelWidth, pixelHeight));
         }
         return results;
     }
@@ -134,7 +142,7 @@ public final class MorphologyExtractor {
     }
 
     private static ObjectMorphology measureObject(int label, List<int[]> pixels,
-                                                    int imgW, int imgH, double pixelSize) {
+                                                    double pixelWidth, double pixelHeight) {
         // Bounding box
         int minX = Integer.MAX_VALUE, maxX = 0, minY = Integer.MAX_VALUE, maxY = 0;
         for (int[] p : pixels) {
@@ -148,7 +156,7 @@ public final class MorphologyExtractor {
 
         // Area
         double area = pixels.size();
-        double areaUm2 = area * pixelSize * pixelSize;
+        double areaUm2 = area * pixelWidth * pixelHeight;
 
         // Build binary mask for perimeter and convex hull
         boolean[][] mask = new boolean[bbH][bbW];
@@ -156,18 +164,15 @@ public final class MorphologyExtractor {
             mask[p[1] - minY][p[0] - minX] = true;
         }
 
-        // Perimeter: count boundary pixels (4-connected edge pixels)
-        double perimeter = computePerimeter(mask, bbW, bbH);
+        // Perimeter of the pixel footprint: sum exposed physical edge lengths.
+        double perimeter = computePerimeter(mask, bbW, bbH, pixelWidth, pixelHeight);
 
         // Circularity
-        double circularity = perimeter > 0 ? 4.0 * Math.PI * area / (perimeter * perimeter) : 0;
-        // Values > 1 are a known digitisation artefact of the 4-connected
-        // boundary-pixel perimeter estimator on small/rough shapes. Keep the
-        // raw value so downstream stats see actual variance; callers can
-        // clamp for display if needed.
+        double circularity = perimeter > 0 ? 4.0 * Math.PI * areaUm2 / (perimeter * perimeter) : 0;
 
-        // Convex hull area (Andrew's monotone chain on boundary pixels)
-        List<int[]> boundary = extractBoundaryPixels(mask, bbW, bbH, minX, minY);
+        // Hull and Feret measure the same full pixel footprint as area and perimeter.
+        // Pixel centres shrink the hull and collapse a single pixel to a point.
+        List<int[]> boundary = extractBoundaryCorners(mask, bbW, bbH);
         List<int[]> hull = convexHull(boundary);
         double convexHullArea = polygonArea(hull);
         if (convexHullArea < area) convexHullArea = area; // sanity
@@ -176,40 +181,37 @@ public final class MorphologyExtractor {
         double solidity = convexHullArea > 0 ? area / convexHullArea : 0;
 
         // Aspect ratio
-        double aspectRatio = bbH > 0 ? (double) bbW / bbH : 1.0;
+        double aspectRatio = bbH > 0 ? bbW * pixelWidth / (bbH * pixelHeight) : 1.0;
         if (aspectRatio < 1.0) aspectRatio = 1.0 / aspectRatio;
 
         // Feret diameter (rotating calipers on convex hull, exact)
-        double feret = computeFeret(boundary, hull) * pixelSize;
+        double feret = computeFeret(boundary, hull, pixelWidth, pixelHeight);
 
         // Extent
         double bbArea = (double) bbW * bbH;
         double extent = bbArea > 0 ? area / bbArea : 0;
 
-        return new ObjectMorphology(label, area, areaUm2, perimeter * pixelSize,
-                circularity, convexHullArea * pixelSize * pixelSize, solidity,
+        return new ObjectMorphology(label, area, areaUm2, perimeter,
+                circularity, convexHullArea * pixelWidth * pixelHeight, solidity,
                 aspectRatio, feret, extent, bbW, bbH);
     }
 
-    private static double computePerimeter(boolean[][] mask, int w, int h) {
-        int count = 0;
+    private static double computePerimeter(boolean[][] mask, int w, int h,
+                                           double pixelWidth, double pixelHeight) {
+        double length = 0.0;
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 if (!mask[y][x]) continue;
-                // Check 4-connected neighbors; if any is outside or false, this is boundary
-                if (x == 0 || !mask[y][x - 1] ||
-                    x == w - 1 || !mask[y][x + 1] ||
-                    y == 0 || !mask[y - 1][x] ||
-                    y == h - 1 || !mask[y + 1][x]) {
-                    count++;
-                }
+                if (x == 0 || !mask[y][x - 1]) length += pixelHeight;
+                if (x == w - 1 || !mask[y][x + 1]) length += pixelHeight;
+                if (y == 0 || !mask[y - 1][x]) length += pixelWidth;
+                if (y == h - 1 || !mask[y + 1][x]) length += pixelWidth;
             }
         }
-        return count;
+        return length;
     }
 
-    private static List<int[]> extractBoundaryPixels(boolean[][] mask, int w, int h,
-                                                      int offsetX, int offsetY) {
+    private static List<int[]> extractBoundaryCorners(boolean[][] mask, int w, int h) {
         List<int[]> boundary = new ArrayList<int[]>();
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
@@ -218,7 +220,10 @@ public final class MorphologyExtractor {
                     x == w - 1 || !mask[y][x + 1] ||
                     y == 0 || !mask[y - 1][x] ||
                     y == h - 1 || !mask[y + 1][x]) {
-                    boundary.add(new int[]{x + offsetX, y + offsetY});
+                    boundary.add(new int[]{x, y});
+                    boundary.add(new int[]{x + 1, y});
+                    boundary.add(new int[]{x, y + 1});
+                    boundary.add(new int[]{x + 1, y + 1});
                 }
             }
         }
@@ -284,7 +289,8 @@ public final class MorphologyExtractor {
      * Exact for any point set whose convex hull has ≥ 2 vertices. Falls back to brute force
      * over the boundary when the hull degenerates (e.g. fewer than 2 vertices).
      */
-    private static double computeFeret(List<int[]> boundary, List<int[]> hull) {
+    private static double computeFeret(List<int[]> boundary, List<int[]> hull,
+                                       double pixelWidth, double pixelHeight) {
         if (boundary.size() < 2) return 0;
         int h = hull.size();
         if (h < 2) {
@@ -293,8 +299,8 @@ public final class MorphologyExtractor {
                 int[] a = boundary.get(i);
                 for (int j = i + 1; j < boundary.size(); j++) {
                     int[] b = boundary.get(j);
-                    double dx = a[0] - b[0];
-                    double dy = a[1] - b[1];
+                    double dx = (a[0] - b[0]) * pixelWidth;
+                    double dy = (a[1] - b[1]) * pixelHeight;
                     double d = dx * dx + dy * dy;
                     if (d > max) max = d;
                 }
@@ -304,8 +310,8 @@ public final class MorphologyExtractor {
         if (h == 2) {
             int[] a = hull.get(0);
             int[] b = hull.get(1);
-            double dx = a[0] - b[0];
-            double dy = a[1] - b[1];
+            double dx = (a[0] - b[0]) * pixelWidth;
+            double dy = (a[1] - b[1]) * pixelHeight;
             return Math.sqrt(dx * dx + dy * dy);
         }
         // Rotating calipers: for each hull edge (i, i+1), advance k while the perpendicular
@@ -320,10 +326,10 @@ public final class MorphologyExtractor {
                    > Math.abs(cross(hull.get(i), hull.get(ni), hull.get(k)))) {
                 k = (k + 1) % h;
             }
-            double dx1 = hull.get(i)[0] - hull.get(k)[0];
-            double dy1 = hull.get(i)[1] - hull.get(k)[1];
-            double dx2 = hull.get(ni)[0] - hull.get(k)[0];
-            double dy2 = hull.get(ni)[1] - hull.get(k)[1];
+            double dx1 = (hull.get(i)[0] - hull.get(k)[0]) * pixelWidth;
+            double dy1 = (hull.get(i)[1] - hull.get(k)[1]) * pixelHeight;
+            double dx2 = (hull.get(ni)[0] - hull.get(k)[0]) * pixelWidth;
+            double dy2 = (hull.get(ni)[1] - hull.get(k)[1]) * pixelHeight;
             double d1 = dx1 * dx1 + dy1 * dy1;
             double d2 = dx2 * dx2 + dy2 * dy2;
             if (d1 > maxSq) maxSq = d1;

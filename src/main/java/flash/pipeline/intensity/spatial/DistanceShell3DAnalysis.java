@@ -3,11 +3,9 @@ package flash.pipeline.intensity.spatial;
 import flash.pipeline.analyses.wizard.IntensitySpatialConfig;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.PriorityQueue;
 
 /**
  * Mean source-channel intensity in native-3D Euclidean shells around the partner mask.
@@ -107,58 +105,9 @@ public final class DistanceShell3DAnalysis implements IntensitySpatialPairAnalys
     }
 
     private static double[] distanceToPartnerMask(PairVolume3D volume) {
-        final double[] distances = new double[volume.width * volume.height * volume.depth];
-        java.util.Arrays.fill(distances, Double.POSITIVE_INFINITY);
-        PriorityQueue<Node> queue = new PriorityQueue<Node>(Math.max(1, volume.count),
-                new Comparator<Node>() {
-                    @Override
-                    public int compare(Node a, Node b) {
-                        return Double.compare(a.distance, b.distance);
-                    }
-                });
-
-        for (int i = 0; i < volume.partnerMask.length; i++) {
-            if (volume.valid[i] && volume.partnerMask[i]) {
-                distances[i] = 0.0;
-                queue.add(new Node(i, 0.0));
-            }
-        }
-
-        while (!queue.isEmpty()) {
-            Node node = queue.poll();
-            if (node.distance > distances[node.index]) continue;
-            int x = node.index % volume.width;
-            int yz = node.index / volume.width;
-            int y = yz % volume.height;
-            int z = yz / volume.height;
-            for (int dz = -1; dz <= 1; dz++) {
-                for (int dy = -1; dy <= 1; dy++) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        if (dx == 0 && dy == 0 && dz == 0) continue;
-                        int xx = x + dx;
-                        int yy = y + dy;
-                        int zz = z + dz;
-                        if (xx < 0 || xx >= volume.width
-                                || yy < 0 || yy >= volume.height
-                                || zz < 0 || zz >= volume.depth) {
-                            continue;
-                        }
-                        int next = PairVolume3D.index(xx, yy, zz, volume.width, volume.height);
-                        if (!volume.valid[next]) continue;
-                        double stepX = dx * volume.pixelWidthUm;
-                        double stepY = dy * volume.pixelHeightUm;
-                        double stepZ = dz * volume.pixelDepthUm;
-                        double candidate = node.distance
-                                + Math.sqrt(stepX * stepX + stepY * stepY + stepZ * stepZ);
-                        if (candidate < distances[next]) {
-                            distances[next] = candidate;
-                            queue.add(new Node(next, candidate));
-                        }
-                    }
-                }
-            }
-        }
-        return distances;
+        return ExactEuclideanDistance.toMask(volume.partnerMask, volume.valid,
+                volume.width, volume.height, volume.depth,
+                volume.pixelWidthUm, volume.pixelHeightUm, volume.pixelDepthUm);
     }
 
     private static double shellWidth(IntensitySpatialConfig config) {
@@ -177,13 +126,4 @@ public final class DistanceShell3DAnalysis implements IntensitySpatialPairAnalys
         return Math.max(1, value);
     }
 
-    private static final class Node {
-        final int index;
-        final double distance;
-
-        private Node(int index, double distance) {
-            this.index = index;
-            this.distance = distance;
-        }
-    }
 }

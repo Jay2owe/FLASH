@@ -29,6 +29,55 @@ public class SpectralOutputWriterTest {
     public TemporaryFolder temp = new TemporaryFolder();
 
     @Test
+    public void partialImageSaveFailurePreservesPriorTiffAndRemovesStagingFile() throws Exception {
+        File directory = temp.newFolder("spectral-partial-save");
+        File target = new File(directory, "corrected.tif");
+        SpectralOutputWriter.saveCorrectedImage(shortImage(new int[]{10, 20, 30, 40}), target);
+        byte[] previous = Files.readAllBytes(target.toPath());
+        for (final boolean throwsFailure : new boolean[]{true, false}) {
+            try {
+                SpectralOutputWriter.saveImage(shortImage(new int[]{99, 99, 99, 99}), target,
+                        new SpectralOutputWriter.ImageSaveAction() {
+                            @Override public boolean save(ImagePlus image, File staged)
+                                    throws java.io.IOException {
+                                Files.write(staged.toPath(), new byte[]{1, 2, 3});
+                                if (throwsFailure) throw new java.io.IOException("injected partial save");
+                                return false;
+                            }
+                        });
+                org.junit.Assert.fail("Incomplete image save must not publish");
+            } catch (java.io.IOException expected) {
+                assertArrayEquals(previous, Files.readAllBytes(target.toPath()));
+                assertEquals(1, directory.listFiles().length);
+            }
+        }
+    }
+
+    @Test
+    public void readableButWrongStagedPixelsCannotReplaceAcceptedTiff() throws Exception {
+        File directory = temp.newFolder("spectral-wrong-pixels");
+        File target = new File(directory, "corrected.tif");
+        ImagePlus accepted = shortImage(new int[]{10, 20, 30, 40});
+        ImagePlus requested = shortImage(new int[]{90, 90, 90, 90});
+        try {
+            SpectralOutputWriter.saveCorrectedImage(accepted, target);
+            byte[] previous = Files.readAllBytes(target.toPath());
+            try {
+                SpectralOutputWriter.saveImage(requested, target,
+                        (source, staged) -> new ij.io.FileSaver(accepted).saveAsTiff(staged.getAbsolutePath()));
+                org.junit.Assert.fail("Wrong pixel values must not replace accepted correction");
+            } catch (java.io.IOException expected) {
+                assertTrue(expected.getMessage().contains("pixel content differs"));
+                assertArrayEquals(previous, Files.readAllBytes(target.toPath()));
+                assertEquals(1, directory.listFiles().length);
+            }
+        } finally {
+            accepted.close();
+            requested.close();
+        }
+    }
+
+    @Test
     public void writesExpectedBatchFilesAndRows() throws Exception {
         File directory = temp.newFolder("spectral-output-writer");
         SpectralOutputWriter.RunMetadata runMetadata = runMetadata();

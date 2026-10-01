@@ -288,7 +288,7 @@ public class LinearUnmixingFeature implements CorrectionPipeline.ExecutableFeatu
                 }
             }
             if (Math.abs(a[bestRow][pivot]) <= pivotTolerance) {
-                return diagonalFallback(matrix, rhs);
+                throw unidentifiableFit();
             }
             if (bestRow != pivot) {
                 double[] tempRow = a[pivot];
@@ -312,7 +312,7 @@ public class LinearUnmixingFeature implements CorrectionPipeline.ExecutableFeatu
         double[] solution = new double[n];
         for (int row = n - 1; row >= 0; row--) {
             if (Math.abs(a[row][row]) <= pivotTolerance) {
-                return diagonalFallback(matrix, rhs);
+                throw unidentifiableFit();
             }
             double sum = b[row];
             for (int col = row + 1; col < n; col++) {
@@ -323,13 +323,10 @@ public class LinearUnmixingFeature implements CorrectionPipeline.ExecutableFeatu
         return solution;
     }
 
-    private static double[] diagonalFallback(double[][] matrix, double[] rhs) {
-        double[] solution = new double[rhs.length];
-        for (int i = 0; i < rhs.length; i++) {
-            double diagonal = matrix[i][i];
-            solution[i] = Math.abs(diagonal) <= PIVOT_ABSOLUTE_TOLERANCE ? 0.0 : rhs[i] / diagonal;
-        }
-        return solution;
+    private static IllegalArgumentException unidentifiableFit() {
+        return new IllegalArgumentException("Linear unmixing could not identify independent "
+                + "contaminant weights: the fitted channels are singular or ill-conditioned. "
+                + "Select independent contaminant channels or supply calibrated manual weights.");
     }
 
     private static double pivotTolerance(double[][] matrix) {

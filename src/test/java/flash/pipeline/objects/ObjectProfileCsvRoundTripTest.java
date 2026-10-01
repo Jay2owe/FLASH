@@ -96,7 +96,7 @@ public class ObjectProfileCsvRoundTripTest {
         String expected = "SourceChannel,PartnerChannel,ProfileType,Group,Bin,AxisNorm,Mean,SEM,N"
                 + newline + "'\u000b=AggregateSource,'  +AggregatePartner,"
                 + "\"'-Type \"\"\u03c4\"\"\",\"'\n@Group,\r\n\u96ea\","
-                + "0,0.0,-2.5,0.0,1" + newline;
+                + "0,0.0,-2.5,,1" + newline;
 
         byte[] actual = Files.readAllBytes(csv.toPath());
         assertArrayEquals(expected.getBytes(CsvSupport.CHARSET), actual);
@@ -104,7 +104,7 @@ public class ObjectProfileCsvRoundTripTest {
         assertEquals(2, rows.size());
         assertEquals(Arrays.asList("'\u000b=AggregateSource", "'  +AggregatePartner",
                 "'-Type \"\u03c4\"", "'\n@Group,\r\n\u96ea", "0", "0.0", "-2.5",
-                "0.0", "1"), rows.get(1));
+                "", "1"), rows.get(1));
     }
 
     private static ObjectProfileResult objectWithRadial(int label, double[] norm) {

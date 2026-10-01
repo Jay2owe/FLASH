@@ -276,6 +276,33 @@ public class FilterMacroParserTest {
     }
 
     @Test
+    public void executableTextAroundRunForcesLegacyExecution() {
+        String[] macros = {
+                "run(\"Add...\", \"value=1 stack\"); run(\"Multiply...\", \"value=2 stack\");",
+                "if (false) run(\"Add...\", \"value=1 stack\");",
+                "for (i=0; i<3; i++) run(\"Add...\", \"value=1 stack\");",
+                "run(\"Add...\", \"value=1 stack\"); close();",
+                "/* comment */ run(\"Add...\", \"value=1 stack\");",
+                "/* unclosed comment\nrun(\"Add...\", \"value=1 stack\");\n*/"
+        };
+        for (String macro : macros) {
+            boolean unknown = false;
+            for (Op op : FilterMacroParser.parseString(macro)) {
+                unknown |= op.type == OpType.UNKNOWN;
+            }
+            assertTrue("Must preserve complete macro semantics: " + macro, unknown);
+        }
+    }
+
+    @Test
+    public void oneRunWithTrailingLineCommentRemainsNative() {
+        List<Op> ops = FilterMacroParser.parseString(
+                "run(\"Add...\", \"value=1 stack\"); // run(\"Multiply...\", \"value=2\");");
+        assertEquals(1, ops.size());
+        assertEquals(OpType.ADD, ops.get(0).type);
+    }
+
+    @Test
     public void getParam_substringKeyDoesNotCollide() {
         // "max" key must not match the "x" inside "max=...". The arg list is
         // "x=2 max=10 z=1" — getParam("x") must return 2, not the 10 inside max.

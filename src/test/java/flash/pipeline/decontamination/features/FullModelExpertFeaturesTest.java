@@ -22,6 +22,54 @@ import static org.junit.Assert.assertTrue;
 
 public class FullModelExpertFeaturesTest {
 
+    @Test
+    public void singularLocalFitUsesIdentifiedGlobalCoefficients() throws Exception {
+        java.lang.reflect.Method localFit = FullForwardModelFeature.class.getDeclaredMethod(
+                "resolveLocalCoefficients", double[].class, double[][].class, double[][].class,
+                int.class, int.class, int.class, int.class, int.class, int.class, int.class,
+                double[].class, double[].class, double[][].class, double[].class,
+                double[][].class, double[].class);
+        localFit.setAccessible(true);
+        // Three locally identical contaminant pixels cannot identify two weights.
+        // The globally identified model remains the explicit fallback.
+        double[] counts = {0, 0, 0, 0, 0, 1, 2, 3};
+        double[] cross = {0, 0, 0, 0, 0, 10, 20, 30};
+        double[] products = {0, 0, 0, 0, 0, 100, 200, 300};
+        double[] fitted = {99, 99};
+        boolean usedLocal = ((Boolean) localFit.invoke(null, counts,
+                new double[][]{cross, cross}, new double[][]{products, products, products},
+                3, 2, 0, 0, 2, 0, 3,
+                new double[]{0.4, 0.6}, fitted,
+                new double[2][2], new double[2], new double[2][2], new double[2])).booleanValue();
+        assertFalse(usedLocal);
+        org.junit.Assert.assertArrayEquals(new double[]{0.4, 0.6}, fitted, 1e-12);
+    }
+
+    @Test
+    public void dependentBleedChannelsCannotPublishDoubleSubtraction() {
+        ImagePlus source = multiChannelImage(4, 1,
+                new int[]{50, 50, 100, 120},
+                new int[]{100, 100, 100, 100},
+                new int[]{100, 100, 100, 100},
+                new int[]{0, 0, 0, 0});
+        SpectralDecontaminationConfig config = new SpectralDecontaminationConfig();
+        config.setTargetChannelIndex(0);
+        config.setBleedThroughChannelIndexes(Arrays.asList(1, 2));
+        config.setAutofluorescenceChannelIndexes(Arrays.asList(3));
+        CorrectionPipeline.ExecutionState state = CorrectionPipeline.ExecutionState.create(source, config);
+        state.setFeatureSettings(FullForwardModelFeature.ID, new FullForwardModelFeature.Settings()
+                .setQuietTargetPercentile(100).setSourceBrightPercentile(0)
+                .setMinBleedFitPixels(3).toPipelineSettings());
+        try {
+            new FullForwardModelFeature().apply(state);
+            org.junit.Assert.fail("Singular global fit must not publish correction");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("singular or ill-conditioned"));
+            org.junit.Assert.assertNull(state.getCorrectedImage());
+            assertTrue(state.getFeatureSummaries().isEmpty());
+        }
+    }
+
     private final CorrectionFeatureRegistry registry = CorrectionFeatureRegistry.getDefault();
 
     @Test

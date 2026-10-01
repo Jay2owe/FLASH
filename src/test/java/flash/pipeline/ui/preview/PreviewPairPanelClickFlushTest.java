@@ -81,6 +81,8 @@ public class PreviewPairPanelClickFlushTest {
         assertEquals(2.0, click.x, 0.0001);
         assertEquals(1.0, click.y, 0.0001);
         assertEquals(verdict, click.verdict);
+        assertEquals(flash.pipeline.click.SegmentationFingerprint.of(clickLabels("labels")),
+                click.segmentationFingerprint);
     }
 
     private static ImagePlus clickSource(String title) {

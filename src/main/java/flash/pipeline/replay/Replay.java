@@ -10,6 +10,8 @@ import flash.pipeline.project.ProjectFile;
 import flash.pipeline.project.ProjectFileIO;
 import flash.pipeline.runrecord.EnvironmentSnapshot;
 import flash.pipeline.runrecord.InputFingerprinter;
+import flash.pipeline.runrecord.ConfigurationSnapshot;
+import flash.pipeline.runrecord.ProjectFileHasher;
 import flash.pipeline.runrecord.RunDiff;
 import flash.pipeline.runrecord.RunRecord;
 import flash.pipeline.runrecord.RunRecordIO;
@@ -28,12 +30,8 @@ import java.awt.GraphicsEnvironment;
 import java.awt.Window;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +64,16 @@ public final class Replay {
             blockers.add("No parent run was provided.");
             return new ReplayPlan(null, null, null, null, warnings, blockers);
         }
+        if (RunRecord.STATUS_RUNNING.equals(parent.status)) {
+            blockers.add("This run has no terminal record; a running or interrupted run cannot be reproduced verbatim.");
+        }
+        String recordedArtifact = parent.extras == null ? ""
+                : safe(String.valueOf(parent.extras.get("flashArtifactFingerprint")));
+        if (recordedArtifact.isEmpty() || "null".equals(recordedArtifact)) {
+            blockers.add("This run has no loaded FLASH code fingerprint; its exact build cannot be reproduced verbatim.");
+        } else if (!recordedArtifact.equals(EnvironmentSnapshot.flashArtifactFingerprint())) {
+            blockers.add("Loaded FLASH code changed since this run; verbatim replay requires the recorded build.");
+        }
         if (analysis == null) {
             blockers.add("Analysis key is not registered in this FLASH version: "
                     + safe(parent.analysis) + " (index " + parent.analysisIndex + ").");
@@ -83,7 +91,17 @@ public final class Replay {
         if (parentProjectRoot == null || !parentProjectRoot.isDirectory()) {
             blockers.add("Parent project root is missing: "
                     + (parentProjectRoot == null ? "(unknown)" : parentProjectRoot.getAbsolutePath()));
+        } else if (!safe(parent.projectFileHash).isEmpty()) {
+            ProjectFile currentProject = ProjectFileIO.read(FlashProjectLayout
+                    .forDirectory(parentProjectRoot.getAbsolutePath()).configurationWriteDir());
+            if (currentProject == null) {
+                blockers.add("The recorded project manifest is missing or unreadable; verbatim replay cannot verify the original input selection.");
+            } else if (!parent.projectFileHash.equals(ProjectFileHasher.hash(currentProject))) {
+                blockers.add("Project manifest changed since this run; verbatim replay would use a different input selection or metadata.");
+            }
         }
+
+        validateConfiguration(parent, parentProjectRoot, blockers);
 
         validateInputs(parent, warnings, blockers);
 
@@ -114,6 +132,13 @@ public final class Replay {
             return;
         }
 
+        // A dialog or delayed invocation may outlive the original preflight checks.
+        ReplayPlan revalidated = plan(plan.parent());
+        if (!revalidated.canExecute()) {
+            showOrThrow(owner, "Replay is blocked:\n" + join(revalidated.messages()), "Reproduce verbatim");
+            return;
+        }
+
         File replayRoot = plan.replayRoot();
         if (replayRoot == null) {
             throw new IllegalStateException("Replay root was not planned.");
@@ -127,7 +152,7 @@ public final class Replay {
         assertFreshReplayRoot(replayRoot);
 
         try {
-            copyProjectConfiguration(plan.parentProjectRoot(), replayRoot);
+            copyRecordedConfiguration(plan.parent(), plan.parentProjectRoot(), replayRoot);
             rewriteProjectOutputRoot(replayRoot);
             String macroOptions = macroOptionsFor(plan);
             runner.run(plan, macroOptions);
@@ -151,11 +176,13 @@ public final class Replay {
     }
 
     private static void validateInputs(RunRecord parent, List<String> warnings, List<String> blockers) {
-        if (parent.inputs == null) {
+        if (parent.inputs == null || parent.inputs.isEmpty()) {
+            blockers.add("This run has no recorded inputs; verbatim replay cannot verify its original data selection.");
             return;
         }
         for (RunRecord.InputItem input : parent.inputs) {
             if (input == null || safe(input.path).isEmpty()) {
+                blockers.add("Recorded input has no source path; verbatim replay cannot verify it.");
                 continue;
             }
             File file = new File(input.path);
@@ -163,13 +190,67 @@ public final class Replay {
                 blockers.add("Input file is missing: " + file.getAbsolutePath());
                 continue;
             }
-            if (!safe(input.fingerprint).isEmpty()) {
-                InputFingerprinter.FingerprintResult fresh = InputFingerprinter.fastFingerprint(file);
-                if (fresh.hasValue() && !input.fingerprint.equals(fresh.value)) {
-                    warnings.add("Input fingerprint drifted: " + file.getAbsolutePath());
-                } else if (!fresh.warning.isEmpty()) {
-                    warnings.add(fresh.warning);
+            if (safe(input.fingerprint).isEmpty()) {
+                blockers.add("Input has no recorded fingerprint; verbatim replay cannot verify "
+                        + file.getAbsolutePath());
+            } else {
+                InputFingerprinter.FingerprintMode mode;
+                if ("full".equals(input.fingerprintMode)) {
+                    mode = InputFingerprinter.FingerprintMode.FULL;
+                } else if ("fast".equals(input.fingerprintMode)
+                        || safe(input.fingerprintMode).isEmpty()) {
+                    mode = InputFingerprinter.FingerprintMode.FAST;
+                } else {
+                    blockers.add("Unsupported input fingerprint mode " + input.fingerprintMode
+                            + " for " + file.getAbsolutePath());
+                    continue;
                 }
+                InputFingerprinter.FingerprintResult fresh = InputFingerprinter.fingerprint(file, mode);
+                if (fresh.hasValue() && (file.length() != fresh.sizeBytes
+                        || file.lastModified() != fresh.lastModifiedMillis)) {
+                    blockers.add("Input changed while its fingerprint was being verified: " + file.getAbsolutePath());
+                } else if (fresh.hasValue() && !input.fingerprint.equals(fresh.value)) {
+                    blockers.add("Input fingerprint drifted: " + file.getAbsolutePath());
+                } else if (!fresh.hasValue()) {
+                    blockers.add("Could not verify input fingerprint: " + file.getAbsolutePath()
+                            + ". " + fresh.warning);
+                }
+            }
+        }
+    }
+
+    private static void validateConfiguration(RunRecord parent, File root, List<String> blockers) {
+        Object saved = parent.extras == null ? null : parent.extras.get(ConfigurationSnapshot.EXTRA_KEY);
+        if (!(saved instanceof Map)) {
+            blockers.add("This run has no configuration and ROI fingerprints; verbatim replay cannot verify its original settings or region selections.");
+            return;
+        }
+        if (root == null || !root.isDirectory()) return;
+        try {
+            Map<String, Object> current = ConfigurationSnapshot.capture(root);
+            if (!saved.equals(current)) {
+                blockers.add("Configuration or ROI files changed since this run; verbatim replay would use different settings or region selections.");
+            }
+        } catch (IOException failure) {
+            blockers.add("Could not verify the recorded configuration or ROI files: " + failure.getMessage());
+        }
+    }
+
+    private static void copyRecordedConfiguration(RunRecord parent, File sourceRoot, File targetRoot)
+            throws IOException {
+        Map<?, ?> fingerprints = (Map<?, ?>) parent.extras.get(ConfigurationSnapshot.EXTRA_KEY);
+        for (Map.Entry<?, ?> entry : fingerprints.entrySet()) {
+            if (!(entry.getKey() instanceof String) || !(entry.getValue() instanceof String)) {
+                throw new IOException("Malformed recorded configuration fingerprint.");
+            }
+            String relative = (String) entry.getKey();
+            File source = ConfigurationSnapshot.resolve(sourceRoot, relative);
+            File target = ConfigurationSnapshot.resolve(targetRoot, relative);
+            Files.createDirectories(target.getParentFile().toPath());
+            Files.copy(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            InputFingerprinter.FingerprintResult copied = InputFingerprinter.fullFingerprint(target);
+            if (!entry.getValue().equals(copied.value)) {
+                throw new IOException("Configuration changed while preparing replay: " + relative);
             }
         }
     }
@@ -243,32 +324,6 @@ public final class Replay {
         if (files != null && files.length > 0) {
             throw new IllegalStateException("Replay root is not empty: " + replayRoot.getAbsolutePath());
         }
-    }
-
-    private static void copyProjectConfiguration(File parentRoot, File replayRoot) throws IOException {
-        if (parentRoot == null) {
-            return;
-        }
-        final File source = FlashProjectLayout.forDirectory(parentRoot.getAbsolutePath()).visibleConfigurationDir();
-        if (!source.isDirectory()) {
-            return;
-        }
-        final File target = FlashProjectLayout.forDirectory(replayRoot.getAbsolutePath()).visibleConfigurationDir();
-        Files.walkFileTree(source.toPath(), new SimpleFileVisitor<Path>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                Path relative = source.toPath().relativize(dir);
-                Files.createDirectories(target.toPath().resolve(relative));
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                Path relative = source.toPath().relativize(file);
-                Files.copy(file, target.toPath().resolve(relative), StandardCopyOption.REPLACE_EXISTING);
-                return FileVisitResult.CONTINUE;
-            }
-        });
     }
 
     private static void rewriteProjectOutputRoot(File replayRoot) throws IOException {

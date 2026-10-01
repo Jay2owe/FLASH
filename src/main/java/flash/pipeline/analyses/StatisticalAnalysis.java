@@ -149,8 +149,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
                         .load(presetName.trim());
                 target = preset.toConfig();
             } catch (IOException e) {
-                IJ.log("[CLI] Warning: Could not load stats.preset '"
-                        + presetName + "': " + e.getMessage());
+                throw new UncheckedIOException("Could not load requested statistics preset '"
+                        + presetName + "'; refusing to substitute default statistical settings.", e);
             }
         }
         if (src.getPairedMode() != null) {
@@ -1902,6 +1902,11 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
 
                     String animal = safeGet(row, animalIdx).trim();
                     if (animal.isEmpty()) continue;
+                    if (result.data.containsKey(animal)) {
+                        throw new IOException("Duplicate animal/group row '" + animal
+                                + "' in " + csvFile.getName()
+                                + "; each statistical observation must have a unique row key.");
+                    }
                     result.animals.add(animal);
                     result.runIdByAnimal.put(animal, runIdIdx >= 0 ? safeGet(row, runIdIdx).trim() : "");
 
@@ -1929,6 +1934,8 @@ public class StatisticalAnalysis implements Analysis, RunRecordAware {
             IJ.log("Error reading " + csvFile.getName() + ": " + e.getMessage());
             inputStatus = "failed";
             recordError("Error reading " + csvFile.getName(), e);
+            throw new UncheckedIOException("Cannot analyse incomplete master table "
+                    + csvFile.getAbsolutePath(), e);
         } finally {
             recordInputEnd(inputHandle, inputStatus, inputStarted);
         }

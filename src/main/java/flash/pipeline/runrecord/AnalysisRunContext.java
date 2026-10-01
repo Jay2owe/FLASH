@@ -6,6 +6,7 @@ import ij.IJ;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,6 +40,7 @@ public final class AnalysisRunContext implements AutoCloseable {
     private final ExecutorService fingerprintExecutor;
     private final Object lock = new Object();
     private boolean closed;
+    private boolean configurationCaptured;
 
     /** Opaque handle to a specific recorded input, so repeats of the same file stay distinct. */
     public static final class InputHandle {
@@ -77,6 +79,7 @@ public final class AnalysisRunContext implements AutoCloseable {
         record.jdkVersion = EnvironmentSnapshot.jdkVersion();
         record.osName = EnvironmentSnapshot.osName();
         record.biofVersion = EnvironmentSnapshot.biofVersion();
+        record.extras.put("flashArtifactFingerprint", EnvironmentSnapshot.flashArtifactFingerprint());
         record.projectFileHash = ProjectFileHasher.hash(project);
         record.projectRoot = absolute(projectRoot);
         record.outputRoot = resolveOutputRoot(projectRoot, project);
@@ -86,7 +89,20 @@ public final class AnalysisRunContext implements AutoCloseable {
 
         File runsDir = FlashProjectLayout.forDirectory(safeDirectory(projectRoot)).runJsonlWriteDir();
         File runFile = RunRecordIO.runFile(runsDir, record);
-        return new AnalysisRunContext(record, runFile, InputFingerprinter.FingerprintMode.FAST);
+        AnalysisRunContext context = new AnalysisRunContext(record, runFile,
+                InputFingerprinter.FingerprintMode.FAST);
+        if (EnvironmentSnapshot.flashArtifactFingerprint().isEmpty()) {
+            context.warn("Could not fingerprint the loaded FLASH code; its exact build cannot be verified for replay.");
+        }
+        try {
+            synchronized (context.lock) {
+                context.writeCheckpointLocked();
+            }
+        } catch (RuntimeException failure) {
+            context.fingerprintExecutor.shutdownNow();
+            throw failure;
+        }
+        return context;
     }
 
     /** ULID for this run, exposed for the {@code run_id} CSV column (phase 05). */
@@ -132,7 +148,10 @@ public final class AnalysisRunContext implements AutoCloseable {
         input.fingerprintMode = fingerprintMode.token;
         input.status = "processing";
         synchronized (lock) {
+            if (closed) throw new IllegalStateException("Cannot record an input after the run is closed.");
+            captureConfigurationLocked();
             record.inputs.add(input);
+            if (record.inputs.size() == 1) writeCheckpointLocked();
         }
         if (source != null) {
             submitFingerprint(input, source, true);
@@ -145,8 +164,10 @@ public final class AnalysisRunContext implements AutoCloseable {
             return;
         }
         synchronized (lock) {
+            if (closed) return;
             handle.item.status = status == null ? "" : status;
             handle.item.durationMillis = durationMillis;
+            writeCheckpointLocked();
         }
     }
 
@@ -155,7 +176,13 @@ public final class AnalysisRunContext implements AutoCloseable {
         out.path = output == null ? "" : output.getAbsolutePath();
         out.kind = kind == null ? "" : kind;
         synchronized (lock) {
+            if (closed) throw new IllegalStateException("Cannot record an output after the run is closed.");
+            captureConfigurationLocked();
             record.outputs.add(out);
+            // Keep the first published output recoverable without duplicating the full
+            // growing record for every file in a batch. Input completion checkpoints
+            // persist later outputs, and close always writes the complete terminal trail.
+            if (record.outputs.size() == 1) writeCheckpointLocked();
         }
         if (output != null) {
             submitOutputFingerprint(out, output);
@@ -274,12 +301,19 @@ public final class AnalysisRunContext implements AutoCloseable {
             fingerprintExecutor.shutdownNow();
         }
         synchronized (lock) {
+            captureConfigurationLocked();
             for (RunRecord.InputItem input : record.inputs) {
                 if (input.fingerprint == null) {
                     input.fingerprint = "";
                 }
                 if (input.fingerprint.isEmpty() && input.path != null && !input.path.isEmpty()) {
                     addMessageLocked("warn", "No fingerprint captured for input " + input.path);
+                }
+            }
+            for (RunRecord.OutputItem output : record.outputs) {
+                if ((output.fingerprint == null || output.fingerprint.isEmpty())
+                        && output.path != null && !output.path.isEmpty()) {
+                    addMessageLocked("warn", "No fingerprint captured for output " + output.path);
                 }
             }
             record.finishedAtMillis = System.currentTimeMillis();
@@ -301,6 +335,37 @@ public final class AnalysisRunContext implements AutoCloseable {
             closed = true;
         }
         fingerprintExecutor.shutdownNow();
+        try {
+            Files.deleteIfExists(runFile.toPath());
+            File parent = runFile.getParentFile();
+            if (parent != null) parent.delete(); // Removes only an empty, now-unused runs directory.
+        } catch (IOException failure) {
+            throw new IllegalStateException("Could not discard cancelled run record " + runFile, failure);
+        }
+    }
+
+    private void captureConfigurationLocked() {
+        if (configurationCaptured) return;
+        configurationCaptured = true;
+        try {
+            record.extras.put(ConfigurationSnapshot.EXTRA_KEY,
+                    ConfigurationSnapshot.capture(new File(record.projectRoot)));
+        } catch (IOException failure) {
+            addMessageLocked("warn", "Could not capture configuration for verbatim replay: "
+                    + failure.getMessage());
+        }
+    }
+
+    private void writeCheckpointLocked() {
+        String terminalStatus = record.status;
+        record.status = RunRecord.STATUS_RUNNING;
+        try {
+            RunRecordIO.writeSnapshot(runFile, record);
+        } catch (IOException failure) {
+            throw new IllegalStateException("Could not write required run checkpoint " + runFile, failure);
+        } finally {
+            record.status = terminalStatus;
+        }
     }
 
     private void submitFingerprint(final RunRecord.InputItem input, final File source,
@@ -361,6 +426,9 @@ public final class AnalysisRunContext implements AutoCloseable {
     private void addMessageLocked(String level, String text) {
         record.messages.add(new RunRecord.Message(level, System.currentTimeMillis(),
                 text == null ? "" : text));
+        if ("warn".equals(level) && RunRecord.STATUS_OK.equals(record.status)) {
+            record.status = RunRecord.STATUS_WARN;
+        }
     }
 
     private static String resolveOutputRoot(String projectRoot, ProjectFile project) {

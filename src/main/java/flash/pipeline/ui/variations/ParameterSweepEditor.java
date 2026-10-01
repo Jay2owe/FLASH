@@ -52,10 +52,12 @@ public final class ParameterSweepEditor extends JPanel {
 
     public ParameterSweepEditor(VariationEngineContext context) {
         this(context == null ? ParameterSweep.Method.CLASSICAL : context.method(),
-                baseComboFor(context),
                 context == null ? "" : context.channelName(),
                 sourceHash(context == null ? null : context.filteredSource()),
                 maxPossibleVoxels(context == null ? null : context.filteredSource()),
+                sectionsFor(context == null ? ParameterSweep.Method.CLASSICAL : context.method(),
+                        baseComboFor(context)),
+                context == null ? "" : context.cacheNamespace(),
                 MacroVariationCatalog.forContext(context));
     }
 

@@ -49,13 +49,18 @@ public final class DensityHeatmapGenerator {
      */
     public static ImagePlus generate(double[][] centroids, int imgWidth, int imgHeight,
                                      double pixelSize, double bandwidth) {
+        return generate(centroids, imgWidth, imgHeight, pixelSize, pixelSize, bandwidth);
+    }
+
+    public static ImagePlus generate(double[][] centroids, int imgWidth, int imgHeight,
+                                     double pixelWidth, double pixelHeight, double bandwidth) {
         if (centroids == null || centroids.length == 0 || !validImageSize(imgWidth, imgHeight)) {
             return null;
         }
 
-        if (!Double.isFinite(pixelSize) || pixelSize <= 0) pixelSize = 1.0;
+        validateCalibration(pixelWidth, pixelHeight);
         return generateInternal(centroids, null, imgWidth, imgHeight,
-                pixelSize, bandwidth, "Density_Heatmap");
+                pixelWidth, pixelHeight, bandwidth, "Density_Heatmap");
     }
 
     /**
@@ -65,18 +70,25 @@ public final class DensityHeatmapGenerator {
     public static ImagePlus generateWeighted(double[][] centroids, double[] weights,
                                              int imgWidth, int imgHeight,
                                              double pixelSize, double bandwidth) {
+        return generateWeighted(centroids, weights, imgWidth, imgHeight,
+                pixelSize, pixelSize, bandwidth);
+    }
+
+    public static ImagePlus generateWeighted(double[][] centroids, double[] weights,
+                                             int imgWidth, int imgHeight,
+                                             double pixelWidth, double pixelHeight, double bandwidth) {
         if (centroids == null || centroids.length == 0 || weights == null) return null;
         if (centroids.length != weights.length) return null;
         if (!validImageSize(imgWidth, imgHeight)) return null;
 
-        if (!Double.isFinite(pixelSize) || pixelSize <= 0) pixelSize = 1.0;
+        validateCalibration(pixelWidth, pixelHeight);
         return generateInternal(centroids, weights, imgWidth, imgHeight,
-                pixelSize, bandwidth, "Weighted_Density_Heatmap");
+                pixelWidth, pixelHeight, bandwidth, "Weighted_Density_Heatmap");
     }
 
     private static ImagePlus generateInternal(double[][] centroids, double[] weights,
                                               int imgWidth, int imgHeight,
-                                              double pixelSize, double bandwidth,
+                                              double pixelWidth, double pixelHeight, double bandwidth,
                                               String title) {
         double resolvedBandwidth = bandwidth;
         if (!Double.isFinite(resolvedBandwidth) || resolvedBandwidth <= 0) {
@@ -84,15 +96,18 @@ public final class DensityHeatmapGenerator {
             // wholly off-image support must not move the bandwidth and thereby alter
             // otherwise identical in-image pixels.
             resolvedBandwidth = scottsRuleWithinImage(
-                    centroids, weights, imgWidth, imgHeight, pixelSize);
+                    centroids, weights, imgWidth, imgHeight, pixelWidth, pixelHeight);
             if (!Double.isFinite(resolvedBandwidth) || resolvedBandwidth <= 0) {
-                resolvedBandwidth = pixelSize * 10.0;
+                resolvedBandwidth = Math.min(pixelWidth, pixelHeight) * 10.0;
             }
         }
 
-        double bwPx = resolvedBandwidth / pixelSize;
-        if (!Double.isFinite(bwPx) || bwPx <= 0) bwPx = 10.0;
-        long radius = kernelRadius(bwPx);
+        double bwPxX = resolvedBandwidth / pixelWidth;
+        double bwPxY = resolvedBandwidth / pixelHeight;
+        if (!Double.isFinite(bwPxX) || bwPxX <= 0) bwPxX = 10.0;
+        if (!Double.isFinite(bwPxY) || bwPxY <= 0) bwPxY = 10.0;
+        long radiusX = kernelRadius(bwPxX);
+        long radiusY = kernelRadius(bwPxY);
 
         // Establish admission before allocating the image. This makes an all-off-image
         // request a cheap, explicit empty result even for hostile finite coordinates.
@@ -100,32 +115,34 @@ public final class DensityHeatmapGenerator {
         for (int i = 0; i < centroids.length; i++) {
             double weight = sampleWeight(weights, i);
             if (!validPoint(centroids[i]) || weight <= 0.0) continue;
-            if (clippedSupport(centroids[i], pixelSize, radius, imgWidth, imgHeight) == null) continue;
+            if (clippedSupport(centroids[i], pixelWidth, pixelHeight, radiusX, radiusY,
+                    imgWidth, imgHeight) == null) continue;
             admitted++;
         }
         if (admitted == 0) return null;
 
         float[] pixels = new float[imgWidth * imgHeight];
-        double invTwoSigmaSq = 1.0 / (2.0 * bwPx * bwPx);
+        double invTwoSigmaSqX = 1.0 / (2.0 * bwPxX * bwPxX);
+        double invTwoSigmaSqY = 1.0 / (2.0 * bwPxY * bwPxY);
 
         for (int i = 0; i < centroids.length; i++) {
             double weight = sampleWeight(weights, i);
             if (!validPoint(centroids[i]) || weight <= 0.0) continue;
             KernelSupport support = clippedSupport(
-                    centroids[i], pixelSize, radius, imgWidth, imgHeight);
+                    centroids[i], pixelWidth, pixelHeight, radiusX, radiusY, imgWidth, imgHeight);
             if (support == null) continue;
 
             for (int y = support.yMin; y <= support.yMax; y++) {
                 double dy = (double) y - (double) support.centerY;
                 for (int x = support.xMin; x <= support.xMax; x++) {
                     double dx = (double) x - (double) support.centerX;
-                    double kernel = Math.exp(-(dx * dx + dy * dy) * invTwoSigmaSq);
+                    double kernel = Math.exp(-dx * dx * invTwoSigmaSqX - dy * dy * invTwoSigmaSqY);
                     pixels[y * imgWidth + x] += (float) (kernel * weight);
                 }
             }
         }
 
-        double norm = admitted * 2.0 * Math.PI * bwPx * bwPx;
+        double norm = admitted * 2.0 * Math.PI * bwPxX * bwPxY;
         if (norm > 0.0) {
             float floatNorm = (float) norm;
             for (int i = 0; i < pixels.length; i++) {
@@ -136,10 +153,17 @@ public final class DensityHeatmapGenerator {
         FloatProcessor fp = new FloatProcessor(imgWidth, imgHeight, pixels);
         ImagePlus imp = new ImagePlus(title, fp);
         ij.measure.Calibration cal = imp.getCalibration();
-        cal.pixelWidth = pixelSize;
-        cal.pixelHeight = pixelSize;
+        cal.pixelWidth = pixelWidth;
+        cal.pixelHeight = pixelHeight;
         cal.setUnit("um");
         return imp;
+    }
+
+    private static void validateCalibration(double pixelWidth, double pixelHeight) {
+        if (!Double.isFinite(pixelWidth) || pixelWidth <= 0.0
+                || !Double.isFinite(pixelHeight) || pixelHeight <= 0.0) {
+            throw new IllegalArgumentException("Density heatmaps require positive finite X and Y micron scales.");
+        }
     }
 
     /**
@@ -186,7 +210,7 @@ public final class DensityHeatmapGenerator {
     }
 
     /**
-     * Scott's rule for bandwidth selection: h = n^(-1/5) * sigma.
+     * Scott's rule for two-dimensional bandwidth selection: h = n^(-1/6) * sigma.
      * Uses the mean of X and Y standard deviations.
      */
     static double scottsRule(double[][] centroids) {
@@ -214,12 +238,12 @@ public final class DensityHeatmapGenerator {
         varY /= (n - 1);
 
         double sigma = (Math.sqrt(varX) + Math.sqrt(varY)) / 2.0;
-        return Double.isFinite(sigma) ? Math.pow(n, -0.2) * sigma : 0;
+        return Double.isFinite(sigma) ? Math.pow(n, -1.0 / 6.0) * sigma : 0;
     }
 
     private static double scottsRuleWithinImage(double[][] centroids, double[] weights,
                                                 int imgWidth, int imgHeight,
-                                                double pixelSize) {
+                                                double pixelWidth, double pixelHeight) {
         int n = 0;
         double meanX = 0.0;
         double meanY = 0.0;
@@ -228,8 +252,8 @@ public final class DensityHeatmapGenerator {
         for (int i = 0; i < centroids.length; i++) {
             double[] point = centroids[i];
             if (!validPoint(point) || sampleWeight(weights, i) <= 0.0) continue;
-            long centerX = roundedPixel(point[0], pixelSize);
-            long centerY = roundedPixel(point[1], pixelSize);
+            long centerX = roundedPixel(point[0], pixelWidth);
+            long centerY = roundedPixel(point[1], pixelHeight);
             if (centerX < 0L || centerX >= imgWidth || centerY < 0L || centerY >= imgHeight) continue;
 
             n++;
@@ -243,7 +267,7 @@ public final class DensityHeatmapGenerator {
         if (n < 2 || !Double.isFinite(m2X) || !Double.isFinite(m2Y)) return 0.0;
         double sigma = (Math.sqrt(Math.max(0.0, m2X / (n - 1)))
                 + Math.sqrt(Math.max(0.0, m2Y / (n - 1)))) / 2.0;
-        double selected = Math.pow(n, -0.2) * sigma;
+        double selected = Math.pow(n, -1.0 / 6.0) * sigma;
         return Double.isFinite(selected) ? selected : 0.0;
     }
 
@@ -263,22 +287,23 @@ public final class DensityHeatmapGenerator {
         return Double.isFinite(weight) && weight > 0.0 ? weight : 0.0;
     }
 
-    private static KernelSupport clippedSupport(double[] point, double pixelSize, long radius,
+    private static KernelSupport clippedSupport(double[] point, double pixelWidth, double pixelHeight,
+                                                long radiusX, long radiusY,
                                                 int imgWidth, int imgHeight) {
-        long centerX = roundedPixel(point[0], pixelSize);
-        long centerY = roundedPixel(point[1], pixelSize);
+        long centerX = roundedPixel(point[0], pixelWidth);
+        long centerY = roundedPixel(point[1], pixelHeight);
 
         // These comparisons avoid centre +/- radius overflow for extreme, but finite,
         // coordinates. Once admitted, all following arithmetic is within a few image widths.
-        if (!axisIntersects(centerX, radius, imgWidth)
-                || !axisIntersects(centerY, radius, imgHeight)) {
+        if (!axisIntersects(centerX, radiusX, imgWidth)
+                || !axisIntersects(centerY, radiusY, imgHeight)) {
             return null;
         }
 
-        int xMin = clippedMinimum(centerX, radius);
-        int xMax = clippedMaximum(centerX, radius, imgWidth);
-        int yMin = clippedMinimum(centerY, radius);
-        int yMax = clippedMaximum(centerY, radius, imgHeight);
+        int xMin = clippedMinimum(centerX, radiusX);
+        int xMax = clippedMaximum(centerX, radiusX, imgWidth);
+        int yMin = clippedMinimum(centerY, radiusY);
+        int yMax = clippedMaximum(centerY, radiusY, imgHeight);
         return new KernelSupport(centerX, centerY, xMin, xMax, yMin, yMax);
     }
 

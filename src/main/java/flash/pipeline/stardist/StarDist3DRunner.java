@@ -211,6 +211,15 @@ public class StarDist3DRunner {
                                 double qualityMin, double intensityMin,
                                 String modelKey,
                                 File projectRoot) {
+        // Z is deliberately treated as synthetic time for 3D linking. A real time axis
+        // would join the last slice of one frame to the first slice of the next, and
+        // multiple source channels would silently quantify only channel 1.
+        if (input == null || input.getNChannels() != 1 || input.getNFrames() != 1) {
+            IllegalArgumentException cause = new IllegalArgumentException(
+                    "StarDist 3D requires one channel and one time frame. "
+                            + "Extract each channel and time frame separately before segmentation.");
+            throw failure("StarDist failed: " + cause.getMessage(), cause);
+        }
         // Clear any orphaned imagej-tensorflow crash flag from a previous Fiji
         // session before TrackMate-StarDist triggers the native TensorFlow load
         // below. Without this, Fiji refuses to load TensorFlow ("Could not load

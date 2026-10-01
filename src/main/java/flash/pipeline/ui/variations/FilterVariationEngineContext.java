@@ -264,8 +264,23 @@ public final class FilterVariationEngineContext {
                 + image.getWidth() + "x"
                 + image.getHeight() + "x"
                 + image.getStackSize() + ":"
+                + image.getNChannels() + "x" + image.getNSlices() + "x" + image.getNFrames() + ":"
+                + calibrationFingerprint(image) + ":"
                 + pixelFingerprint(image);
         return sha256(raw);
+    }
+
+    private static String calibrationFingerprint(ImagePlus image) {
+        ij.measure.Calibration calibration = image.getCalibration();
+        if (calibration == null) return "none";
+        return calibration.pixelWidth + ":" + calibration.pixelHeight + ":"
+                + calibration.pixelDepth + ":" + calibration.frameInterval + ":"
+                + calibration.xOrigin + ":" + calibration.yOrigin + ":"
+                + calibration.zOrigin + ":" + calibration.getUnit() + ":"
+                + calibration.getTimeUnit() + ":" + calibration.getValueUnit() + ":"
+                + calibration.getFunction() + ":"
+                + java.util.Arrays.toString(calibration.getCoefficients()) + ":"
+                + calibration.getInvertY();
     }
 
     private static String pixelFingerprint(ImagePlus image) {

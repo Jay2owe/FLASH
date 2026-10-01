@@ -400,14 +400,21 @@ public class AnalysisRunCoordinator extends AbstractService {
             return false; // no persisted routing keys / group routes nothing to deconv
         }
 
+        boolean headless = isHeadlessPreflight(cliConfig);
+        boolean requireFresh = cliConfig != null && cliConfig.getDeconv() != null
+                && cliConfig.getDeconv().isRequireFresh();
+
         List<DeconvPreflight.SeriesRef> series;
         try {
             series = deconvSeriesEnumerator.list(directory);
         } catch (Exception e) {
-            // Never crash a run over a preflight enumeration failure; the consumer still falls back
-            // per-series (its own raw fallback), just without this early warning.
-            IJ.log("[Deconv preflight] Could not enumerate series in " + directory
-                    + " - skipping preflight: " + e.getMessage());
+            String reason = "Could not verify deconvolution freshness because series enumeration failed in "
+                    + directory + ": " + e.getMessage();
+            if (requireFresh) {
+                throw new IllegalStateException(reason
+                        + " deconv.requireFresh=true, so the run is aborted.", e);
+            }
+            warnProceedOnRaw(context, reason + " Continuing with per-series raw fallback.");
             return false;
         }
 
@@ -420,10 +427,6 @@ public class AnalysisRunCoordinator extends AbstractService {
         if (missing.isEmpty()) {
             return false; // fully fresh: only cheap manifest reads were paid
         }
-
-        boolean headless = GraphicsEnvironment.isHeadless() || cliConfig != null;
-        boolean requireFresh = cliConfig != null && cliConfig.getDeconv() != null
-                && cliConfig.getDeconv().isRequireFresh();
 
         if (headless) {
             if (requireFresh) {
@@ -443,7 +446,17 @@ public class AnalysisRunCoordinator extends AbstractService {
         PreflightChoice choice = deconvPreflightPrompter.ask(analysisLabel, missing);
         if (choice == PreflightChoice.DECONVOLVE) {
             try {
-                deconvBatchRunner.run(directory);
+                if (!deconvBatchRunner.run(directory)) {
+                    warnProceedOnRaw(context,
+                            "Deconvolution preflight batch did not complete; proceeding with per-series raw fallback.");
+                } else {
+                    List<DeconvPreflight.MissingMirror> remaining = DeconvPreflight.scan(
+                            new File(directory), routing, group.get(), series, expectedParams);
+                    if (!remaining.isEmpty()) {
+                        warnProceedOnRaw(context, preflightSummary(analysisLabel, remaining)
+                                + " The preflight batch left these mirrors missing or stale; proceeding with per-series raw fallback.");
+                    }
+                }
             } catch (Exception e) {
                 warnProceedOnRaw(context,
                         "Deconvolution preflight batch failed; proceeding on raw. " + e.getMessage());
@@ -459,6 +472,10 @@ public class AnalysisRunCoordinator extends AbstractService {
         warnProceedOnRaw(context, preflightSummary(analysisLabel, missing)
                 + " User chose to proceed on RAW pixels for those channels.");
         return false;
+    }
+
+    boolean isHeadlessPreflight(CLIConfig cliConfig) {
+        return GraphicsEnvironment.isHeadless() || cliConfig != null;
     }
 
     private static void warnProceedOnRaw(AnalysisRunContext context, String message) {

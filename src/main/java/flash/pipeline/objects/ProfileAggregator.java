@@ -63,7 +63,13 @@ public final class ProfileAggregator {
         if (other == null) return;
         for (Map.Entry<String, BinStats> e : other.groups.entrySet()) {
             BinStats mine = groups.get(e.getKey());
-            if (mine == null) groups.put(e.getKey(), e.getValue());
+            if (mine == null) {
+                BinStats incoming = e.getValue();
+                mine = new BinStats(incoming.source, incoming.partner, incoming.profileType,
+                        incoming.groupKey, incoming.mean.length);
+                mine.merge(incoming);
+                groups.put(e.getKey(), mine);
+            }
             else mine.merge(e.getValue());
         }
     }
@@ -96,40 +102,56 @@ public final class ProfileAggregator {
 
     private static final class BinStats {
         final String source, partner, profileType, groupKey;
-        final double[] sum, sumsq;
+        final double[] mean, m2;
         final int[] n;
         BinStats(String source, String partner, String profileType, String groupKey, int len) {
             this.source = source; this.partner = partner; this.profileType = profileType;
             this.groupKey = groupKey;
-            sum = new double[len]; sumsq = new double[len]; n = new int[len];
+            mean = new double[len]; m2 = new double[len]; n = new int[len];
         }
         void add(double[] curve) {
-            int len = Math.min(curve.length, sum.length);
+            if (curve.length != mean.length) {
+                throw new IllegalArgumentException("Cannot aggregate profiles with different bin axes.");
+            }
+            int len = mean.length;
             for (int i = 0; i < len; i++) {
                 double v = curve[i];
-                if (Double.isNaN(v)) continue;
-                sum[i] += v; sumsq[i] += v * v; n[i]++;
+                if (!Double.isFinite(v)) continue;
+                n[i]++;
+                double delta = v - mean[i];
+                mean[i] += delta / n[i];
+                m2[i] += delta * (v - mean[i]);
             }
         }
         void merge(BinStats o) {
-            for (int i = 0; i < sum.length && i < o.sum.length; i++) {
-                sum[i] += o.sum[i]; sumsq[i] += o.sumsq[i]; n[i] += o.n[i];
+            if (mean.length != o.mean.length) {
+                throw new IllegalArgumentException("Cannot merge profiles with different bin axes.");
+            }
+            for (int i = 0; i < mean.length; i++) {
+                if (o.n[i] == 0) continue;
+                int combined = n[i] + o.n[i];
+                double delta = o.mean[i] - mean[i];
+                m2[i] += o.m2[i] + delta * delta * n[i] * ((double) o.n[i] / combined);
+                mean[i] += delta * o.n[i] / combined;
+                n[i] = combined;
             }
         }
         AggregatedProfile finish() {
-            int len = sum.length;
+            int len = this.mean.length;
             double[] x = new double[len], mean = new double[len], sem = new double[len];
             for (int i = 0; i < len; i++) {
                 x[i] = axisAt(profileType, i, len);
                 if (n[i] > 0) {
-                    mean[i] = sum[i] / n[i];
-                    double var = Math.max(0, sumsq[i] / n[i] - mean[i] * mean[i]);
-                    sem[i] = n[i] > 1 ? Math.sqrt(var) / Math.sqrt(n[i]) : 0;
+                    mean[i] = this.mean[i];
+                    // Sample SEM requires at least two contributing objects.
+                    sem[i] = n[i] > 1
+                            ? Math.sqrt(Math.max(0.0, m2[i]) / (n[i] - 1.0) / n[i])
+                            : Double.NaN;
                 } else {
                     mean[i] = Double.NaN; sem[i] = Double.NaN;
                 }
             }
-            return new AggregatedProfile(source, partner, profileType, groupKey, x, mean, sem, n);
+            return new AggregatedProfile(source, partner, profileType, groupKey, x, mean, sem, n.clone());
         }
     }
 }

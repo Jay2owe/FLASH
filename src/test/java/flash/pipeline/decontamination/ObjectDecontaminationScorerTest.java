@@ -4,6 +4,7 @@ import ij.ImagePlus;
 import ij.ImageStack;
 import ij.measure.Calibration;
 import ij.process.ShortProcessor;
+import ij.process.FloatProcessor;
 import org.junit.Test;
 
 import java.util.Arrays;
@@ -15,6 +16,65 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ObjectDecontaminationScorerTest {
+
+    @Test
+    public void blankContaminantsCannotRejectBrightTargetObjectsAsHighOverlap() {
+        ObjectDecontaminationScorer.ScoreResult result = ObjectDecontaminationScorer.score(
+                labelImage(2, 1, new int[]{1, 1}),
+                multiChannelImage(2, 1, new int[]{100, 100}, new int[]{0, 0}, new int[]{0, 0}),
+                baseConfig(), null, null);
+        ObjectDecontaminationScorer.ObjectScore score = result.getScores().get(0);
+        assertTrue(score.isKeepObject());
+        assertEquals(0.0, score.getHighBleedThroughOverlapFraction(), 0.0);
+        assertEquals(0.0, score.getHighAutofluorescenceOverlapFraction(), 0.0);
+        assertEquals(0.0, score.getContaminationScore(), 0.0);
+    }
+
+    @Test
+    public void floatLabelIdsAboveUnsignedShortRangeRemainNumericalAndDistinct() {
+        ImagePlus labels = new ImagePlus("wide labels", new FloatProcessor(2, 1,
+                new float[]{65536.0f, 65537.0f}));
+        ImagePlus source = multiChannelImage(2, 1, new int[]{100, 10}, new int[]{1, 200});
+        SpectralDecontaminationConfig config = new SpectralDecontaminationConfig();
+        config.setTargetChannelIndex(0);
+        config.setBleedThroughChannelIndexes(Arrays.asList(1));
+        ObjectDecontaminationScorer.ScoreResult result = ObjectDecontaminationScorer.score(
+                labels, source, config, null, new ObjectDecontaminationScorer.Settings());
+        assertEquals(65536, result.getScores().get(0).getObjectId());
+        assertEquals(65537, result.getScores().get(1).getObjectId());
+        assertEquals(65536.0f, result.getCleanedObjectMap().getProcessor().getf(0), 0.0f);
+        assertEquals(0.0f, result.getCleanedObjectMap().getProcessor().getf(1), 0.0f);
+        assertEquals(65537.0f, labels.getProcessor().getf(1), 0.0f);
+    }
+
+    @Test
+    public void malformedFloatLabelsFailBeforeScoringOrCleaning() {
+        for (float label : new float[]{Float.NaN, Float.POSITIVE_INFINITY, -1.0f, 0.5f, 16777218.0f}) {
+            ImagePlus labels = new ImagePlus("invalid labels", new FloatProcessor(1, 1, new float[]{label}));
+            ImagePlus source = multiChannelImage(1, 1, new int[]{100}, new int[]{1}, new int[]{1});
+            try {
+                ObjectDecontaminationScorer.score(labels, source, baseConfig(), null, null);
+                org.junit.Assert.fail("Invalid label must fail: " + label);
+            } catch (IllegalArgumentException expected) {
+                assertTrue(expected.getMessage().contains("exact label range"));
+            }
+            try {
+                ObjectDecontaminationScorer.createCleanedObjectMap(labels, null);
+                org.junit.Assert.fail("Direct cleaning must reject invalid label: " + label);
+            } catch (IllegalArgumentException expected) {
+                assertTrue(expected.getMessage().contains("exact label range"));
+            }
+        }
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void equalPlaneCountWithDifferentDepthAndTimeIsRejected() {
+        ImagePlus labels = labelImage(1, 1, new int[]{1}, new int[]{1});
+        labels.setDimensions(1, 1, 2);
+        ImagePlus source = multiChannelImage(1, 1, 2,
+                new int[][]{{100}, {100}}, new int[][]{{1}, {1}}, new int[][]{{1}, {1}});
+        ObjectDecontaminationScorer.score(labels, source, baseConfig(), null, null);
+    }
 
     @Test
     public void scoresNonContiguousLabelsAndRemovesRejectedObjectsWithoutRelabelling() {

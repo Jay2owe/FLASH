@@ -10,6 +10,7 @@ import ij.plugin.GaussianBlur3D;
 import ij.plugin.filter.BackgroundSubtracter;
 import ij.plugin.filter.GaussianBlur;
 import ij.plugin.filter.RankFilters;
+import ij.plugin.filter.UnsharpMask;
 import ij.plugin.frame.RoiManager;
 import ij.process.BinaryProcessor;
 import ij.process.ByteProcessor;
@@ -44,6 +45,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Executes ImageJ filter macros on an ImagePlus.
@@ -399,57 +401,18 @@ public final class FilterExecutor {
      * Thread-safe version of runIjmFile.
      */
     public static boolean runIjmFileThreadSafe(ImagePlus imp, File ijmFile) {
-        if (imp == null || ijmFile == null || !ijmFile.exists()) return true;
+        if (imp == null || ijmFile == null) return true;
+        final String content;
         try {
-            // Read file content to check for compound filter patterns
-            String content = new String(java.nio.file.Files.readAllBytes(ijmFile.toPath()),
+            content = new String(java.nio.file.Files.readAllBytes(ijmFile.toPath()),
                     java.nio.charset.StandardCharsets.UTF_8);
-            if (PunctaResolveFilter.matches(content)) {
-                WindowManagerLock.LOCK.lock();
-                try {
-                    PunctaResolveFilter.apply(imp, content);
-                } finally {
-                    WindowManagerLock.LOCK.unlock();
-                }
-                return true;
-            }
-            if (DiffuseObjectFilter.matches(content)) {
-                WindowManagerLock.LOCK.lock();
-                try {
-                    DiffuseObjectFilter.apply(imp, content);
-                } finally {
-                    WindowManagerLock.LOCK.unlock();
-                }
-                return true;
-            }
-
-            List<FilterMacroParser.Op> ops = FilterMacroParser.parse(ijmFile);
-            for (FilterMacroParser.Op op : ops) {
-                if (op.type == FilterMacroParser.OpType.UNKNOWN) {
-                    WindowManagerLock.LOCK.lock();
-                    try {
-                        runIjmFile(imp, ijmFile);
-                    } finally {
-                        closeWindowSafely(imp);
-                        WindowManagerLock.LOCK.unlock();
-                    }
-                    return false;
-                }
-            }
-            for (FilterMacroParser.Op op : ops) {
-                executeOpOnStack(imp, op);
-            }
-            return true;
-        } catch (Exception e) {
-            WindowManagerLock.LOCK.lock();
-            try {
-                runIjmFile(imp, ijmFile);
-            } finally {
-                closeWindowSafely(imp);
-                WindowManagerLock.LOCK.unlock();
-            }
-            return false;
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Cannot read filter macro: "
+                    + ijmFile.getAbsolutePath(), e);
         }
+        // Both entry points choose the execution path before modifying pixels.
+        // An execution failure must never replay a macro on partly filtered data.
+        return runThreadSafe(imp, content);
     }
 
     /**
@@ -777,6 +740,7 @@ public final class FilterExecutor {
             case CONVERT_8BIT:
             case CONVERT_16BIT:
             case CONVERT_32BIT:
+            case ENHANCE_CONTRAST:
                 return true;
             default:
                 return false;
@@ -807,6 +771,8 @@ public final class FilterExecutor {
         int nThreads = Math.min(nSlices, Runtime.getRuntime().availableProcessors());
         ExecutorService slicePool = Executors.newFixedThreadPool(nThreads);
         List<Future<?>> futures = new ArrayList<Future<?>>();
+        boolean completed = false;
+        try {
         // Inherit the parent's ParallelContext so any nested FilterExecutor
         // calls on the slice threads serialise rather than spawning more pools.
         // We're at the top of the parallel chain here, so enter the flag
@@ -838,7 +804,35 @@ public final class FilterExecutor {
                         + "' across " + nSlices + " slice(s)", cause);
             }
         }
-        slicePool.shutdown();
+            completed = true;
+        } finally {
+            finishSliceWorkers(slicePool, futures, completed);
+        }
+    }
+
+    private static void finishSliceWorkers(ExecutorService pool,
+                                            List<Future<?>> futures,
+                                            boolean completed) {
+        boolean interrupted = Thread.interrupted();
+        if (completed) {
+            pool.shutdown();
+        } else {
+            for (Future<?> future : futures) future.cancel(true);
+            pool.shutdownNow();
+        }
+        try {
+            // Do not return a failed image while a worker can still mutate it.
+            while (!pool.isTerminated()) {
+                try {
+                    pool.awaitTermination(100, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                    pool.shutdownNow();
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -855,11 +849,19 @@ public final class FilterExecutor {
             }
             case SUBTRACT_BACKGROUND: {
                 double rolling = op.getParam("rolling");
-                if (Double.isNaN(rolling)) rolling = 20.0;
-                // createBackground=false, lightBackground=false, useParaboloid=false,
-                // doPresmooth=true, correctCorners=true
-                new BackgroundSubtracter().rollingBallBackground(
-                        ip, rolling, false, false, false, true, true);
+                if (Double.isNaN(rolling)) rolling = 50.0;
+                boolean create = op.hasFlag("create");
+                boolean light = op.hasFlag("light") || op.hasFlag("white");
+                boolean sliding = op.hasFlag("sliding");
+                boolean smooth = !op.hasFlag("disable");
+                BackgroundSubtracter subtracter = new BackgroundSubtracter();
+                if (ip instanceof ColorProcessor && !op.hasFlag("separate")) {
+                    subtracter.rollingBallBrightnessBackground((ColorProcessor) ip,
+                            rolling, create, light, sliding, smooth, true);
+                } else {
+                    subtracter.rollingBallBackground(ip, rolling, create, light,
+                            sliding, smooth, true);
+                }
                 break;
             }
             case MEDIAN: {
@@ -897,16 +899,15 @@ public final class FilterExecutor {
                 if (Double.isNaN(radius)) radius = 10.0;
                 double weight = op.getParam("mask");
                 if (Double.isNaN(weight)) weight = 0.60;
-                ImageProcessor blurred = ip.duplicate();
-                new GaussianBlur().blurGaussian(blurred, radius);
-                float[] origPixels = ipToFloatArray(ip);
-                float[] blurredPixels = ipToFloatArray(blurred);
-                int size = origPixels.length;
-                for (int i = 0; i < size; i++) {
-                    float v = origPixels[i] + (float)(weight * (origPixels[i] - blurredPixels[i]));
-                    origPixels[i] = Math.max(0, v);
+                if (radius < 0 || weight < 0 || weight > 0.99) {
+                    throw new IllegalArgumentException("Invalid Unsharp Mask radius or weight");
                 }
-                setFromFloatArray(ip, origPixels);
+                for (int channel = 0; channel < ip.getNChannels(); channel++) {
+                    FloatProcessor fp = ip.toFloat(channel, null);
+                    fp.snapshot();
+                    new UnsharpMask().sharpenFloat(fp, radius, (float) weight);
+                    ip.setPixels(channel, fp);
+                }
                 break;
             }
             case DILATE: {
@@ -1003,10 +1004,6 @@ public final class FilterExecutor {
                 applyAutoLocalThreshold(ip, op);
                 break;
             }
-            case ENHANCE_CONTRAST: {
-                applyEnhanceContrast(ip, op);
-                break;
-            }
             default:
                 // Whole-stack ops should not reach this method; UNKNOWN never reaches
                 // here either (caller falls back). Be defensive: silently skip.
@@ -1057,6 +1054,10 @@ public final class FilterExecutor {
                 }
                 break;
             }
+            case ENHANCE_CONTRAST: {
+                applyEnhanceContrast(imp, op);
+                break;
+            }
             default:
                 break;
         }
@@ -1081,10 +1082,7 @@ public final class FilterExecutor {
      */
     private static void applyAutoLocalThreshold(ImageProcessor ip, FilterMacroParser.Op op) {
         if (!(ip instanceof ByteProcessor)) {
-            // Auto Local Threshold runs on 8-bit images. Skip silently for other
-            // bit depths — the caller is expected to convert first (the bundled
-            // Puncta Resolve macro does run("8-bit") immediately before).
-            return;
+            throw new IllegalArgumentException("Auto Local Threshold requires an 8-bit image");
         }
         String method = op.getStringParam("method");
         if (method == null) method = "Bernsen";
@@ -1108,8 +1106,7 @@ public final class FilterExecutor {
                     double.class, double.class, boolean.class)
                     .invoke(inst, tmp, method, (int) radius, p1, p2, white);
         } catch (ClassNotFoundException notFound) {
-            // Plugin not available — leave the slice unchanged. This only happens
-            // outside Fiji (unit tests without the auto-local-threshold jar).
+            throw new IllegalStateException("Auto Local Threshold plugin is unavailable", notFound);
         } catch (Exception e) {
             throw new RuntimeException("Auto Local Threshold native execution failed", e);
         }
@@ -1120,22 +1117,38 @@ public final class FilterExecutor {
      * Uses {@link ContrastEnhancer#stretchHistogram(ImageProcessor, double)} with
      * the {@code normalize} field set when present in the args.
      */
-    private static void applyEnhanceContrast(ImageProcessor ip, FilterMacroParser.Op op) {
-        if (ip instanceof ColorProcessor) return;
+    private static void applyEnhanceContrast(ImagePlus imp, FilterMacroParser.Op op) {
         double saturated = op.getParam("saturated");
         if (Double.isNaN(saturated)) saturated = 0.35;
-        boolean normalize = op.hasFlag("normalize");
+        boolean processAll = imp.getStackSize() > 1
+                && (op.hasFlag("process_all") || op.hasFlag("normalize_all"));
+        boolean normalize = op.hasFlag("normalize")
+                || op.hasFlag("normalize_all") || processAll;
         boolean equalize = op.hasFlag("equalize");
 
         ContrastEnhancer ce = new ContrastEnhancer();
-        // ContrastEnhancer fields differ in visibility across IJ versions —
-        // reflectively assign the ones we recognise so we do not depend on
-        // a particular accessor surface.
-        setFieldIfExists(ce, "normalize", normalize);
-        setFieldIfExists(ce, "equalize",  equalize);
-        setFieldIfExists(ce, "useStackHistogram", false);
-        setFieldIfExists(ce, "processStack", false);
-        ce.stretchHistogram(ip, saturated);
+        ce.setProcessStack(processAll);
+        ce.setNormalize(normalize && imp.getBitDepth() != 24);
+        ce.setUseStackHistogram(op.hasFlag("use"));
+        if (processAll) {
+            // ImageJ 1.53f initializes this only from the GUI run() entry point.
+            // Calling either stack API with its default zero processes no slices.
+            try {
+                Field stackSize = ContrastEnhancer.class.getDeclaredField("stackSize");
+                stackSize.setAccessible(true);
+                stackSize.setInt(ce, imp.getStackSize());
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                throw new IllegalStateException("Cannot initialize Enhance Contrast stack processing", e);
+            }
+        }
+        if (equalize) {
+            if (imp.getBitDepth() == 32) {
+                throw new IllegalArgumentException("Histogram equalization requires an 8-bit or 16-bit image");
+            }
+            ce.equalize(imp);
+        } else {
+            ce.stretchHistogram(imp, Math.max(0, Math.min(100, saturated)));
+        }
     }
 
     private static void setFieldIfExists(Object target, String name, boolean value) {

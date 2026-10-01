@@ -9,6 +9,8 @@ import ij.process.ImageStatistics;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -98,20 +100,26 @@ public final class ThreadSafeMeasure {
                                                  ImagePlus rawImp,
                                                  ImagePlus binarizedRawInMaskImp,
                                                  Roi roi) {
+        requireMeasurementGeometry(filteredImp, rawImp, binarizedRawInMaskImp);
+        checkInterrupted();
         int nSlices = filteredImp.getNSlices();
         SliceResult[] results = new SliceResult[nSlices];
 
-        if (nSlices < PARALLEL_THRESHOLD) {
+        if (nSlices < PARALLEL_THRESHOLD || ParallelContext.isNested()) {
             for (int s = 1; s <= nSlices; s++) {
+                checkInterrupted();
                 results[s - 1] = measureSlice(filteredImp, rawImp, binarizedRawInMaskImp, s, roi);
             }
             return results;
         }
 
-        int nThreads = Math.min(nSlices, Runtime.getRuntime().availableProcessors());
+        long bytesPerSlice = (long) filteredImp.getWidth() * filteredImp.getHeight()
+                * Math.max(1, filteredImp.getBitDepth() / 8) * 3;
+        int nThreads = AdaptiveParallelism.computeSafeThreadsForInMemoryTasks(bytesPerSlice,
+                Runtime.getRuntime().availableProcessors(), nSlices);
         ExecutorService exec = Executors.newFixedThreadPool(nThreads);
+        List<Future<?>> futures = new ArrayList<Future<?>>();
         try {
-            List<Future<?>> futures = new ArrayList<Future<?>>();
             for (int s = 1; s <= nSlices; s++) {
                 final int slice = s;
                 final Roi roiClone = (roi != null) ? (Roi) roi.clone() : null;
@@ -126,14 +134,55 @@ public final class ThreadSafeMeasure {
             for (Future<?> f : futures) {
                 try {
                     f.get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new CancellationException("Intensity measurement interrupted");
                 } catch (Exception e) {
                     throw new RuntimeException("Parallel measurement failed", e);
                 }
             }
         } finally {
-            exec.shutdown();
+            for (Future<?> future : futures) {
+                if (!future.isDone()) future.cancel(true);
+            }
+            exec.shutdownNow();
+            boolean interrupted = Thread.interrupted();
+            try {
+                // Inputs may be closed by the caller immediately on return.
+                // Future cancellation is not proof that workers have stopped.
+                while (!exec.isTerminated()) {
+                    try {
+                        exec.awaitTermination(100, TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                    }
+                }
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
         }
         return results;
+    }
+
+    private static void checkInterrupted() {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new CancellationException("Intensity measurement interrupted");
+        }
+    }
+
+    private static void requireMeasurementGeometry(ImagePlus filtered, ImagePlus... others) {
+        if (filtered == null || filtered.getNChannels() != 1 || filtered.getNFrames() != 1) {
+            throw new IllegalArgumentException("Intensity measurement requires a single-channel Z stack without time frames");
+        }
+        for (ImagePlus other : others) {
+            if (other != null && (other.getWidth() != filtered.getWidth()
+                    || other.getHeight() != filtered.getHeight()
+                    || other.getNChannels() != filtered.getNChannels()
+                    || other.getNSlices() != filtered.getNSlices()
+                    || other.getNFrames() != filtered.getNFrames())) {
+                throw new IllegalArgumentException("Intensity measurement images must have identical pixel and C/Z/T dimensions");
+            }
+        }
     }
 
     private static IntegratedAreaResult measureIntegratedDensityAndAreaFraction(

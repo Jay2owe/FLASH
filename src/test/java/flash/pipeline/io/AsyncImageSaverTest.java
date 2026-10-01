@@ -19,9 +19,11 @@ import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
 
@@ -314,10 +316,138 @@ public class AsyncImageSaverTest {
         assertEquals(0, AsyncImageSaver.pendingCount());
     }
 
+    @Test
+    public void saturatedSaverBlocksBeforeImageCopyAndResumesWhenDiskCatchesUp() throws Exception {
+        final CountDownLatch release = saturateSaver();
+        final AtomicInteger sourceReads = new AtomicInteger();
+        final ImagePlus source = countedSource(sourceReads);
+        final AtomicReference<Throwable> failure = new AtomicReference<Throwable>();
+        final File target = new File(temp.getRoot(), "after-backpressure.tif");
+        final Thread producer = imageProducer(source, target, failure);
+        try {
+            producer.start();
+            awaitBlockedProducer(producer);
+            assertEquals("A saturated saver must wait before touching/copying source pixels", 0, sourceReads.get());
+            assertEquals(AsyncImageSaver.MAX_IN_FLIGHT_SAVES, AsyncImageSaver.pendingCount());
+            release.countDown();
+            producer.join(5000L);
+            assertFalse(producer.isAlive());
+            assertNull(failure.get());
+            assertTrue(sourceReads.get() > 0);
+            AsyncImageSaver.waitForAll();
+            assertTrue(target.isFile());
+        } finally {
+            release.countDown();
+            producer.interrupt();
+            producer.join(5000L);
+            source.close();
+        }
+    }
+
+    @Test
+    public void interruptedBackpressurePreservesInterruptAndDoesNotCopyOrLeakSlot() throws Exception {
+        final CountDownLatch release = saturateSaver();
+        final AtomicInteger sourceReads = new AtomicInteger();
+        final ImagePlus source = countedSource(sourceReads);
+        final AtomicReference<Throwable> failure = new AtomicReference<Throwable>();
+        final Thread producer = imageProducer(source, new File(temp.getRoot(), "interrupted.tif"), failure);
+        try {
+            producer.start();
+            awaitBlockedProducer(producer);
+            producer.interrupt();
+            producer.join(5000L);
+            assertFalse(producer.isAlive());
+            assertTrue(failure.get() instanceof CancellationException);
+            assertTrue(producer.isInterrupted());
+            assertEquals(0, sourceReads.get());
+            release.countDown();
+            AsyncImageSaver.waitForAll();
+            assertAllSlotsReusable();
+        } finally {
+            release.countDown();
+            producer.interrupt();
+            producer.join(5000L);
+            source.close();
+        }
+    }
+
+    @Test
+    public void guiCancellationReleasesBlockedProducerWithoutCopying() throws Exception {
+        final CountDownLatch release = saturateSaver();
+        final AtomicInteger sourceReads = new AtomicInteger();
+        final ImagePlus source = countedSource(sourceReads);
+        final AtomicReference<Throwable> failure = new AtomicReference<Throwable>();
+        final Thread producer = imageProducer(source, new File(temp.getRoot(), "cancelled.tif"), failure);
+        AnalysisCancellation.Scope scope = AnalysisCancellation.openGuiAnalysisScope();
+        try {
+            producer.start();
+            awaitBlockedProducer(producer);
+            AnalysisCancellation.markDialogCancelRequested();
+            producer.join(5000L);
+            assertFalse(producer.isAlive());
+            assertTrue(failure.get() instanceof CancellationException);
+            assertEquals(0, sourceReads.get());
+            AsyncImageSaver.waitForAll();
+        } finally {
+            scope.close();
+            release.countDown();
+            producer.interrupt();
+            producer.join(5000L);
+            source.close();
+        }
+        TestWait.await("cancelled writer to release its slot", 5000L,
+                () -> saverPool().getActiveCount() == 0);
+        assertAllSlotsReusable();
+    }
+
+    private static CountDownLatch saturateSaver() throws Exception {
+        final CountDownLatch release = new CountDownLatch(1);
+        final CountDownLatch started = new CountDownLatch(1);
+        for (int i = 0; i < AsyncImageSaver.MAX_IN_FLIGHT_SAVES; i++) {
+            AsyncImageSaver.submitTask(() -> {
+                started.countDown();
+                try { release.await(10L, TimeUnit.SECONDS); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            });
+        }
+        TestWait.awaitLatch("saver saturation", started, 5000L);
+        return release;
+    }
+
+    private static ImagePlus countedSource(final AtomicInteger reads) {
+        ImagePlus source = new ImagePlus("counted-source", new ByteProcessor(2, 1)) {
+            @Override public ImageStack getImageStack() {
+                reads.incrementAndGet();
+                return super.getImageStack();
+            }
+        };
+        reads.set(0);
+        return source;
+    }
+
+    private static Thread imageProducer(final ImagePlus source, final File target,
+                                        final AtomicReference<Throwable> failure) {
+        return new Thread(() -> {
+            try { AsyncImageSaver.saveAsTiffAsync(source, target.getAbsolutePath()); }
+            catch (Throwable problem) { failure.set(problem); }
+        }, "test-save-producer");
+    }
+
+    private static void awaitBlockedProducer(final Thread producer) throws Exception {
+        TestWait.await("producer blocked by bounded saver", 5000L,
+                () -> producer.getState() == Thread.State.TIMED_WAITING);
+    }
+
+    private static void assertAllSlotsReusable() throws Exception {
+        CountDownLatch release = saturateSaver();
+        release.countDown();
+        AsyncImageSaver.waitForAll();
+    }
+
     // ── helper ──────────────────────────────────────────────────────
 
     @Test
-    public void guiCancellationDoesNotWaitForBlockedDrain() throws Exception {
+    public void guiCancellationCompletesPromptlyWhenWriterHonorsInterrupt() throws Exception {
         final CountDownLatch running = new CountDownLatch(1);
         final CountDownLatch release = new CountDownLatch(1);
         final CountDownLatch finished = new CountDownLatch(1);
@@ -364,6 +494,57 @@ public class AsyncImageSaverTest {
         TestWait.awaitLatch("blocked save worker to finish", finished, 2000L);
         resources.assertNoLeaks("cancelled AsyncImageSaver drain", 2000L);
         assertEquals("queued save should have been cancelled", 0, queuedRan.get());
+    }
+
+    @Test
+    public void cancellationWaitsForActualWriterCompletionBeforeReceiptCanClose() throws Exception {
+        final CountDownLatch started = new CountDownLatch(1);
+        final CountDownLatch interruptedWriter = new CountDownLatch(1);
+        final CountDownLatch releaseWriter = new CountDownLatch(1);
+        final AtomicInteger published = new AtomicInteger();
+        final AtomicInteger publishedWhenCancellationReturned = new AtomicInteger(-1);
+        final AtomicInteger queuedRan = new AtomicInteger();
+        final AtomicReference<Throwable> failure = new AtomicReference<Throwable>();
+        AsyncImageSaver.submitTask("running-write.tif", () -> {
+            started.countDown();
+            boolean complete = false;
+            while (!complete) {
+                try { complete = releaseWriter.await(10L, TimeUnit.SECONDS); }
+                catch (InterruptedException ignored) { interruptedWriter.countDown(); }
+            }
+            published.incrementAndGet();
+        });
+        TestWait.awaitLatch("writer started", started, 5000L);
+        AsyncImageSaver.submitTask("queued-write.tif", queuedRan::incrementAndGet);
+        AnalysisCancellation.Scope scope = AnalysisCancellation.openGuiAnalysisScope();
+        Thread coordinator = new Thread(() -> {
+            try {
+                AsyncImageSaver.waitForAll();
+                publishedWhenCancellationReturned.set(published.get());
+            } catch (Throwable problem) { failure.set(problem); }
+        }, "test-cancel-save-drain");
+        try {
+            AnalysisCancellation.markDialogCancelRequested();
+            coordinator.start();
+            TestWait.awaitLatch("running writer received cancellation", interruptedWriter, 5000L);
+            assertTrue("Cancelling a future is insufficient proof that writing finished", coordinator.isAlive());
+            assertEquals(0, published.get());
+            assertEquals("Cancellation wait must not hold the pending-list lock", 0, AsyncImageSaver.pendingCount());
+            coordinator.interrupt();
+            releaseWriter.countDown();
+            coordinator.join(5000L);
+            assertFalse(coordinator.isAlive());
+            assertNull(failure.get());
+            assertTrue("Cancellation coordinator must preserve its interrupt", coordinator.isInterrupted());
+            assertEquals(1, publishedWhenCancellationReturned.get());
+            assertEquals(0, queuedRan.get());
+        } finally {
+            scope.close();
+            releaseWriter.countDown();
+            coordinator.interrupt();
+            coordinator.join(5000L);
+        }
+        assertAllSlotsReusable();
     }
 
     @Test

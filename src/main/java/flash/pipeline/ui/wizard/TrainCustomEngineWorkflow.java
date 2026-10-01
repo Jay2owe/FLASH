@@ -1048,6 +1048,9 @@ public final class TrainCustomEngineWorkflow {
                 try {
                     raw = rawProvider.get(imageName);
                     labelsImage = labelProvider.get(imageName);
+                    flash.pipeline.click.SegmentationFingerprint.requireMatching(
+                            selection.toClickStore().forImageAndChannel(imageName,
+                                    selection.channelOneBased), labelsImage);
                     List<ObjectFeatureExtractor.FeatureRow> rows =
                             extractor.extractFromLabelImage(
                                     labelsImage, raw, cellprobImage(labelsImage), labels);

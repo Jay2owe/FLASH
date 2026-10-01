@@ -60,4 +60,40 @@ public class SpectralRunIdCsvTest {
         assertEquals(RunIdCsv.RUN_ID_COLUMN, headers[headers.length - 1]);
         return out;
     }
+
+    @Test
+    public void rewritingReusedRowsKeepsOriginalProducerAcrossMultipleRuns() throws Exception {
+        File root = temp.newFolder("spectral-reuse-run-id");
+        Map<String, String> producer = new LinkedHashMap<String, String>();
+        producer.put("SeriesIndex", "0");
+        producer.put("Metric", "weight_channel_2");
+        producer.put("ObjectID", "7");
+        producer.put(RunIdCsv.RUN_ID_COLUMN, "R-PRODUCER");
+        Map<String, String> copied = SpectralOutputWriter.copySummaryRow(
+                producer, "skipped_existing", "");
+        assertEquals("R-PRODUCER", copied.get(RunIdCsv.SOURCE_RUN_ID_COLUMN));
+        List<Map<String, String>> rows = new ArrayList<Map<String, String>>();
+        rows.add(copied);
+        SpectralOutputWriter.writePerImageSummary(root.getAbsolutePath(), rows, "R-REUSE-1");
+        Map<String, String> second = firstRow(SpectralOutputWriter.perImageSummaryFile(root.getAbsolutePath()));
+        assertEquals("R-REUSE-1", second.get(RunIdCsv.RUN_ID_COLUMN));
+        assertEquals("R-PRODUCER", second.get(RunIdCsv.SOURCE_RUN_ID_COLUMN));
+        rows.clear();
+        rows.add(SpectralOutputWriter.copySummaryRow(second, "skipped_existing", ""));
+        SpectralOutputWriter.writePerImageSummary(root.getAbsolutePath(), rows, "R-REUSE-2");
+        assertEquals("R-PRODUCER", firstRow(SpectralOutputWriter.perImageSummaryFile(
+                root.getAbsolutePath())).get(RunIdCsv.SOURCE_RUN_ID_COLUMN));
+
+        rows.clear();
+        rows.add(producer);
+        SpectralOutputWriter.writeCorrectionCoefficients(root.getAbsolutePath(),
+                SpectralOutputWriter.copyCoefficientRows(rows, "skipped_existing"), "R-REUSE-2");
+        assertEquals("R-PRODUCER", firstRow(SpectralOutputWriter.correctionCoefficientsFile(
+                root.getAbsolutePath())).get(RunIdCsv.SOURCE_RUN_ID_COLUMN));
+        ObjectScoreWriter.writePerObjectScores(root.getAbsolutePath(),
+                ObjectScoreWriter.copyObjectRows(rows, "skipped_existing"), "R-REUSE-2");
+        assertEquals("R-PRODUCER", firstRow(ObjectScoreWriter.perObjectScoresFile(
+                root.getAbsolutePath())).get(RunIdCsv.SOURCE_RUN_ID_COLUMN));
+        org.junit.Assert.assertFalse(producer.containsKey(RunIdCsv.SOURCE_RUN_ID_COLUMN));
+    }
 }

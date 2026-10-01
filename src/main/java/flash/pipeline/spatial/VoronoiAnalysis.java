@@ -5,7 +5,6 @@ import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryCollection;
 import org.locationtech.jts.geom.GeometryFactory;
-import org.locationtech.jts.geom.Polygon;
 import org.locationtech.jts.triangulate.DelaunayTriangulationBuilder;
 import org.locationtech.jts.triangulate.VoronoiDiagramBuilder;
 
@@ -84,8 +83,14 @@ public final class VoronoiAnalysis {
 
         // Build Voronoi diagram
         Collection<Coordinate> sites = new ArrayList<Coordinate>(centroids.length);
-        for (double[] pt : centroids) {
-            sites.add(new Coordinate(pt[0], pt[1]));
+        Map<Coordinate, Integer> siteIndices = new HashMap<Coordinate, Integer>();
+        for (int i = 0; i < centroids.length; i++) {
+            double[] pt = centroids[i];
+            Coordinate site = new Coordinate(pt[0] == 0.0 ? 0.0 : pt[0], pt[1] == 0.0 ? 0.0 : pt[1]);
+            if (siteIndices.put(site, Integer.valueOf(i)) != null) {
+                throw new IllegalArgumentException("Voronoi territories require distinct centroids; duplicate at object " + i);
+            }
+            sites.add(site);
         }
 
         VoronoiDiagramBuilder builder = new VoronoiDiagramBuilder();
@@ -93,10 +98,8 @@ public final class VoronoiAnalysis {
         builder.setClipEnvelope(clip);
         Geometry diagram = builder.getDiagram(factory);
 
-        // Map each Voronoi cell to its generating point
-        // JTS returns cells in the same order as the sorted sites, so we need
-        // to match cells back to input centroids by finding which centroid
-        // falls inside each cell.
+        // JTS records the exact generating Coordinate as each cell's userData.
+        // Spatial proximity is not identity: nearby sites can have very different territories.
         int n = centroids.length;
         Geometry[] cells = new Geometry[n];
         double[] areas = new double[n];
@@ -106,17 +109,10 @@ public final class VoronoiAnalysis {
             for (int g = 0; g < gc.getNumGeometries(); g++) {
                 Geometry cell = gc.getGeometryN(g);
                 Geometry clipped = cell.intersection(clipPoly);
-                // Find which centroid is inside this cell
-                for (int i = 0; i < n; i++) {
-                    if (cells[i] != null) continue;
-                    Coordinate c = new Coordinate(centroids[i][0], centroids[i][1]);
-                    if (cell.contains(factory.createPoint(c)) ||
-                        cell.distance(factory.createPoint(c)) < 1e-6) {
-                        cells[i] = clipped;
-                        areas[i] = clipped.getArea();
-                        break;
-                    }
-                }
+                Integer index = siteIndices.get(cell.getUserData());
+                if (index == null) throw new IllegalStateException("Voronoi cell has no matching generating centroid.");
+                cells[index.intValue()] = clipped;
+                areas[index.intValue()] = clipped.getArea();
             }
         }
 
@@ -137,8 +133,10 @@ public final class VoronoiAnalysis {
                 Geometry edge = ec.getGeometryN(e);
                 Coordinate[] coords = edge.getCoordinates();
                 if (coords.length < 2) continue;
-                int idxA = findClosestCentroid(centroids, coords[0].x, coords[0].y);
-                int idxB = findClosestCentroid(centroids, coords[coords.length - 1].x, coords[coords.length - 1].y);
+                Integer mappedA = siteIndices.get(coords[0]);
+                Integer mappedB = siteIndices.get(coords[coords.length - 1]);
+                int idxA = mappedA == null ? -1 : mappedA.intValue();
+                int idxB = mappedB == null ? -1 : mappedB.intValue();
                 if (idxA >= 0 && idxB >= 0 && idxA != idxB) {
                     if (!adjacency.get(idxA).contains(idxB)) adjacency.get(idxA).add(idxB);
                     if (!adjacency.get(idxB).contains(idxA)) adjacency.get(idxB).add(idxA);
@@ -194,8 +192,10 @@ public final class VoronoiAnalysis {
 
         // Permutation test
         double[][] pValues = new double[nTypes][nTypes];
+        for (double[] row : pValues) Arrays.fill(row, Double.NaN);
         if (nPermutations > 0 && results.length > 1) {
             int[][] exceedCount = new int[nTypes][nTypes];
+            int[][] lowerCount = new int[nTypes][nTypes];
             Random rng = new Random(seed);
             String[] shuffled = Arrays.copyOf(safeTypes, safeTypes.length);
 
@@ -214,13 +214,21 @@ public final class VoronoiAnalysis {
                             exceedCount[a][b]++;
                             if (a != b) exceedCount[b][a]++;
                         }
+                        if (perm[a][b] <= observed[a][b]) {
+                            lowerCount[a][b]++;
+                            if (a != b) lowerCount[b][a]++;
+                        }
                     }
                 }
             }
 
             for (int a = 0; a < nTypes; a++) {
                 for (int b = 0; b < nTypes; b++) {
-                    pValues[a][b] = (double) exceedCount[a][b] / nPermutations;
+                    // Equal-tail two-sided permutation test, with the observed
+                    // arrangement included so random sampling never reports p=0.
+                    pValues[a][b] = Math.min(1.0, 2.0
+                            * (Math.min(exceedCount[a][b], lowerCount[a][b]) + 1.0)
+                            / (nPermutations + 1.0));
                 }
             }
         }
@@ -235,7 +243,7 @@ public final class VoronoiAnalysis {
             if (r == null || r.index < 0 || r.index >= types.length) continue;
             int typeA = typeIndex.get(types[r.index]);
             for (int neighborIdx : r.neighborIndices) {
-                if (neighborIdx >= types.length) continue;
+                if (neighborIdx < 0 || neighborIdx >= types.length) continue;
                 int typeB = typeIndex.get(types[neighborIdx]);
                 // Count each edge once (undirected)
                 if (r.index < neighborIdx) {
@@ -245,21 +253,6 @@ public final class VoronoiAnalysis {
             }
         }
         return counts;
-    }
-
-    private static int findClosestCentroid(double[][] centroids, double x, double y) {
-        int best = -1;
-        double bestDist = Double.MAX_VALUE;
-        for (int i = 0; i < centroids.length; i++) {
-            double dx = centroids[i][0] - x;
-            double dy = centroids[i][1] - y;
-            double d = dx * dx + dy * dy;
-            if (d < bestDist) {
-                bestDist = d;
-                best = i;
-            }
-        }
-        return best;
     }
 
     private static boolean validPoint(double[] point) {

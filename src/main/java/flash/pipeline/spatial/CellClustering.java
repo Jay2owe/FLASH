@@ -154,10 +154,13 @@ public final class CellClustering {
                     countA++;
                 }
             }
+            // A singleton has no within-cluster distance estimate. Its
+            // conventional silhouette is zero, not perfect separation.
+            if (countA == 0) continue;
             double a = countA > 0 ? sumA / countA : 0;
 
             // b(i) = min over other clusters of mean distance
-            double b = Double.MAX_VALUE;
+            double b = Double.POSITIVE_INFINITY;
             for (int c = 0; c < k; c++) {
                 if (c == ci) continue;
                 double sumB = 0;
@@ -173,6 +176,10 @@ public final class CellClustering {
                     if (meanB < b) b = meanB;
                 }
             }
+
+            // Requested clusters can be empty, particularly for identical
+            // points. No other occupied cluster means no separation estimate.
+            if (!Double.isFinite(b)) continue;
 
             double sil = 0;
             double denom = Math.max(a, b);
@@ -240,17 +247,17 @@ public final class CellClustering {
         double[][] result = new double[n][d];
 
         for (int j = 0; j < d; j++) {
-            double sum = 0, sumSq = 0;
+            double mean = 0, m2 = 0;
             int count = 0;
             for (int i = 0; i < n; i++) {
                 double value = valueAt(features, i, j);
                 if (!Double.isFinite(value)) continue;
-                sum += value;
-                sumSq += value * value;
                 count++;
+                double delta = value - mean;
+                mean += delta / count;
+                m2 += delta * (value - mean);
             }
-            double mean = count == 0 ? 0.0 : sum / count;
-            double std = count == 0 ? 1.0 : Math.sqrt(Math.max(0.0, sumSq / count - mean * mean));
+            double std = count == 0 ? 1.0 : Math.sqrt(Math.max(0.0, m2 / count));
             if (!Double.isFinite(std) || std < 1e-10) std = 1.0;
 
             for (int i = 0; i < n; i++) {
