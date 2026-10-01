@@ -789,7 +789,8 @@ public class PreviewPairPanelTest {
                 PreviewPairPanel.PreviewLayout.HORIZONTAL_SLIM);
         pair.setClickCapture(newClickBinFolder(), store, "Mouse1_LH_SCN", 2);
         pair.setOriginal(clickSource("filtered"));
-        pair.setAdjusted(clickLabels("Object labels"));
+        ImagePlus originalLabels = clickLabels("Object labels");
+        pair.setAdjusted(originalLabels);
 
         pair.adjustedPreviewForTest().firePixelClickForTest(
                 2.0, 1.0, 2, MouseEvent.BUTTON1, 0);
@@ -798,6 +799,8 @@ public class PreviewPairPanelTest {
         assertEquals(1, clicks.size());
         assertEquals(11, clicks.get(0).label);
         assertEquals(ClickStore.Verdict.NEGATIVE, clicks.get(0).verdict);
+        assertEquals(flash.pipeline.click.SegmentationFingerprint.of(originalLabels),
+                clicks.get(0).segmentationFingerprint);
     }
 
     @Test

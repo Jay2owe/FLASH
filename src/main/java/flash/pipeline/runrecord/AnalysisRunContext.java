@@ -338,7 +338,11 @@ public final class AnalysisRunContext implements AutoCloseable {
         try {
             Files.deleteIfExists(runFile.toPath());
             File parent = runFile.getParentFile();
-            if (parent != null) parent.delete(); // Removes only an empty, now-unused runs directory.
+            if (parent != null) {
+                parent.delete(); // Removes only an empty, now-unused runs directory.
+                File recordsRoot = parent.getParentFile();
+                if (recordsRoot != null) recordsRoot.delete(); // Empty Run Records only; preserve prior records.
+            }
         } catch (IOException failure) {
             throw new IllegalStateException("Could not discard cancelled run record " + runFile, failure);
         }

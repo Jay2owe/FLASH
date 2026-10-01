@@ -1886,8 +1886,9 @@ public final class PreviewPairPanel extends JPanel {
         if (clear) {
             clickStore.clearForObject(clickImageName, clickChannelOneBased, label);
         } else {
-            ImagePlus labels = objectTrueLabelMap != null
-                    ? objectTrueLabelMap : largePreviewThirdImage;
+            // Use the same original label image that resolved the inline click,
+            // including embedded previews that have no large-view label model.
+            ImagePlus labels = inlineObjectLabelImage(adjustedPreview);
             String fingerprint = SegmentationFingerprint.of(labels);
             if (fingerprint.isEmpty()) {
                 IJ.log("[FLASH] Cannot capture object selection without the original label map.");

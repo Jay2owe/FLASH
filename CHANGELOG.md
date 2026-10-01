@@ -10,5 +10,7 @@ Local candidate; not yet published to the ImageJ update site or archived on Zeno
 - Verify replay inputs and settings, compiled code identity and source-run lineage.
 - Preserve image axes, physical calibration and channel colors in exported images.
 - Bound background save work and close only analysis-owned images after processing.
+- Preserve segmentation identity for clicks made in embedded object previews.
+- Remove empty run-record folders when cancelling before any output is recorded.
 
 [5.1.0]: https://github.com/Jay2owe/FLASH/compare/v5.0.0...fix/quantification-audit-20261001
