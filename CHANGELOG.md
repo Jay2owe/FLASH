@@ -1,6 +1,6 @@
 # Changelog
 
-## [5.1.0] - 2026-10-01
+## [5.2.0] - 2026-10-01
 
 Local candidate; not yet published to the ImageJ update site or archived on Zenodo.
 
@@ -14,4 +14,4 @@ Local candidate; not yet published to the ImageJ update site or archived on Zeno
 - Remove empty run-record folders when cancelling before any output is recorded.
 - Open the main window without loading every recent project's source images.
 
-[5.1.0]: https://github.com/Jay2owe/FLASH/compare/v5.0.0...fix/quantification-audit-20261001
+[5.2.0]: https://github.com/Jay2owe/FLASH/compare/v5.0.0...fix/quantification-audit-20261001

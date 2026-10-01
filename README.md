@@ -90,7 +90,7 @@ paper rerun; the guide states the current limits.
 
 ## Reproducible source snapshot
 
-This branch builds the local candidate FLASH 5.1.0, which corrects measurement
+This branch builds the local candidate FLASH 5.2.0, which corrects measurement
 and run-recording behavior. It has not been published to the ImageJ update site
 or archived on Zenodo. Record its source commit and plugin file checksum with
 new analysis results.
@@ -262,17 +262,17 @@ src/test/java/flash/pipeline/
 
 ## Citation
 
-If you use this local candidate in published work, cite version 5.1.0 and record
+If you use this local candidate in published work, cite version 5.2.0 and record
 the exact source commit and plugin file checksum. This candidate has no Zenodo
 archive yet:
 
-> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.1.0, local candidate) [Computer software]. https://github.com/Jay2owe/FLASH
+> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.2.0, local candidate) [Computer software]. https://github.com/Jay2owe/FLASH
 
 ```bibtex
 @software{malcolm_flash_2026,
   author    = {Malcolm, Jamie},
   title     = {{FLASH}: {F}luorescence {A}utomated {S}patial {H}istology},
-  version   = {5.1.0},
+  version   = {5.2.0},
   year      = {2026},
   note      = {Local candidate; record source commit and plugin checksum},
   url       = {https://github.com/Jay2owe/FLASH}
