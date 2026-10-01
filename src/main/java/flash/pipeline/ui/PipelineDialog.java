@@ -239,6 +239,23 @@ public class PipelineDialog {
         northContainer.repaint();
     }
 
+    /**
+     * Sets an optional fixed component to the right of the scroll viewport,
+     * between the north slot and the footer. Passing null clears it.
+     */
+    public void setEastSlot(JComponent component) {
+        Container pane = dialog.getContentPane();
+        Component existing = ((BorderLayout) pane.getLayout()).getLayoutComponent(BorderLayout.EAST);
+        if (existing != null) {
+            pane.remove(existing);
+        }
+        if (component != null) {
+            pane.add(component, BorderLayout.EAST);
+        }
+        pane.revalidate();
+        pane.repaint();
+    }
+
     /** Updates the optional workflow phase breadcrumb shown above the dialog body. */
     public void setBreadcrumb(Phase phase, String stepText) {
         currentPhase = phase;

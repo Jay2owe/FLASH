@@ -30,6 +30,10 @@ import flash.pipeline.ui.HelpButton;
 import flash.pipeline.image.GpuConcurrency;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.FlashTheme;
+import flash.pipeline.ui.main.AnalysisDetailPanel;
+import flash.pipeline.ui.main.AnalysisRowFocus;
+import flash.pipeline.ui.main.StatusChip;
 
 import flash.pipeline.io.ImageCache;
 import flash.pipeline.io.ConditionManifestIO;
@@ -75,6 +79,8 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JLabel;
@@ -814,44 +820,58 @@ public class FLASH_Pipeline implements PlugIn {
             final Map<Integer, AnalysisStatus>[] pendingStatuses = new Map[1];
             final AnalysisStatusScanner[] pendingScanner = new AnalysisStatusScanner[1];
             final Icon pendingIcon = loadStatusIcon("status_pending.png");
+            final AnalysisDetailPanel detail = new AnalysisDetailPanel(analyses, DESCRIPTIONS,
+                    new AnalysisDetailPanel.Actions() {
+                        @Override public void openHelp(int analysisIndex) {
+                            openAnalysisHelp(pd, analysisIndex);
+                        }
+
+                        @Override public void openDependencies() {
+                            pd.closeWithAction("dependencies");
+                        }
+                    });
+            detail.setProjectDirectory(directory);
+            final AnalysisRowFocus rowFocus = new AnalysisRowFocus(detail);
             startAnalysisStatusScan(directory, pd, statusRowsByAnalysis, statusRowsReady,
-                    pendingStatuses, pendingScanner);
+                    pendingStatuses, pendingScanner, detail);
 
             addRecipeWarningPanel(pd);
 
             final ToggleSwitch[] togglesByAnalysis = new ToggleSwitch[analyses.length];
-            pd.setNorthSlot(buildQuickStartPanel(pd, togglesByAnalysis,
-                    statusRowsByAnalysis, statusRowsReady, pendingStatuses, pendingScanner));
+            final MainStrip strip = buildMainStatusStrip(pd, togglesByAnalysis);
+            pd.setNorthSlot(strip.panel);
+            pd.setEastSlot(detail);
+            refreshProjectSummaryChips(strip.imagesChip, strip.conditionsChip);
 
             addAnalysisSection(pd, "Setup", new int[]{
                     IDX_CREATE_BIN,
                     IDX_DRAW_ROIS
-            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis, rowFocus);
 
             addAnalysisSection(pd, "Image Preparation", new int[]{
                     IDX_DECONVOLUTION,
                     IDX_SPECTRAL_DECONTAMINATION
-            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis, rowFocus);
 
             addAnalysisSection(pd, "Display", new int[]{
                     IDX_SPLIT_MERGE,
                     IDX_REPRESENTATIVE_FIGURE
-            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis, rowFocus);
 
             addAnalysisSection(pd, "Image Analysis", new int[]{
                     IDX_INTENSITY,
                     IDX_3D_OBJECT,
                     IDX_SPATIAL
-            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis, rowFocus);
 
             addAnalysisSection(pd, "Results and Validation", new int[]{
                     IDX_AGGREGATION,
                     IDX_STATISTICS,
                     IDX_EXCEL_EXPORT
-            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis);
+            }, pendingIcon, statusRowsByAnalysis, nextStatusRow, togglesByAnalysis, rowFocus);
             statusRowsReady[0] = true;
             if (pendingStatuses[0] != null && pendingScanner[0] != null) {
-                applyAnalysisStatuses(pd, statusRowsByAnalysis, pendingStatuses[0], pendingScanner[0]);
+                applyAnalysisStatuses(pd, statusRowsByAnalysis, pendingStatuses[0], pendingScanner[0], detail);
                 pendingStatuses[0] = null;
                 pendingScanner[0] = null;
             }
@@ -872,10 +892,14 @@ public class FLASH_Pipeline implements PlugIn {
                 }
             }));
 
-            JButton depsBtn = pd.addFooterButton(dependencyButtonLabel(false));
-            depsBtn.setToolTipText("Checking dependency status...");
-            startDependencyBadgeRefresh(pd, depsBtn);
-            depsBtn.addActionListener(e -> pd.closeWithAction("dependencies"));
+            JButton feedbackBtn = pd.addFooterButton("Feedback");
+            feedbackBtn.setToolTipText("Send FLASH feedback and optionally attach diagnostic logs.");
+            feedbackBtn.addActionListener(e -> FeedbackDialog.show(pd.getWindow(), directory));
+
+            startDependencyBadgeRefresh(pd, rows -> {
+                applyDependencyChip(strip.dependenciesChip, rows.size());
+                detail.setDependencyAttention(dependencyAttentionById(rows));
+            });
 
             if (!pd.showDialog()) {
                 if ("check_my_data".equals(pd.getActionCommand())) {
@@ -892,6 +916,11 @@ public class FLASH_Pipeline implements PlugIn {
                 }
                 if ("edit_project_setup".equals(pd.getActionCommand())) {
                     editCurrentProjectSetupFromMainDialog(null);
+                    continue;
+                }
+                if (pd.getActionCommand().startsWith(OPEN_RECENT_ACTION_PREFIX)) {
+                    openRecentProjectFromMainDialog(
+                            pd.getActionCommand().substring(OPEN_RECENT_ACTION_PREFIX.length()));
                     continue;
                 }
                 return null;
@@ -1014,29 +1043,6 @@ public class FLASH_Pipeline implements PlugIn {
         return sb.toString();
     }
 
-    private String conditionStatusSummary() {
-        if (directory == null || directory.trim().isEmpty()) {
-            return "Pick a directory first.";
-        }
-        LinkedHashSet<String> animals = ResultAnimalScanner.collect(directory);
-        if (animals.isEmpty()) {
-            return "No animals found yet - run an analysis or set up the project.";
-        }
-        return ConditionReviewSupport.evaluate(directory, animals).summary();
-    }
-
-    private void updateConditionSummaryLabel(JLabel label) {
-        String summary = conditionStatusSummary();
-        label.setText(summary);
-        label.setToolTipText(summary);
-    }
-
-    private void updateDirectorySummaryLabel(JLabel label) {
-        String fullPath = directory == null ? "" : directory;
-        label.setText(compactDirectoryPathForDisplay(fullPath));
-        label.setToolTipText(fullPath.trim().isEmpty() ? "No project selected" : fullPath);
-    }
-
     private void reviewConditionsFromPicker(Set<String> animals) {
         if (animals == null || animals.isEmpty()) {
             IJ.showMessage("Review conditions",
@@ -1052,6 +1058,16 @@ public class FLASH_Pipeline implements PlugIn {
     private boolean switchProjectFromMainDialog(Window owner) {
         ProjectLaunchSelection picked = chooseProjectFromHome(owner,
                 RecentProjectsStore.resolveStoreDir());
+        return applyMainDialogProjectSelection(picked);
+    }
+
+    private boolean openRecentProjectFromMainDialog(String projectJsonPath) {
+        ProjectLaunchSelection picked = openExistingHomeProject(new File(projectJsonPath),
+                RecentProjectsStore.resolveStoreDir());
+        if (picked == null) {
+            IJ.showMessage("Open project", "Could not open the project at:\n" + projectJsonPath);
+            return false;
+        }
         return applyMainDialogProjectSelection(picked);
     }
 
@@ -1202,29 +1218,117 @@ public class FLASH_Pipeline implements PlugIn {
         }
     }
 
-    private JPanel buildQuickStartPanel(final PipelineDialog pd,
-                                        final ToggleSwitch[] togglesByAnalysis,
-                                        final int[] statusRowsByAnalysis,
-                                        final boolean[] statusRowsReady,
-                                        final Map<Integer, AnalysisStatus>[] pendingStatuses,
-                                        final AnalysisStatusScanner[] pendingScanner) {
-        JPanel panel = new JPanel(new java.awt.BorderLayout(18, 0));
-        panel.setBackground(new Color(245, 245, 245));
-        panel.setBorder(BorderFactory.createEmptyBorder(6, 20, 6, 20));
-        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+    static final String OPEN_RECENT_ACTION_PREFIX = "open_recent:";
+    static final String RECIPE_LAST_RUN = "last-run";
+    static final String RECIPE_CLEAR = "clear";
 
-        JPanel quickColumn = new JPanel();
-        quickColumn.setLayout(new BoxLayout(quickColumn, BoxLayout.Y_AXIS));
-        quickColumn.setOpaque(false);
-        quickColumn.setAlignmentX(Component.LEFT_ALIGNMENT);
+    /** Main-dialog top strip: project and its health on one line, recipes on the next. */
+    static final class MainStrip {
+        final JPanel panel;
+        final JComboBox<ProjectChoice> projectCombo;
+        final StatusChip imagesChip;
+        final StatusChip conditionsChip;
+        final StatusChip dependenciesChip;
+        final JComboBox<RecipeChoice> recipeCombo;
+        final JLabel recipeCaption;
 
-        JPanel headerRow = new JPanel();
-        headerRow.setLayout(new BoxLayout(headerRow, BoxLayout.X_AXIS));
-        headerRow.setOpaque(false);
-        headerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        MainStrip(JPanel panel, JComboBox<ProjectChoice> projectCombo, StatusChip imagesChip,
+                  StatusChip conditionsChip, StatusChip dependenciesChip,
+                  JComboBox<RecipeChoice> recipeCombo, JLabel recipeCaption) {
+            this.panel = panel;
+            this.projectCombo = projectCombo;
+            this.imagesChip = imagesChip;
+            this.conditionsChip = conditionsChip;
+            this.dependenciesChip = dependenciesChip;
+            this.recipeCombo = recipeCombo;
+            this.recipeCaption = recipeCaption;
+        }
+    }
 
-        headerRow.add(topPanelHeaderLabel("Quick start"));
-        headerRow.add(Box.createHorizontalStrut(6));
+    /** One entry of the project menu: the open project, a recent one, or "open another". */
+    static final class ProjectChoice {
+        enum Kind { CURRENT, RECENT, OTHER }
+
+        final Kind kind;
+        final String name;
+        final String path;
+
+        ProjectChoice(Kind kind, String name, String path) {
+            this.kind = kind;
+            this.name = name;
+            this.path = path;
+        }
+
+        @Override public String toString() {
+            return name;
+        }
+    }
+
+    /** One entry of the recipe menu; {@code id} is null for the prompt row. */
+    static final class RecipeChoice {
+        final String label;
+        final String id;
+        final String tooltip;
+
+        RecipeChoice(String label, String id, String tooltip) {
+            this.label = label;
+            this.id = id;
+            this.tooltip = tooltip;
+        }
+
+        @Override public String toString() {
+            return label;
+        }
+    }
+
+    private MainStrip buildMainStatusStrip(final PipelineDialog pd, final ToggleSwitch[] togglesByAnalysis) {
+        JPanel strip = new JPanel(new java.awt.GridBagLayout());
+        strip.setBackground(FlashTheme.SURFACE);
+        strip.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, FlashTheme.BORDER),
+                FlashTheme.pad(6, 12, 6, 12)));
+        strip.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        final JComboBox<ProjectChoice> projectCombo = new JComboBox<ProjectChoice>(projectChoices());
+        projectCombo.setFont(FlashTheme.body());
+        projectCombo.setRenderer(new javax.swing.DefaultListCellRenderer() {
+            @Override public Component getListCellRendererComponent(javax.swing.JList<?> list, Object value,
+                                                                    int index, boolean selected, boolean focus) {
+                Component c = super.getListCellRendererComponent(list, value, index, selected, focus);
+                if (value instanceof ProjectChoice && c instanceof JComponent) {
+                    ((JComponent) c).setToolTipText(((ProjectChoice) value).path);
+                }
+                return c;
+            }
+        });
+        projectCombo.setToolTipText(directory == null || directory.trim().isEmpty()
+                ? "No project selected" : directory);
+        projectCombo.addActionListener(e -> {
+            ProjectChoice choice = (ProjectChoice) projectCombo.getSelectedItem();
+            if (choice == null || choice.kind == ProjectChoice.Kind.CURRENT) return;
+            if (choice.kind == ProjectChoice.Kind.OTHER) {
+                pd.closeWithAction("change_project");
+            } else {
+                pd.closeWithAction(OPEN_RECENT_ACTION_PREFIX + choice.path);
+            }
+        });
+
+        final StatusChip imagesChip = new StatusChip("Counting images...");
+        imagesChip.setCursor(java.awt.Cursor.getDefaultCursor());
+        imagesChip.setToolTipText("Images in this project, and animals that already have results.");
+        final StatusChip conditionsChip = new StatusChip("Checking conditions...");
+        conditionsChip.setToolTipText("Review which condition each animal belongs to.");
+        final StatusChip dependenciesChip = new StatusChip("Checking dependencies...");
+        dependenciesChip.setToolTipText("Checking dependency status...");
+        dependenciesChip.addActionListener(e -> pd.closeWithAction("dependencies"));
+        conditionsChip.addActionListener(e -> {
+            if (directory == null) {
+                IJ.showMessage("Review conditions", "Pick a directory first.");
+                return;
+            }
+            reviewConditionsFromPicker(ResultAnimalScanner.collect(directory));
+            refreshProjectSummaryChips(imagesChip, conditionsChip);
+        });
 
         final JButton helpBtn = HelpButton.question("Open FLASH help and workflow advice.");
         helpBtn.addActionListener(e -> {
@@ -1236,240 +1340,191 @@ public class FLASH_Pipeline implements PlugIn {
                 helpBtn.setEnabled(true);
             }
         });
-        headerRow.add(helpBtn);
-        headerRow.add(Box.createHorizontalStrut(6));
-        final JButton feedbackBtn = new JButton("Feedback");
-        styleSaveRecipeButton(feedbackBtn);
-        feedbackBtn.setToolTipText("Send FLASH feedback and optionally attach diagnostic logs.");
-        feedbackBtn.addActionListener(e -> FeedbackDialog.show(pd.getWindow(), directory));
-        headerRow.add(feedbackBtn);
-        headerRow.add(Box.createHorizontalGlue());
-        quickColumn.add(headerRow);
-        quickColumn.add(Box.createVerticalStrut(5));
-
-        final JLabel recipeCaption = new JLabel(
-                "<html><body width='300'>Pick a recipe or tick analyses individually.</body></html>");
-        recipeCaption.setFont(recipeCaption.getFont().deriveFont(Font.PLAIN, 11f));
-        recipeCaption.setForeground(new Color(33, 33, 33));
-        recipeCaption.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        JButton standardRecipeBtn = new JButton("Standard 3D + Intensity");
-        JButton quickCountRecipeBtn = new JButton("Quick cell count");
-        JButton presentationRecipeBtn = new JButton("Presentation");
-        JButton fastPresentableResultsBtn = new JButton("Fast Presentable Results");
-        JButton fullRecipeBtn = new JButton("Full pipeline");
-        JButton lastRunRecipeBtn = new JButton("Last run");
-        JButton customRecipeBtn = new JButton("Clear Recipe");
-        JButton saveRecipeBtn = new JButton("Save selection as recipe...");
-        setRecipeTooltip(standardRecipeBtn, "standard-3d-intensity");
-        setRecipeTooltip(quickCountRecipeBtn, "quick-cell-count");
-        setRecipeTooltip(presentationRecipeBtn, "presentation");
-        setRecipeTooltip(fastPresentableResultsBtn, "fast-presentable-results");
-        setRecipeTooltip(fullRecipeBtn, "full-pipeline");
-        lastRunRecipeBtn.setToolTipText("Tick the same analyses as the last successful run for this project.");
-        customRecipeBtn.setToolTipText("Clear all recipe selections.");
-        styleSaveRecipeButton(saveRecipeBtn);
-        saveRecipeBtn.setToolTipText("Save the currently ticked analyses as a reusable recipe.");
-
-        JPanel buttonRows = new JPanel();
-        buttonRows.setLayout(new BoxLayout(buttonRows, BoxLayout.Y_AXIS));
-        buttonRows.setOpaque(false);
-        buttonRows.setAlignmentX(Component.LEFT_ALIGNMENT);
-        buttonRows.add(recipeButtonRow(standardRecipeBtn, quickCountRecipeBtn));
-        buttonRows.add(Box.createVerticalStrut(2));
-        buttonRows.add(recipeButtonRow(fullRecipeBtn, presentationRecipeBtn));
-        buttonRows.add(Box.createVerticalStrut(2));
-        buttonRows.add(recipeButtonRow(fastPresentableResultsBtn));
-        buttonRows.add(Box.createVerticalStrut(2));
-        buttonRows.add(recipeButtonRow(saveRecipeBtn));
-        buttonRows.add(Box.createVerticalStrut(2));
-        buttonRows.add(recipeButtonRow(lastRunRecipeBtn, customRecipeBtn));
-
-        standardRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "standard-3d-intensity"));
-        quickCountRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "quick-cell-count"));
-        presentationRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "presentation"));
-        fastPresentableResultsBtn.addActionListener(
-                e -> applyRecipe(togglesByAnalysis, recipeCaption, "fast-presentable-results"));
-        fullRecipeBtn.addActionListener(e -> applyRecipe(togglesByAnalysis, recipeCaption, "full-pipeline"));
-        lastRunRecipeBtn.addActionListener(e -> applyLastRunRecipe(togglesByAnalysis, recipeCaption));
-        customRecipeBtn.addActionListener(e -> {
-            for (int i = 0; i < togglesByAnalysis.length; i++) {
-                if (togglesByAnalysis[i] != null) {
-                    togglesByAnalysis[i].setSelected(false);
-                }
-            }
-            recipeCaption.setText("<html><body width='300'>Recipe cleared.</body></html>");
-        });
-        saveRecipeBtn.addActionListener(e -> saveCurrentSelectionAsRecipe(pd, togglesByAnalysis));
-
-        quickColumn.add(buttonRows);
-        quickColumn.add(Box.createVerticalStrut(3));
-        quickColumn.add(recipeCaption);
-
-        panel.add(quickColumn, java.awt.BorderLayout.WEST);
-        panel.add(buildProjectSummaryPanel(pd, statusRowsByAnalysis, statusRowsReady,
-                pendingStatuses, pendingScanner), java.awt.BorderLayout.CENTER);
-
-        return panel;
-    }
-
-    @SuppressWarnings("unchecked")
-    private JPanel buildQuickStartPanel(final PipelineDialog pd, final ToggleSwitch[] togglesByAnalysis) {
-        final int[] statusRowsByAnalysis = new int[analyses.length];
-        Arrays.fill(statusRowsByAnalysis, -1);
-        final boolean[] statusRowsReady = new boolean[]{false};
-        final Map<Integer, AnalysisStatus>[] pendingStatuses = new Map[1];
-        final AnalysisStatusScanner[] pendingScanner = new AnalysisStatusScanner[1];
-        return buildQuickStartPanel(pd, togglesByAnalysis, statusRowsByAnalysis, statusRowsReady,
-                pendingStatuses, pendingScanner);
-    }
-
-    private JPanel buildProjectSummaryPanel(final PipelineDialog pd,
-                                            final int[] statusRowsByAnalysis,
-                                            final boolean[] statusRowsReady,
-                                            final Map<Integer, AnalysisStatus>[] pendingStatuses,
-                                            final AnalysisStatusScanner[] pendingScanner) {
-        JPanel summaryColumn = new JPanel();
-        summaryColumn.setLayout(new BoxLayout(summaryColumn, BoxLayout.Y_AXIS));
-        summaryColumn.setOpaque(false);
-        summaryColumn.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        final JLabel directoryLabel = topPanelValueLabel("");
-        updateDirectorySummaryLabel(directoryLabel);
-        final JLabel conditionsLabel = topPanelValueLabel("");
-        updateConditionSummaryLabel(conditionsLabel);
-
-        JButton changeBtn = new JButton("Change project...");
-        changeBtn.setFocusPainted(false);
-        changeBtn.addActionListener(e -> {
-            pd.closeWithAction("change_project");
-        });
-
         JButton editSetupBtn = new JButton("Edit setup...");
         editSetupBtn.setFocusPainted(false);
-        editSetupBtn.addActionListener(e -> {
-            pd.closeWithAction("edit_project_setup");
+        editSetupBtn.setToolTipText("Change the project's images, animals, regions or channels.");
+        editSetupBtn.addActionListener(e -> pd.closeWithAction("edit_project_setup"));
+
+
+        final JLabel recipeCaption = new JLabel("");
+        recipeCaption.setFont(FlashTheme.caption());
+        recipeCaption.setForeground(FlashTheme.TEXT_HELP);
+        final JComboBox<RecipeChoice> recipeCombo = new JComboBox<RecipeChoice>(recipeChoices());
+        recipeCombo.setFont(FlashTheme.body());
+        recipeCombo.setToolTipText("Tick a ready-made set of analyses.");
+        recipeCombo.setRenderer(new javax.swing.DefaultListCellRenderer() {
+            @Override public Component getListCellRendererComponent(javax.swing.JList<?> list, Object value,
+                                                                    int index, boolean selected, boolean focus) {
+                Component c = super.getListCellRendererComponent(list, value, index, selected, focus);
+                if (value instanceof RecipeChoice && c instanceof JComponent) {
+                    ((JComponent) c).setToolTipText(((RecipeChoice) value).tooltip);
+                }
+                return c;
+            }
         });
-
-        JButton reviewBtn = new JButton("Review conditions...");
-        reviewBtn.setFocusPainted(false);
-        reviewBtn.addActionListener(e -> {
-            if (directory == null) {
-                IJ.showMessage("Review conditions", "Pick a directory first.");
-                return;
+        recipeCombo.addActionListener(e -> {
+            RecipeChoice choice = (RecipeChoice) recipeCombo.getSelectedItem();
+            if (choice == null || choice.id == null) return;
+            if (RECIPE_LAST_RUN.equals(choice.id)) {
+                applyLastRunRecipe(togglesByAnalysis, recipeCaption);
+            } else if (RECIPE_CLEAR.equals(choice.id)) {
+                applySelectionsToToggles(togglesByAnalysis, new boolean[togglesByAnalysis.length]);
+                recipeCaption.setText("All analyses unticked.");
+            } else {
+                applyRecipe(togglesByAnalysis, recipeCaption, choice.id);
             }
-            reviewConditionsFromPicker(ResultAnimalScanner.collect(directory));
-            updateConditionSummaryLabel(conditionsLabel);
         });
+        JButton saveRecipeBtn = new JButton("Save selection as recipe...");
+        styleSaveRecipeButton(saveRecipeBtn);
+        saveRecipeBtn.setToolTipText("Save the currently ticked analyses as a reusable recipe.");
+        saveRecipeBtn.addActionListener(e -> saveCurrentSelectionAsRecipe(pd, togglesByAnalysis));
 
-        summaryColumn.add(topPanelHeaderLabel("Current Project"));
-        summaryColumn.add(Box.createVerticalStrut(5));
-        summaryColumn.add(directoryLabel);
-        summaryColumn.add(Box.createVerticalStrut(4));
-        summaryColumn.add(recipeButtonRow(changeBtn, editSetupBtn));
-        summaryColumn.add(Box.createVerticalStrut(9));
-        summaryColumn.add(topPanelHeaderLabel("Conditions"));
-        summaryColumn.add(Box.createVerticalStrut(5));
-        summaryColumn.add(conditionsLabel);
-        summaryColumn.add(Box.createVerticalStrut(4));
-        summaryColumn.add(recipeButtonRow(reviewBtn));
-        summaryColumn.add(Box.createVerticalGlue());
-        return summaryColumn;
+        // A grid sizes every cell from its text when laid out, so nothing is frozen at a width
+        // measured before the window exists; column 0 keeps the two menus aligned.
+        addStripCell(strip, stripLabel("Project"), 0, 0, 0);
+        addStripCell(strip, stripFlow(projectCombo, imagesChip, conditionsChip, dependenciesChip), 1, 0, 1);
+        addStripCell(strip, stripFlow(helpBtn, editSetupBtn), 2, 0, 0);
+        addStripCell(strip, stripLabel("Recipe"), 0, 1, 0);
+        addStripCell(strip, stripFlow(recipeCombo, saveRecipeBtn, recipeCaption), 1, 1, 1);
+        return new MainStrip(strip, projectCombo, imagesChip, conditionsChip, dependenciesChip,
+                recipeCombo, recipeCaption);
     }
 
-    private JLabel topPanelHeaderLabel(String text) {
-        JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
-        label.setForeground(new Color(55, 71, 79));
-        label.setAlignmentX(Component.LEFT_ALIGNMENT);
-        return label;
+    /** Test seam: builds the strip without showing a dialog. */
+    MainStrip buildMainStatusStripForTests(PipelineDialog pd, ToggleSwitch[] togglesByAnalysis) {
+        return buildMainStatusStrip(pd, togglesByAnalysis);
     }
 
-    private JLabel topPanelValueLabel(String text) {
-        JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.PLAIN, 11f));
-        label.setForeground(new Color(33, 33, 33));
-        label.setAlignmentX(Component.LEFT_ALIGNMENT);
-        label.setMaximumSize(new java.awt.Dimension(320, 18));
-        return label;
-    }
-
-    static String compactDirectoryPathForDisplay(String path) {
-        return compactDirectoryPathForDisplay(path, 46);
-    }
-
-    static String compactDirectoryPathForDisplay(String path, int maxChars) {
-        if (path == null || path.trim().isEmpty()) {
-            return "No project selected";
-        }
-        String trimmed = path.trim();
-        if (maxChars <= 0 || trimmed.length() <= maxChars) {
-            return trimmed;
-        }
-
-        String separator = trimmed.indexOf('\\') >= 0 ? "\\" : "/";
-        String[] rawParts = trimmed.split("[\\\\/]+");
-        List<String> parts = new ArrayList<String>();
-        for (String part : rawParts) {
-            if (part != null && !part.isEmpty()) {
-                parts.add(part);
+    private ProjectChoice[] projectChoices() {
+        List<ProjectChoice> out = new ArrayList<ProjectChoice>();
+        String current = directory == null ? "" : directory.trim();
+        String currentName = current.isEmpty() ? "No project selected" : new File(current).getName();
+        List<ProjectChoice> others = new ArrayList<ProjectChoice>();
+        for (RecentProject recent : RecentProjectsStore.read(RecentProjectsStore.resolveStoreDir())) {
+            if (recent == null || recent.path == null) continue;
+            File root = outputRootForProjectJson(new File(recent.path));
+            String name = recent.name == null || recent.name.trim().isEmpty()
+                    ? (root == null ? recent.path : root.getName()) : recent.name.trim();
+            if (!current.isEmpty() && root != null && sameDirectoryPath(current, root.getAbsolutePath())) {
+                currentName = name;
+            } else {
+                others.add(new ProjectChoice(ProjectChoice.Kind.RECENT, name, recent.path));
             }
         }
-        if (parts.isEmpty()) {
-            return trimmed.substring(Math.max(0, trimmed.length() - maxChars));
-        }
+        out.add(new ProjectChoice(ProjectChoice.Kind.CURRENT, currentName, current));
+        out.addAll(others);
+        out.add(new ProjectChoice(ProjectChoice.Kind.OTHER, "Open another project...", ""));
+        return out.toArray(new ProjectChoice[0]);
+    }
 
-        String prefix = "..." + separator;
-        String tail = parts.get(parts.size() - 1);
-        for (int i = parts.size() - 2; i >= 0; i--) {
-            String candidate = parts.get(i) + separator + tail;
-            if ((prefix + candidate).length() > maxChars) {
-                break;
+    private RecipeChoice[] recipeChoices() {
+        return new RecipeChoice[]{
+                new RecipeChoice("Choose a recipe...", null, "Tick a ready-made set of analyses."),
+                new RecipeChoice("Standard 3D + Intensity", "standard-3d-intensity",
+                        recipeTooltip("standard-3d-intensity")),
+                new RecipeChoice("Quick cell count", "quick-cell-count", recipeTooltip("quick-cell-count")),
+                new RecipeChoice("Full pipeline", "full-pipeline", recipeTooltip("full-pipeline")),
+                new RecipeChoice("Presentation", "presentation", recipeTooltip("presentation")),
+                new RecipeChoice("Fast Presentable Results", "fast-presentable-results",
+                        recipeTooltip("fast-presentable-results")),
+                new RecipeChoice("Last run", RECIPE_LAST_RUN,
+                        "Tick the same analyses as the last successful run for this project."),
+                new RecipeChoice("Clear all", RECIPE_CLEAR, "Untick every analysis.")
+        };
+    }
+
+    /** Fills the image-count and conditions chips off the Swing thread. */
+    private void refreshProjectSummaryChips(final StatusChip imagesChip, final StatusChip conditionsChip) {
+        final String scanDirectory = directory;
+        new javax.swing.SwingWorker<Object[], Void>() {
+            @Override protected Object[] doInBackground() {
+                if (scanDirectory == null || scanDirectory.trim().isEmpty()) {
+                    return new Object[]{Integer.valueOf(0), new LinkedHashSet<String>(), null};
+                }
+                int images = AnalysisStatusScanner.estimateImageCount(scanDirectory);
+                LinkedHashSet<String> animals = ResultAnimalScanner.collect(scanDirectory);
+                ConditionReviewSupport.Health health = animals.isEmpty()
+                        ? null : ConditionReviewSupport.evaluate(scanDirectory, animals);
+                return new Object[]{Integer.valueOf(images), animals, health};
             }
-            tail = candidate;
-        }
 
-        String compact = prefix + tail;
-        if (compact.length() <= maxChars) {
-            return compact;
-        }
-        int availableTailChars = maxChars - prefix.length();
-        if (availableTailChars <= 0) {
-            return trimmed.substring(Math.max(0, trimmed.length() - maxChars));
-        }
-        return prefix + tail.substring(Math.max(0, tail.length() - availableTailChars));
+            @Override protected void done() {
+                if (scanDirectory == null ? directory != null : !scanDirectory.equals(directory)) return;
+                Object[] result;
+                try {
+                    result = get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (java.util.concurrent.ExecutionException e) {
+                    IJ.log("[FLASH] Could not summarise project: " + e.getMessage());
+                    imagesChip.apply(StatusChip.State.NEUTRAL, "Images unknown", e.getMessage());
+                    return;
+                }
+                @SuppressWarnings("unchecked")
+                Set<String> animals = (Set<String>) result[1];
+                applyProjectSummaryChips(imagesChip, conditionsChip, scanDirectory,
+                        ((Integer) result[0]).intValue(), animals, (ConditionReviewSupport.Health) result[2]);
+            }
+        }.execute();
     }
 
-    private JPanel recipeButtonRow(JButton first) {
-        JPanel row = leftAlignedButtonRow();
-        row.add(first);
-        row.add(Box.createHorizontalGlue());
-        return row;
-    }
-
-    private JPanel recipeButtonRow(JButton first, JButton second) {
-        return recipeButtonRow(first, second, null);
-    }
-
-    private JPanel recipeButtonRow(JButton first, JButton second, JButton third) {
-        JPanel row = leftAlignedButtonRow();
-        row.add(first);
-        row.add(Box.createHorizontalStrut(6));
-        row.add(second);
-        if (third != null) {
-            row.add(Box.createHorizontalStrut(6));
-            row.add(third);
+    static void applyProjectSummaryChips(StatusChip imagesChip, StatusChip conditionsChip,
+                                         String projectDirectory, int images, Set<String> animals,
+                                         ConditionReviewSupport.Health health) {
+        int animalCount = animals == null ? 0 : animals.size();
+        String imageText = images == 1 ? "1 image" : images + " images";
+        if (animalCount > 0) {
+            imageText += " · " + animalCount + (animalCount == 1 ? " animal" : " animals");
         }
-        row.add(Box.createHorizontalGlue());
-        return row;
+        imagesChip.apply(StatusChip.State.NEUTRAL, imageText,
+                "Images in this project, and animals that already have results.");
+        if (projectDirectory == null || projectDirectory.trim().isEmpty()) {
+            conditionsChip.apply(StatusChip.State.NEUTRAL, "No project", "Pick a directory first.");
+        } else if (health == null) {
+            conditionsChip.apply(StatusChip.State.NEUTRAL, "No conditions yet",
+                    "No animals found yet - run an analysis or set up the project.");
+        } else if (health.needsReview()) {
+            conditionsChip.apply(StatusChip.State.WARN, "Conditions need review", health.summary());
+        } else {
+            conditionsChip.apply(StatusChip.State.OK, "Conditions", health.summary());
+        }
     }
 
-    private JPanel leftAlignedButtonRow() {
-        JPanel row = new JPanel();
-        row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
-        row.setOpaque(false);
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        return row;
+    static void applyDependencyChip(StatusChip chip, int issueCount) {
+        if (issueCount <= 0) {
+            chip.apply(StatusChip.State.OK, "Dependencies", "Open dependency checks and installers.");
+        } else {
+            chip.apply(StatusChip.State.WARN,
+                    issueCount == 1 ? "1 dependency issue" : issueCount + " dependency issues",
+                    issueCount + " dependency issue(s) need attention before affected analyses will run."
+                            + " Click to open Dependencies.");
+        }
+    }
+
+    private static JPanel stripFlow(JComponent... parts) {
+        JPanel flow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        flow.setOpaque(false);
+        for (JComponent part : parts) flow.add(part);
+        return flow;
+    }
+
+    private static void addStripCell(JPanel strip, JComponent cell, int column, int row, double weightX) {
+        java.awt.GridBagConstraints c = new java.awt.GridBagConstraints();
+        c.gridx = column;
+        c.gridy = row;
+        c.weightx = weightX;
+        c.anchor = java.awt.GridBagConstraints.WEST;
+        c.fill = java.awt.GridBagConstraints.NONE;
+        c.insets = new java.awt.Insets(row == 0 ? 0 : 5, 0, 0, 0);
+        strip.add(cell, c);
+    }
+
+    private static JLabel stripLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(FlashTheme.caption());
+        label.setForeground(FlashTheme.TEXT_MUTED);
+        return label;
     }
 
     private void styleSaveRecipeButton(JButton button) {
@@ -1494,13 +1549,13 @@ public class FLASH_Pipeline implements PlugIn {
 
     private void addAnalysisSection(PipelineDialog pd, String heading, int[] analysisIndices,
                                     Icon pendingIcon, int[] statusRowsByAnalysis, int[] nextStatusRow,
-                                    ToggleSwitch[] togglesByAnalysis) {
+                                    ToggleSwitch[] togglesByAnalysis, AnalysisRowFocus rowFocus) {
         final ToggleSwitch sectionToggle = pd.addHeaderToggle(heading, false);
         final List<ToggleSwitch> childToggles = new java.util.ArrayList<ToggleSwitch>();
         final boolean[] updating = new boolean[]{false};
         for (int i = 0; i < analysisIndices.length; i++) {
             final ToggleSwitch child = addAnalysisToggle(pd, analysisIndices[i],
-                    pendingIcon, statusRowsByAnalysis, nextStatusRow);
+                    pendingIcon, statusRowsByAnalysis, nextStatusRow, rowFocus);
             if (togglesByAnalysis != null && analysisIndices[i] >= 0
                     && analysisIndices[i] < togglesByAnalysis.length) {
                 togglesByAnalysis[analysisIndices[i]] = child;
@@ -1537,7 +1592,7 @@ public class FLASH_Pipeline implements PlugIn {
 
     private ToggleSwitch addAnalysisToggle(PipelineDialog pd, int analysisIndex,
                                            Icon pendingIcon, int[] statusRowsByAnalysis,
-                                           int[] nextStatusRow) {
+                                           int[] nextStatusRow, AnalysisRowFocus rowFocus) {
         JLabel statusIcon = new JLabel(pendingIcon);
         statusIcon.setToolTipText("Scanning...");
         int rowIndex = nextStatusRow[0]++;
@@ -1545,7 +1600,10 @@ public class FLASH_Pipeline implements PlugIn {
         final JButton help = HelpButton.question("About " + analyses[analysisIndex]);
         help.addActionListener(e -> openAnalysisHelp(pd, analysisIndex));
         ToggleSwitch toggle = pd.addToggleWithStatus(analyses[analysisIndex], false, statusIcon, help);
-        pd.addHelpText(DESCRIPTIONS[analysisIndex]);
+        JLabel description = pd.addHelpText(DESCRIPTIONS[analysisIndex]);
+        if (rowFocus != null && toggle.getParent() instanceof JComponent) {
+            rowFocus.register(analysisIndex, toggle, (JComponent) toggle.getParent(), description);
+        }
         return toggle;
     }
 
@@ -1643,13 +1701,13 @@ public class FLASH_Pipeline implements PlugIn {
         }
     }
 
-    private void setRecipeTooltip(JButton button, String recipeId) {
+    private String recipeTooltip(String recipeId) {
         try {
             PipelineRecipe recipe = PipelineRecipeIO.loadFromResources(recipeId);
-            button.setToolTipText("<html><body width='280'>"
-                    + htmlText(buildRecipeSelectionSummary(recipe, analyses)) + "</body></html>");
+            return "<html><body width='280'>"
+                    + htmlText(buildRecipeSelectionSummary(recipe, analyses)) + "</body></html>";
         } catch (IOException e) {
-            button.setToolTipText("Could not load recipe preview: " + e.getMessage());
+            return "Could not load recipe preview: " + e.getMessage();
         }
     }
 
@@ -1806,7 +1864,8 @@ public class FLASH_Pipeline implements PlugIn {
                                          final int[] statusRowsByAnalysis,
                                          final boolean[] statusRowsReady,
                                          final Map<Integer, AnalysisStatus>[] pendingStatuses,
-                                         final AnalysisStatusScanner[] pendingScanner) {
+                                         final AnalysisStatusScanner[] pendingScanner,
+                                         final AnalysisDetailPanel detail) {
         final AnalysisStatusScanner scanner = new AnalysisStatusScanner();
         Thread thread = new Thread(new Runnable() {
             @Override public void run() {
@@ -1821,7 +1880,7 @@ public class FLASH_Pipeline implements PlugIn {
                             pendingScanner[0] = scanner;
                             return;
                         }
-                        applyAnalysisStatuses(pd, statusRowsByAnalysis, statuses, scanner);
+                        applyAnalysisStatuses(pd, statusRowsByAnalysis, statuses, scanner, detail);
                     }
                 });
             }
@@ -1833,8 +1892,16 @@ public class FLASH_Pipeline implements PlugIn {
     private void applyAnalysisStatuses(PipelineDialog pd,
                                        int[] statusRowsByAnalysis,
                                        Map<Integer, AnalysisStatus> statuses,
-                                       AnalysisStatusScanner scanner) {
+                                       final AnalysisStatusScanner scanner,
+                                       AnalysisDetailPanel detail) {
         if (pd == null || statuses == null || scanner == null) return;
+        if (detail != null) {
+            detail.setStatusSource(new AnalysisDetailPanel.StatusSource() {
+                @Override public String statusFor(int analysisIndex) {
+                    return scanner.tooltipFor(analysisIndex);
+                }
+            });
+        }
         for (int i = 0; i < analyses.length; i++) {
             int row = statusRowsByAnalysis[i];
             if (row < 0) continue;
@@ -2128,11 +2195,11 @@ public class FLASH_Pipeline implements PlugIn {
         }
     }
 
-    private void startDependencyBadgeRefresh(final PipelineDialog pd, final JButton depsBtn) {
-        if (pd == null || depsBtn == null) {
+    private void startDependencyBadgeRefresh(final PipelineDialog pd,
+                                             final java.util.function.Consumer<List<DependencyService.DialogRow>> onRows) {
+        if (pd == null || onRows == null) {
             return;
         }
-        final Color defaultForeground = depsBtn.getForeground();
         final boolean[] openedOrClosed = new boolean[]{false};
         final java.util.concurrent.atomic.AtomicInteger refreshGeneration =
                 new java.util.concurrent.atomic.AtomicInteger();
@@ -2146,19 +2213,17 @@ public class FLASH_Pipeline implements PlugIn {
             }
         });
 
-        refreshDependencyBadgeAsync(pd, depsBtn, defaultForeground, openedOrClosed, refreshGeneration);
+        refreshDependencyBadgeAsync(pd, onRows, openedOrClosed, refreshGeneration);
         CellposeRuntime.probeAsync().whenComplete(
                 new java.util.function.BiConsumer<CellposeRuntime.Status, Throwable>() {
                     @Override public void accept(CellposeRuntime.Status status, Throwable throwable) {
-                        refreshDependencyBadgeAsync(
-                                pd, depsBtn, defaultForeground, openedOrClosed, refreshGeneration);
+                        refreshDependencyBadgeAsync(pd, onRows, openedOrClosed, refreshGeneration);
                     }
                 });
     }
 
     private void refreshDependencyBadgeAsync(final PipelineDialog pd,
-                                             final JButton depsBtn,
-                                             final Color defaultForeground,
+                                             final java.util.function.Consumer<List<DependencyService.DialogRow>> onRows,
                                              final boolean[] openedOrClosed,
                                              final java.util.concurrent.atomic.AtomicInteger refreshGeneration) {
         final int generation = refreshGeneration.incrementAndGet();
@@ -2184,26 +2249,21 @@ public class FLASH_Pipeline implements PlugIn {
                     IJ.log("[FLASH] Could not update dependency badge: " + e.getMessage());
                     return;
                 }
-                boolean hasDependencyIssues = rows != null && !rows.isEmpty();
-                depsBtn.setText(dependencyButtonLabel(hasDependencyIssues));
-                depsBtn.setForeground(hasDependencyIssues ? new Color(183, 28, 28) : defaultForeground);
-                depsBtn.setToolTipText(dependencyAttentionTooltip(rows));
-                depsBtn.revalidate();
-                depsBtn.repaint();
+                onRows.accept(rows == null ? new ArrayList<DependencyService.DialogRow>() : rows);
             }
         }.execute();
     }
 
-    static String dependencyButtonLabel(boolean hasDependencyIssues) {
-        return hasDependencyIssues ? "Dependencies !" : "Dependencies";
-    }
-
-    private static String dependencyAttentionTooltip(List<DependencyService.DialogRow> rows) {
-        int count = rows == null ? 0 : rows.size();
-        if (count <= 0) {
-            return "Open dependency checks and installers.";
+    /** Maps rows needing attention to their dependency id and short status label. */
+    static Map<DependencyId, String> dependencyAttentionById(List<DependencyService.DialogRow> rows) {
+        Map<DependencyId, String> out = new java.util.EnumMap<DependencyId, String>(DependencyId.class);
+        if (rows == null) return out;
+        for (DependencyService.DialogRow row : rows) {
+            if (row == null || row.getSpec() == null) continue;
+            DependencyId id = row.getSpec().getId();
+            if (id != null) out.put(id, row.getStatusLabel());
         }
-        return count + " dependency issue(s) need attention before affected analyses will run.";
+        return out;
     }
 
     private static String firstDependencyDetailLine(String detail) {

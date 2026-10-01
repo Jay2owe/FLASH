@@ -5,27 +5,26 @@ import flash.pipeline.recipes.PipelineRecipe;
 import flash.pipeline.recipes.PipelineRecipeIO;
 import flash.pipeline.ui.PipelineDialog;
 import flash.pipeline.ui.ToggleSwitch;
+import flash.pipeline.ui.main.StatusChip;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import javax.swing.JButton;
-import javax.swing.JLabel;
-import javax.swing.JPanel;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.io.File;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 public class FLASH_PipelineRecipeTest {
@@ -80,7 +79,7 @@ public class FLASH_PipelineRecipeTest {
     }
 
     @Test
-    public void presentationRecipeButtonTicksPresentationImagesAndRepresentativeFigure() throws Exception {
+    public void presentationRecipeTicksPresentationImagesAndRepresentativeFigure() throws Exception {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         PipelineDialog dialog = new PipelineDialog("Recipes");
         try {
@@ -88,9 +87,9 @@ public class FLASH_PipelineRecipeTest {
             toggles[FLASH_Pipeline.IDX_SPLIT_MERGE] = new ToggleSwitch(false);
             toggles[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE] = new ToggleSwitch(false);
             toggles[FLASH_Pipeline.IDX_INTENSITY] = new ToggleSwitch(true);
-            JPanel quickStart = quickStartPanel(pipeline, dialog, toggles);
+            FLASH_Pipeline.MainStrip strip = pipeline.buildMainStatusStripForTests(dialog, toggles);
 
-            findButton(quickStart, "Presentation").doClick();
+            chooseRecipe(strip, "Presentation");
 
             assertTrue(toggles[FLASH_Pipeline.IDX_SPLIT_MERGE].isSelected());
             assertTrue(toggles[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE].isSelected());
@@ -101,18 +100,15 @@ public class FLASH_PipelineRecipeTest {
     }
 
     @Test
-    public void fastPresentableResultsButtonTicksDisplayIntensityResultsAndValidation() throws Exception {
+    public void fastPresentableResultsRecipeTicksDisplayIntensityResultsAndValidation() throws Exception {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         PipelineDialog dialog = new PipelineDialog("Recipes");
         try {
-            ToggleSwitch[] toggles = new ToggleSwitch[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
-            for (int i = 0; i < toggles.length; i++) {
-                toggles[i] = new ToggleSwitch(false);
-            }
+            ToggleSwitch[] toggles = allToggles(false);
             toggles[FLASH_Pipeline.IDX_3D_OBJECT].setSelected(true);
-            JPanel quickStart = quickStartPanel(pipeline, dialog, toggles);
+            FLASH_Pipeline.MainStrip strip = pipeline.buildMainStatusStripForTests(dialog, toggles);
 
-            findButton(quickStart, "Fast Presentable Results").doClick();
+            chooseRecipe(strip, "Fast Presentable Results");
 
             assertTrue(toggles[FLASH_Pipeline.IDX_SPLIT_MERGE].isSelected());
             assertTrue(toggles[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE].isSelected());
@@ -122,84 +118,82 @@ public class FLASH_PipelineRecipeTest {
             assertTrue(toggles[FLASH_Pipeline.IDX_EXCEL_EXPORT].isSelected());
             assertFalse(toggles[FLASH_Pipeline.IDX_3D_OBJECT].isSelected());
             assertFalse(toggles[FLASH_Pipeline.IDX_DECONVOLUTION].isSelected());
+            assertTrue(strip.recipeCaption.getText().contains("Applied recipe"));
         } finally {
             dialog.closeWithAction("test");
         }
     }
 
     @Test
-    public void quickStartSaveRecipeButtonIsDistinctAndLeftAligned() throws Exception {
+    public void clearAllRecipeUnticksEveryAnalysis() throws Exception {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         PipelineDialog dialog = new PipelineDialog("Recipes");
         try {
-            JPanel quickStart = quickStartPanel(pipeline, dialog);
-            JButton standard = findButton(quickStart, "Standard 3D + Intensity");
-            JButton presentation = findButton(quickStart, "Presentation");
-            JButton fastPresentableResults = findButton(quickStart, "Fast Presentable Results");
-            JButton lastRun = findButton(quickStart, "Last run");
-            JButton clear = findButton(quickStart, "Clear Recipe");
-            JButton save = findButton(quickStart, "Save selection as recipe...");
-            JButton help = findButton(quickStart, "?");
-            JButton feedback = findButton(quickStart, "Feedback");
-            JLabel caption = findLabelContaining(quickStart, "Pick a recipe");
+            ToggleSwitch[] toggles = allToggles(true);
+            FLASH_Pipeline.MainStrip strip = pipeline.buildMainStatusStripForTests(dialog, toggles);
 
-            assertNotNull(standard);
-            assertNotNull(presentation);
-            assertNotNull(fastPresentableResults);
-            assertNotNull(lastRun);
-            assertNotNull(clear);
-            assertNotNull(save);
-            assertNotNull(help);
-            assertNotNull(feedback);
-            assertNotNull(caption);
-            assertSame(standard, standard.getParent().getComponent(0));
-            assertSame(findButton(quickStart, "Full pipeline").getParent(), presentation.getParent());
-            assertSame(lastRun.getParent(), clear.getParent());
-            assertSame(fastPresentableResults, fastPresentableResults.getParent().getComponent(0));
-            assertEquals(Component.LEFT_ALIGNMENT, caption.getAlignmentX(), 0.001f);
-            assertEquals(new Color(232, 245, 253), save.getBackground());
-            assertEquals(new Color(15, 87, 140), save.getForeground());
-            assertEquals(save.getBackground(), help.getBackground());
-            assertEquals(save.getForeground(), help.getForeground());
-            assertEquals(save.getBackground(), feedback.getBackground());
-            assertEquals(save.getForeground(), feedback.getForeground());
-            assertTrue(save.isOpaque());
-            assertTrue(save.isContentAreaFilled());
+            chooseRecipe(strip, "Clear all");
+
+            for (ToggleSwitch toggle : toggles) {
+                assertFalse(toggle.isSelected());
+            }
         } finally {
             dialog.closeWithAction("test");
         }
     }
 
     @Test
-    public void quickStartDirectoryShowsTailAndKeepsFullPathTooltip() throws Exception {
+    public void stripReplacesRecipeButtonsWithOneMenuPlusSave() throws Exception {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        PipelineDialog dialog = new PipelineDialog("Recipes");
+        try {
+            FLASH_Pipeline.MainStrip strip = pipeline.buildMainStatusStripForTests(dialog, allToggles(false));
+            JButton save = findButton(strip.panel, "Save selection as recipe...");
+            JButton help = findButton(strip.panel, "?");
+
+            assertEquals(8, strip.recipeCombo.getItemCount());
+            assertEquals("Choose a recipe...", strip.recipeCombo.getItemAt(0).label);
+            assertNull(findButton(strip.panel, "Standard 3D + Intensity"));
+            assertNull(findButton(strip.panel, "Clear Recipe"));
+            assertNotNull(save);
+            assertNotNull(help);
+            assertNotNull(findButton(strip.panel, "Edit setup..."));
+            assertEquals(new Color(232, 245, 253), save.getBackground());
+            assertEquals(new Color(15, 87, 140), save.getForeground());
+            assertEquals(save.getBackground(), help.getBackground());
+            assertTrue(save.isOpaque());
+        } finally {
+            dialog.closeWithAction("test");
+        }
+    }
+
+    @Test
+    public void projectMenuShowsFolderNameWithFullPathTooltip() throws Exception {
         File project = temp.newFolder("Amyloid Project", "2, 4, and 8 Weeks", "MOAB-2.AF488");
         String fullPath = project.getAbsolutePath();
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         setDirectory(pipeline, fullPath);
         PipelineDialog dialog = new PipelineDialog("Recipes");
         try {
-            JPanel quickStart = quickStartPanel(pipeline, dialog);
-            JLabel directory = findLabelContaining(quickStart, "MOAB-2.AF488");
+            FLASH_Pipeline.MainStrip strip = pipeline.buildMainStatusStripForTests(dialog, allToggles(false));
 
-            assertNotNull(directory);
-            assertEquals("...\\2, 4, and 8 Weeks\\MOAB-2.AF488", directory.getText());
-            assertEquals(fullPath, directory.getToolTipText());
+            assertEquals("MOAB-2.AF488", strip.projectCombo.getItemAt(0).name);
+            assertEquals(fullPath, strip.projectCombo.getToolTipText());
+            assertEquals("Open another project...",
+                    strip.projectCombo.getItemAt(strip.projectCombo.getItemCount() - 1).name);
         } finally {
             dialog.closeWithAction("test");
         }
     }
 
     @Test
-    public void quickStartProjectSwitchButtonReturnsChangeProjectAction() throws Exception {
+    public void openAnotherProjectReturnsChangeProjectAction() throws Exception {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         PipelineDialog dialog = new PipelineDialog("Recipes");
         try {
-            JPanel quickStart = quickStartPanel(pipeline, dialog);
+            FLASH_Pipeline.MainStrip strip = pipeline.buildMainStatusStripForTests(dialog, allToggles(false));
 
-            assertNotNull(findLabelContaining(quickStart, "Current Project"));
-            assertNotNull(findButton(quickStart, "Edit setup..."));
-
-            findButton(quickStart, "Change project...").doClick();
+            strip.projectCombo.setSelectedIndex(strip.projectCombo.getItemCount() - 1);
 
             assertEquals("change_project", dialog.getActionCommand());
         } finally {
@@ -208,13 +202,32 @@ public class FLASH_PipelineRecipeTest {
     }
 
     @Test
-    public void quickStartEditSetupButtonReturnsEditAction() throws Exception {
+    public void recentProjectReturnsOpenRecentActionWithItsPath() throws Exception {
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
         PipelineDialog dialog = new PipelineDialog("Recipes");
         try {
-            JPanel quickStart = quickStartPanel(pipeline, dialog);
+            FLASH_Pipeline.MainStrip strip = pipeline.buildMainStatusStripForTests(dialog, allToggles(false));
+            FLASH_Pipeline.ProjectChoice recent = new FLASH_Pipeline.ProjectChoice(
+                    FLASH_Pipeline.ProjectChoice.Kind.RECENT, "Other", "C:/data/other/project.json");
+            strip.projectCombo.addItem(recent);
 
-            findButton(quickStart, "Edit setup...").doClick();
+            strip.projectCombo.setSelectedItem(recent);
+
+            assertEquals(FLASH_Pipeline.OPEN_RECENT_ACTION_PREFIX + "C:/data/other/project.json",
+                    dialog.getActionCommand());
+        } finally {
+            dialog.closeWithAction("test");
+        }
+    }
+
+    @Test
+    public void editSetupButtonReturnsEditAction() throws Exception {
+        FLASH_Pipeline pipeline = new FLASH_Pipeline();
+        PipelineDialog dialog = new PipelineDialog("Recipes");
+        try {
+            FLASH_Pipeline.MainStrip strip = pipeline.buildMainStatusStripForTests(dialog, allToggles(false));
+
+            findButton(strip.panel, "Edit setup...").doClick();
 
             assertEquals("edit_project_setup", dialog.getActionCommand());
         } finally {
@@ -223,7 +236,7 @@ public class FLASH_PipelineRecipeTest {
     }
 
     @Test
-    public void lastRunRecipeButtonRestoresOnlyWhenClicked() throws Exception {
+    public void lastRunRecipeRestoresOnlyWhenChosen() throws Exception {
         File project = temp.newFolder("last-run-button");
         Map<String, Object> recipe = new LinkedHashMap<String, Object>();
         recipe.put("name", "last-run");
@@ -231,27 +244,49 @@ public class FLASH_PipelineRecipeTest {
         ProjectStatusStore.writeLastRunRecipe(project.getAbsolutePath(), recipe);
 
         FLASH_Pipeline pipeline = new FLASH_Pipeline();
-        java.lang.reflect.Field directory = FLASH_Pipeline.class.getDeclaredField("directory");
-        directory.setAccessible(true);
-        directory.set(pipeline, project.getAbsolutePath());
+        setDirectory(pipeline, project.getAbsolutePath());
 
         PipelineDialog dialog = new PipelineDialog("Recipes");
         try {
-            ToggleSwitch[] toggles = new ToggleSwitch[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
-            JPanel quickStart = quickStartPanel(pipeline, dialog, toggles);
-            toggles[FLASH_Pipeline.IDX_SPLIT_MERGE] = new ToggleSwitch(false);
-            toggles[FLASH_Pipeline.IDX_STATISTICS] = new ToggleSwitch(false);
+            ToggleSwitch[] toggles = allToggles(false);
+            FLASH_Pipeline.MainStrip strip = pipeline.buildMainStatusStripForTests(dialog, toggles);
 
             assertFalse(toggles[FLASH_Pipeline.IDX_SPLIT_MERGE].isSelected());
             assertFalse(toggles[FLASH_Pipeline.IDX_STATISTICS].isSelected());
 
-            findButton(quickStart, "Last run").doClick();
+            chooseRecipe(strip, "Last run");
 
             assertTrue(toggles[FLASH_Pipeline.IDX_SPLIT_MERGE].isSelected());
             assertTrue(toggles[FLASH_Pipeline.IDX_STATISTICS].isSelected());
         } finally {
             dialog.closeWithAction("test");
         }
+    }
+
+    @Test
+    public void projectChipsDescribeImagesAnimalsAndConditionState() {
+        StatusChip images = new StatusChip("");
+        StatusChip conditions = new StatusChip("");
+
+        FLASH_Pipeline.applyProjectSummaryChips(images, conditions, "C:/p", 48,
+                new LinkedHashSet<String>(Arrays.asList("A1", "A2")), null);
+
+        assertEquals("48 images \u00B7 2 animals", images.getText());
+        assertEquals(StatusChip.State.NEUTRAL, conditions.getState());
+        assertTrue(conditions.getText().contains("No conditions yet"));
+    }
+
+    @Test
+    public void dependencyChipTurnsAmberWithIssueCount() {
+        StatusChip chip = new StatusChip("");
+
+        FLASH_Pipeline.applyDependencyChip(chip, 2);
+        assertEquals(StatusChip.State.WARN, chip.getState());
+        assertTrue(chip.getText().endsWith("2 dependency issues"));
+
+        FLASH_Pipeline.applyDependencyChip(chip, 0);
+        assertEquals(StatusChip.State.OK, chip.getState());
+        assertTrue(chip.getText().endsWith("Dependencies"));
     }
 
     @Test
@@ -288,18 +323,22 @@ public class FLASH_PipelineRecipeTest {
         assertFalse(selections[FLASH_Pipeline.IDX_CREATE_BIN]);
     }
 
-    private static JPanel quickStartPanel(FLASH_Pipeline pipeline, PipelineDialog dialog) throws Exception {
-        return quickStartPanel(pipeline, dialog,
-                new ToggleSwitch[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1]);
+    private static ToggleSwitch[] allToggles(boolean selected) {
+        ToggleSwitch[] toggles = new ToggleSwitch[FLASH_Pipeline.IDX_REPRESENTATIVE_FIGURE + 1];
+        for (int i = 0; i < toggles.length; i++) {
+            toggles[i] = new ToggleSwitch(selected);
+        }
+        return toggles;
     }
 
-    private static JPanel quickStartPanel(FLASH_Pipeline pipeline,
-                                          PipelineDialog dialog,
-                                          ToggleSwitch[] toggles) throws Exception {
-        Method method = FLASH_Pipeline.class.getDeclaredMethod(
-                "buildQuickStartPanel", PipelineDialog.class, ToggleSwitch[].class);
-        method.setAccessible(true);
-        return (JPanel) method.invoke(pipeline, dialog, toggles);
+    private static void chooseRecipe(FLASH_Pipeline.MainStrip strip, String label) {
+        for (int i = 0; i < strip.recipeCombo.getItemCount(); i++) {
+            if (label.equals(strip.recipeCombo.getItemAt(i).label)) {
+                strip.recipeCombo.setSelectedIndex(i);
+                return;
+            }
+        }
+        throw new AssertionError("No recipe named " + label);
     }
 
     private static void setDirectory(FLASH_Pipeline pipeline, String directory) throws Exception {
@@ -315,21 +354,6 @@ public class FLASH_PipelineRecipeTest {
             }
             if (component instanceof Container) {
                 JButton found = findButton((Container) component, text);
-                if (found != null) {
-                    return found;
-                }
-            }
-        }
-        return null;
-    }
-
-    private static JLabel findLabelContaining(Container container, String text) {
-        for (Component component : container.getComponents()) {
-            if (component instanceof JLabel && ((JLabel) component).getText().contains(text)) {
-                return (JLabel) component;
-            }
-            if (component instanceof Container) {
-                JLabel found = findLabelContaining((Container) component, text);
                 if (found != null) {
                     return found;
                 }
