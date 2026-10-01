@@ -90,6 +90,11 @@ paper rerun; the guide states the current limits.
 
 ## Reproducible source snapshot
 
+This branch builds the local candidate FLASH 5.1.0, which corrects measurement
+and run-recording behavior. It has not been published to the ImageJ update site
+or archived on Zenodo. Record its source commit and plugin file checksum with
+new analysis results.
+
 The current tagged release is [FLASH 5.0.0](https://github.com/Jay2owe/FLASH/releases/tag/v5.0.0).
 For a fixed source snapshot, download that release's source archive or check out
 `v5.0.0`; the default branch and ImageJ update site can change over time.
@@ -257,25 +262,25 @@ src/test/java/flash/pipeline/
 
 ## Citation
 
-If you use FLASH in published work, please cite it. The **concept DOI** below
-always resolves to the latest release:
+If you use this local candidate in published work, cite version 5.1.0 and record
+the exact source commit and plugin file checksum. This candidate has no Zenodo
+archive yet:
 
-> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.0.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21633367
+> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.1.0, local candidate) [Computer software]. https://github.com/Jay2owe/FLASH
 
 ```bibtex
 @software{malcolm_flash_2026,
   author    = {Malcolm, Jamie},
   title     = {{FLASH}: {F}luorescence {A}utomated {S}patial {H}istology},
-  version   = {5.0.0},
+  version   = {5.1.0},
   year      = {2026},
-  publisher = {Zenodo},
-  doi       = {10.5281/zenodo.21633367},
-  url       = {https://doi.org/10.5281/zenodo.21633367}
+  note      = {Local candidate; record source commit and plugin checksum},
+  url       = {https://github.com/Jay2owe/FLASH}
 }
 ```
 
-Where exact reproducibility matters, cite the DOI of the specific version you
-ran instead — v5.0.0 is [`10.5281/zenodo.21633368`](https://doi.org/10.5281/zenodo.21633368).
+If you ran the published version 5.0.0, cite its existing archive
+[`10.5281/zenodo.21633368`](https://doi.org/10.5281/zenodo.21633368).
 
 GitHub's **Cite this repository** button (top right, generated from
 [`CITATION.cff`](CITATION.cff)) produces both APA and BibTeX automatically.
