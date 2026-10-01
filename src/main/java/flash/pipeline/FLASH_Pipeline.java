@@ -1396,16 +1396,25 @@ public class FLASH_Pipeline implements PlugIn {
     }
 
     private ProjectChoice[] projectChoices() {
+        return projectChoices(directory, RecentProjectsStore.read(RecentProjectsStore.resolveStoreDir()));
+    }
+
+    /** Build menu labels without opening projects or probing their source images. */
+    static ProjectChoice[] projectChoices(String directory, List<RecentProject> recentProjects) {
         List<ProjectChoice> out = new ArrayList<ProjectChoice>();
         String current = directory == null ? "" : directory.trim();
         String currentName = current.isEmpty() ? "No project selected" : new File(current).getName();
         List<ProjectChoice> others = new ArrayList<ProjectChoice>();
-        for (RecentProject recent : RecentProjectsStore.read(RecentProjectsStore.resolveStoreDir())) {
+        for (RecentProject recent : recentProjects) {
             if (recent == null || recent.path == null) continue;
-            File root = outputRootForProjectJson(new File(recent.path));
+            // Recent paths can point to offline cloud files or unavailable network
+            // drives. Resolve/revalidate only when the user chooses that project.
+            File root = outputRootFor(null, new File(recent.path));
             String name = recent.name == null || recent.name.trim().isEmpty()
                     ? (root == null ? recent.path : root.getName()) : recent.name.trim();
-            if (!current.isEmpty() && root != null && sameDirectoryPath(current, root.getAbsolutePath())) {
+            if (!current.isEmpty() && root != null
+                    && new File(current).toPath().toAbsolutePath().normalize()
+                            .equals(root.toPath().toAbsolutePath().normalize())) {
                 currentName = name;
             } else {
                 others.add(new ProjectChoice(ProjectChoice.Kind.RECENT, name, recent.path));

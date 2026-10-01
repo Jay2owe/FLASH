@@ -1,6 +1,8 @@
 package flash.pipeline;
 
 import flash.pipeline.io.ProjectStatusStore;
+import flash.pipeline.io.FlashProjectLayout;
+import flash.pipeline.project.RecentProject;
 import flash.pipeline.recipes.PipelineRecipe;
 import flash.pipeline.recipes.PipelineRecipeIO;
 import flash.pipeline.ui.PipelineDialog;
@@ -165,6 +167,35 @@ public class FLASH_PipelineRecipeTest {
         } finally {
             dialog.closeWithAction("test");
         }
+    }
+
+    @Test
+    public void recentMenuKeepsUnavailableProjectsSelectableWithoutLoadingThem() {
+        String unavailable = new File(FlashProjectLayout.forDirectory(
+                new File(temp.getRoot(), "offline").getAbsolutePath()).configurationWriteDir(),
+                "project.json").getAbsolutePath();
+        FLASH_Pipeline.ProjectChoice[] choices = FLASH_Pipeline.projectChoices(null,
+                Arrays.asList(new RecentProject("Saved project name", unavailable, 1L)));
+
+        assertEquals(3, choices.length);
+        assertEquals("Saved project name", choices[1].name);
+        assertEquals(unavailable, choices[1].path);
+        assertEquals(FLASH_Pipeline.ProjectChoice.Kind.RECENT, choices[1].kind);
+        assertFalse(new File(unavailable).exists());
+    }
+
+    @Test
+    public void recentMenuRecognizesCurrentProjectWithoutReadingItsConfiguration() {
+        File root = new File(temp.getRoot(), "offline");
+        String pointer = new File(FlashProjectLayout.forDirectory(root.getAbsolutePath())
+                .configurationWriteDir(), "project.json").getAbsolutePath();
+        FLASH_Pipeline.ProjectChoice[] choices = FLASH_Pipeline.projectChoices(root.getAbsolutePath(),
+                Arrays.asList(new RecentProject("Current saved name", pointer, 1L)));
+
+        assertEquals(2, choices.length);
+        assertEquals("Current saved name", choices[0].name);
+        assertEquals(FLASH_Pipeline.ProjectChoice.Kind.CURRENT, choices[0].kind);
+        assertFalse(root.exists());
     }
 
     @Test
