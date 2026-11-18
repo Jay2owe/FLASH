@@ -275,7 +275,8 @@ always resolves to the latest release:
 ```
 
 Where exact reproducibility matters, cite the DOI of the specific version you
-ran instead — v5.0.0 is [`10.5281/zenodo.21633368`](https://doi.org/10.5281/zenodo.21633368).
+ran instead — v5.3.0 is [`10.5281/zenodo.24349244`](https://doi.org/10.5281/zenodo.24349244)
+and v5.0.0 is [`10.5281/zenodo.21633368`](https://doi.org/10.5281/zenodo.21633368).
 
 GitHub's **Cite this repository** button (top right, generated from
 [`CITATION.cff`](CITATION.cff)) produces both APA and BibTeX automatically.
