@@ -1,8 +1,8 @@
 name: Publish ImageJ Update Site
 
+# Manual only: a GitHub release must not trigger an update-site upload.
+# Releases are uploaded with a targeted single-jar upload from a clean stable Fiji.
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       ref:
@@ -12,7 +12,7 @@ on:
       dry_run:
         description: "Simulate the ImageJ update-site upload without publishing."
         required: true
-        default: false
+        default: true
         type: boolean
 
 permissions:

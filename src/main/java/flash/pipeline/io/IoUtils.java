@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.CopyOption;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
@@ -231,11 +232,21 @@ public final class IoUtils {
             } catch (NoSuchFileException absent) {
                 return PriorGeneration.absent();
             }
-            if (!attributes.isRegularFile()) {
+            if (!isReplaceableFile(attributes)) {
                 throw new IOException("replacement target is not a regular file: " + target);
             }
 
-            FileStamp before = stamp(target);
+            FileStamp before;
+            try {
+                before = stamp(target);
+            } catch (NoSuchFileException absent) {
+                throw absent;
+            } catch (FileSystemException unavailable) {
+                throw new IOException("Could not read the existing file before replacing it: "
+                        + target + ". If it is an online-only cloud file (Dropbox or OneDrive),"
+                        + " make sure the sync app is running so the file can be downloaded.",
+                        unavailable);
+            }
             backup = Files.createTempFile(parent, tempPrefix, ".backup");
             Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
             FileStamp backupStamp = stamp(backup);
@@ -599,6 +610,18 @@ public final class IoUtils {
             }
             output.flush();
         }
+    }
+
+    /**
+     * Whether an existing target may be replaced. Windows cloud-sync placeholders
+     * (online-only files from Dropbox or OneDrive) are non-symlink reparse points, which
+     * Java reports as "other" rather than regular; they are still ordinary files.
+     */
+    static boolean isReplaceableFile(BasicFileAttributes attributes) {
+        if (attributes.isRegularFile()) {
+            return true;
+        }
+        return attributes.isOther() && !attributes.isDirectory() && !attributes.isSymbolicLink();
     }
 
     private static FileStamp stamp(Path path) throws IOException {
