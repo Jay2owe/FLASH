@@ -1,6 +1,7 @@
 package flash.pipeline.ui.sandbox;
 
 import java.awt.Menu;
+import java.awt.GraphicsEnvironment;
 import java.awt.MenuBar;
 import java.awt.MenuItem;
 import java.util.Arrays;
@@ -15,6 +16,7 @@ import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeFalse;
 
 public class FilterCatalogTest {
 
@@ -32,6 +34,7 @@ public class FilterCatalogTest {
 
     @Test
     public void collectTierTwoWalksIncludedMenuBranchesOnly() {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         MenuBar bar = new MenuBar();
         Menu file = new Menu("File");
         file.add(new MenuItem("Open..."));

@@ -313,7 +313,8 @@ public final class Replay {
     }
 
     private static void showOrThrow(Window owner, String message, String title) {
-        if (GraphicsEnvironment.isHeadless()) {
+        // No owner window means a non-interactive caller, matching confirm(): never block on a modal.
+        if (owner == null || GraphicsEnvironment.isHeadless()) {
             throw new IllegalStateException(message);
         }
         JOptionPane.showMessageDialog(owner, message, title, JOptionPane.WARNING_MESSAGE);

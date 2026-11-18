@@ -59,7 +59,30 @@ public final class RepresentativeFigureWriter {
         List<RepresentativePreviewRenderer.RenderedFinalSeries> rendered =
                 RepresentativePreviewRenderer.renderFinal(
                         directory, safeConfig, imageCache, parallelThreads, useTifCache, metas);
-        return writeRenderedFigure(directory, safeConfig, rendered);
+        File figure = writeRenderedFigure(directory, safeConfig, rendered);
+        writeFigurePanelBuilderExport(directory, safeConfig, imageCache, useTifCache,
+                metas, figure);
+        return figure;
+    }
+
+    /**
+     * Adds Figure Panel Builder's publication outputs beside the FLASH figure.
+     * A failure is logged and leaves the FLASH figure in place.
+     */
+    private static void writeFigurePanelBuilderExport(String directory,
+                                                      RepresentativeFigureConfig config,
+                                                      ImageCache imageCache,
+                                                      boolean useTifCache,
+                                                      List<SeriesMeta> metas,
+                                                      File figure) {
+        String name = figure.getName().replaceFirst("(?i)\\.png$", "");
+        try {
+            RepresentativePreviewRenderer.exportWithFigurePanelBuilder(directory, config,
+                    imageCache, useTifCache, metas, figure.getParentFile(), name);
+        } catch (Exception failure) {
+            IJ.log("[Representative Figure] Figure Panel Builder export skipped: "
+                    + failure.getMessage());
+        }
     }
 
     static File writeRenderedFigureForTests(
@@ -308,7 +331,10 @@ public final class RepresentativeFigureWriter {
         int drawH = Math.max(1, (int) Math.round(image.getHeight() * scale));
         int drawX = x + (cell - drawW) / 2;
         int drawY = y + (cell - drawH) / 2;
-        g.drawImage(image, drawX, drawY, drawW, drawH, null);
+        // Full-resolution channels shrink into the cell by area averaging;
+        // a bilinear draw aliases puncta and fine processes at large reductions.
+        flash.pipeline.presentation.AreaResample.drawFitted(g, image, drawX, drawY,
+                drawW, drawH);
 
         if (config.annotateOverviewTile()) {
             double recordScale = drawW / (double) Math.max(1, tile.record.widthPx());

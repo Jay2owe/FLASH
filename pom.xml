@@ -20,7 +20,7 @@
 	  Second digit = major rework or large optimization.
 	  Third digit = bug fix or small tweak/optimization.
 	-->
-	<version>5.2.0</version>
+	<version>5.3.0</version>
 
 	<name>FLASH - The Pipeline for Fluorescence Automated Spatial Histology</name>
 	<description>FLASH (Fluorescence Automated Spatial Histology) - ImageJ2/Fiji plugin for automated immunofluorescence image analysis: fluorescence intensity measurement, 3D object analysis, spatial morphometry, and ROI management</description>
@@ -102,6 +102,12 @@
 		<repository>
 			<id>scijava.public</id>
 			<url>https://maven.scijava.org/content/groups/public</url>
+		</repository>
+		<!-- Figure Panel Builder is not on a public Maven repository; its released jar is kept
+		     in lib/ so local and CI builds resolve the same bytes. -->
+		<repository>
+			<id>flash-bundled</id>
+			<url>file://${project.basedir}/lib</url>
 		</repository>
 	</repositories>
 
@@ -324,6 +330,15 @@
 			<version>1.4.0</version>
 		</dependency>
 
+		<!-- Figure Panel Builder: the shared figure engine behind FLASH's Figure Panel Builder
+		     export (SVG/TIFF/PNG figures, per-panel images, manifest, methods, clip report).
+		     BSD 3-Clause; bundled and relocated below so no extra Fiji jar is needed. -->
+		<dependency>
+			<groupId>io.github.jay2owe</groupId>
+			<artifactId>FigurePanelBuilder</artifactId>
+			<version>0.4.0</version>
+		</dependency>
+
 		<!-- Test dependencies -->
 		<dependency>
 			<groupId>junit</groupId>
@@ -371,8 +386,15 @@
 							<artifactSet>
 								<includes>
 									<include>com.github.weisj:jsvg</include>
+									<include>io.github.jay2owe:FigurePanelBuilder</include>
 								</includes>
 							</artifactSet>
+							<relocations>
+								<relocation>
+									<pattern>fpb</pattern>
+									<shadedPattern>flash.internal.fpb</shadedPattern>
+								</relocation>
+							</relocations>
 							<filters>
 								<filter>
 									<artifact>com.github.weisj:jsvg</artifact>
@@ -382,6 +404,15 @@
 										<exclude>META-INF/*.SF</exclude>
 										<exclude>META-INF/*.DSA</exclude>
 										<exclude>META-INF/*.RSA</exclude>
+									</excludes>
+								</filter>
+								<filter>
+									<!-- FPB's plugins.config would add its own menu entry. -->
+									<artifact>io.github.jay2owe:FigurePanelBuilder</artifact>
+									<excludes>
+										<exclude>plugins.config</exclude>
+										<exclude>META-INF/MANIFEST.MF</exclude>
+										<exclude>META-INF/maven/**</exclude>
 									</excludes>
 								</filter>
 							</filters>

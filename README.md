@@ -90,14 +90,9 @@ paper rerun; the guide states the current limits.
 
 ## Reproducible source snapshot
 
-This branch builds the local candidate FLASH 5.2.0, which corrects measurement
-and run-recording behavior. It has not been published to the ImageJ update site
-or archived on Zenodo. Record its source commit and plugin file checksum with
-new analysis results.
-
-The current tagged release is [FLASH 5.0.0](https://github.com/Jay2owe/FLASH/releases/tag/v5.0.0).
+The current tagged release is [FLASH 5.3.0](https://github.com/Jay2owe/FLASH/releases/tag/v5.3.0).
 For a fixed source snapshot, download that release's source archive or check out
-`v5.0.0`; the default branch and ImageJ update site can change over time.
+`v5.3.0`; the default branch and ImageJ update site can change over time.
 Record the FLASH version and analysis settings used with your results.
 The version-specific archive is [Zenodo record 21633368](https://doi.org/10.5281/zenodo.21633368).
 
@@ -262,25 +257,25 @@ src/test/java/flash/pipeline/
 
 ## Citation
 
-If you use this local candidate in published work, cite version 5.2.0 and record
-the exact source commit and plugin file checksum. This candidate has no Zenodo
-archive yet:
+If you use FLASH in published work, please cite it. The **concept DOI** below
+always resolves to the latest release:
 
-> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.2.0, local candidate) [Computer software]. https://github.com/Jay2owe/FLASH
+> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.3.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21633367
 
 ```bibtex
 @software{malcolm_flash_2026,
   author    = {Malcolm, Jamie},
   title     = {{FLASH}: {F}luorescence {A}utomated {S}patial {H}istology},
-  version   = {5.2.0},
+  version   = {5.3.0},
   year      = {2026},
-  note      = {Local candidate; record source commit and plugin checksum},
-  url       = {https://github.com/Jay2owe/FLASH}
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.21633367},
+  url       = {https://doi.org/10.5281/zenodo.21633367}
 }
 ```
 
-If you ran the published version 5.0.0, cite its existing archive
-[`10.5281/zenodo.21633368`](https://doi.org/10.5281/zenodo.21633368).
+Where exact reproducibility matters, cite the DOI of the specific version you
+ran instead — v5.0.0 is [`10.5281/zenodo.21633368`](https://doi.org/10.5281/zenodo.21633368).
 
 GitHub's **Cite this repository** button (top right, generated from
 [`CITATION.cff`](CITATION.cff)) produces both APA and BibTeX automatically.

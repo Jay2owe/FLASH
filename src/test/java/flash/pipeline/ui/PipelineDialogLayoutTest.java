@@ -8,6 +8,7 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import java.awt.Color;
+import java.awt.GraphicsEnvironment;
 import java.awt.Dimension;
 import java.awt.Insets;
 import java.lang.reflect.Field;
@@ -17,6 +18,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeFalse;
 
 public class PipelineDialogLayoutTest {
 
@@ -49,6 +51,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void headerToggleSitsBesideHeaderTextButBodyToggleStaysRightAligned() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Layout");
         ToggleSwitch sectionToggle = dialog.addHeaderToggle("Setup", false);
         ToggleSwitch bodyToggle = dialog.addToggle("Create Bin File", false);
@@ -70,6 +73,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void trailingToggleActionDoesNotEnterBooleanRetrievalOrder() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Trailing Action");
         JButton help = HelpButton.question("About first toggle");
         ToggleSwitch first = dialog.addToggleWithStatus("First analysis", true, new JLabel(), help);
@@ -88,6 +92,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void analysisHelpHeaderCreatesQuestionButtonWithoutChangingBooleanOrder() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Analysis Help Header");
         JButton help = dialog.addAnalysisHelpHeader("Set Up Configuration", FLASH_Pipeline.IDX_CREATE_BIN);
         ToggleSwitch toggle = dialog.addToggle("Run setup", true);
@@ -112,6 +117,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void interleavedControlsRetainIndependentPerTypeRetrievalOrder() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Counter Order");
         dialog.addToggle("First boolean", true);
         dialog.addNumericField("First number", 2.5, 1);
@@ -131,6 +137,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void emptyAndSingleItemChoicesDoNotBreakChoiceRetrieval() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Choice Edge Cases");
         dialog.addChoice("Empty", new String[0], null);
         dialog.addChoice("Single", new String[]{"Only"}, null);
@@ -144,6 +151,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void retrievalDriftReportsFieldTypeAndIndex() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Counter Drift");
         try {
             dialog.getNextNumber();
@@ -159,6 +167,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void footerUtilityButtonsShareRowWithActionButtons() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Footer");
         dialog.addFooterButton("Check my data");
         dialog.addFooterButton("Options");
@@ -174,6 +183,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void helpTextDoesNotExpandToWideInitialDialogWidth() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Help Width");
         JLabel help = dialog.addHelpText("This is a deliberately long help sentence that should wrap compactly "
                 + "instead of making the opening dialog much wider than the controls require.");
@@ -189,6 +199,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void messageTextUsesCompactSwingHtmlWidth() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Message Width");
         JLabel message = dialog.addMessage("D:\\Microscopy Data\\Experiment 01\\FLASH");
 
@@ -199,6 +210,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void primaryAndCancelButtonsUseActionColoursAndPrimaryTextCanChange() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Actions");
 
         assertEquals("OK", button(dialog, "okButton").getText());
@@ -218,6 +230,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void primaryButtonResizesToFitDynamicNextLabel() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Dynamic Primary Label");
         JButton ok = button(dialog, "okButton");
         int initialWidth = ok.getPreferredSize().width;
@@ -241,6 +254,7 @@ public class PipelineDialogLayoutTest {
 
     @Test
     public void requestFocusOnShowDetachesOneShotWindowListener() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
         PipelineDialog dialog = new PipelineDialog("Focus Listener");
         int before = backingDialog(dialog).getWindowListeners().length;
 

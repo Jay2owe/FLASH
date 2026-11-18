@@ -27,6 +27,7 @@ import flash.pipeline.naming.ImageNameParser;
 import flash.pipeline.naming.NameParts;
 import flash.pipeline.naming.OrientationManifestRow;
 import flash.pipeline.naming.ResolvedImageMetadata;
+import flash.pipeline.presentation.PresentationTileConfig;
 import flash.pipeline.presentation.PresentationTileRecord;
 import flash.pipeline.presentation.PresentationTileWriter;
 import flash.pipeline.qc.QcMinMaxPerConditionSelector;
@@ -814,6 +815,12 @@ public final class RepresentativePreviewRenderer {
                 throw new IOException("No channels found in " + item.seriesName);
             }
 
+            if (split.length < item.channels.size()) {
+                // The expected list also counts metadata and saved tile records,
+                // so keep rendering what exists, but never silently.
+                IJ.log("[Representative Figure] " + missingChannelsMessage(item, working,
+                        split.length));
+            }
             int n = Math.min(split.length, item.channels.size());
             List<BufferedImage> channelImages = new ArrayList<BufferedImage>();
             for (int i = 0; i < n; i++) {
@@ -842,6 +849,310 @@ public final class RepresentativePreviewRenderer {
             }
             closeQuietly(source);
         }
+    }
+
+    /**
+     * Writes the selected representatives through Figure Panel Builder's engine
+     * (bundled in FLASH): figure.png/.tif/.svg, full-resolution per-panel images,
+     * manifest, selection, methods and clip report. FLASH prepares the pixels
+     * exactly as for its own figure (deconvolution routing, Z-slice subset,
+     * orientation, maximum projection) and hands them over, so both exports show
+     * the same data with the same locked display ranges.
+     *
+     * @return the Figure Panel Builder figure folder
+     */
+    public static File exportWithFigurePanelBuilder(String directory,
+                                                    RepresentativeFigureConfig config,
+                                                    ImageCache imageCache,
+                                                    boolean useTifCache,
+                                                    List<SeriesMeta> metas,
+                                                    File outputRoot,
+                                                    String figureName) throws Exception {
+        RepresentativeFigureConfig safeConfig =
+                config == null ? new RepresentativeFigureConfig() : config;
+        RepresentativeSelection selection = safeConfig.selection;
+        if (selection == null || !selection.isComplete()) {
+            throw new IllegalStateException("Representative selection is not complete.");
+        }
+        BinConfig binConfig = BinConfigIO.readPartialFromDirectory(directory);
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(directory);
+        List<SeriesMeta> effectiveMetas =
+                metas == null ? ImageSourceDispatcher.readAllMetadata(directory) : metas;
+        DeconvRouting displayRouting = resolveDisplayRouting(directory, layout, binConfig);
+        ExpectedDeconvParams displayExpectedParams =
+                resolveDisplayExpectedParams(directory, layout);
+        final SourceAccess sourceAccess = new SourceAccess(
+                directory, imageCache, useTifCache, true, displayRouting, displayExpectedParams);
+        try {
+            MetadataResolver metadataResolver = new MetadataResolver(directory);
+            List<QcSelectionCandidate> currentCandidates =
+                    QcMinMaxPerConditionSelector.buildCandidates(directory, effectiveMetas);
+            List<RepresentativeSeries> currentSeries = currentIdentitySeries(
+                    directory, effectiveMetas, currentCandidates, sourceAccess, metadataResolver);
+            RepresentativeSelection rebound = rebindSelection(
+                    directory, safeConfig, currentSeries);
+            List<WorkItem> items = buildFinalWorkItems(
+                    directory, rebound, binConfig, effectiveMetas, sourceAccess,
+                    metadataResolver);
+            final RenderContext context = RenderContext.finalRender(binConfig, safeConfig,
+                    new File(directory), displayRouting);
+            return exportItems(directory, items, context, sourceAccess, safeConfig,
+                    outputRoot, figureName);
+        } finally {
+            sourceAccess.close();
+        }
+    }
+
+    /** Test entry: exports one in-memory representative through Figure Panel Builder. */
+    static File exportWithFigurePanelBuilderForTests(String directory,
+                                                     BinConfig binConfig,
+                                                     RepresentativeFigureConfig config,
+                                                     RepresentativeSeries series,
+                                                     ImagePlus source,
+                                                     File sourcePath,
+                                                     File outputRoot,
+                                                     String figureName) throws Exception {
+        WorkItem item = workItemForSeries(series, null, binConfig, sourcePath, directory);
+        RepresentativeFigureConfig safeConfig =
+                config == null ? new RepresentativeFigureConfig() : config;
+        RenderContext context = RenderContext.finalRender(binConfig, safeConfig);
+        return exportItems(directory, Collections.singletonList(item), context,
+                SourceAccess.fixed(source, directory, true), safeConfig, outputRoot,
+                figureName);
+    }
+
+    private static File exportItems(String directory,
+                                    List<WorkItem> items,
+                                    final RenderContext context,
+                                    final SourceAccess sourceAccess,
+                                    RepresentativeFigureConfig safeConfig,
+                                    File outputRoot,
+                                    String figureName) throws Exception {
+        if (items.isEmpty()) {
+            throw new IllegalStateException("No representative images to export.");
+        }
+        final List<ChannelSpec> specs = items.get(0).channels;
+        fpb.FPBParameters.Builder params =
+                fpb.FPBParameters.builder(new File(directory));
+        final Map<fpb.io.ImageSource, WorkItem> bySource =
+                new LinkedHashMap<fpb.io.ImageSource, WorkItem>();
+        for (WorkItem item : items) {
+            File file = item.sourcePath != null ? item.sourcePath
+                    : new File(directory, safe(item.seriesName));
+            fpb.io.ImageSource source = fpb.io.ImageSource.series(file,
+                    Math.max(0, item.seriesIndex), items.size(),
+                    safe(item.seriesName));
+            String group = RepresentativeSelection.conditionLabel(item.condition);
+            String subject = safe(item.animal).trim().isEmpty()
+                    ? safe(item.seriesName) : safe(item.animal);
+            String section = (safe(item.hemisphere) + " " + safe(item.region)).trim();
+            bySource.put(source, item);
+            params.image(source, group, subject, section);
+            params.pick(group, subject);
+        }
+        List<String> names = new ArrayList<String>();
+        for (int i = 0; i < specs.size(); i++) {
+            ChannelSpec spec = specs.get(i);
+            int[] range = lockedRange(context, items, i);
+            String name = safe(spec.channelName).trim();
+            if (name.isEmpty() || names.contains(name)
+                    || "merge".equalsIgnoreCase(name)) {
+                name = "C" + (i + 1);
+            }
+            names.add(name);
+            params.channel(i + 1, name, figurePanelColour(spec.colorName),
+                    range[0], range[1]);
+        }
+        params.panelConfig(figurePanelLayout(safeConfig, names));
+        params.imageOpener(new fpb.io.ImageLoader.ImageOpener() {
+            private final Map<fpb.io.ImageSource, ImagePlus> prepared =
+                    new LinkedHashMap<fpb.io.ImageSource, ImagePlus>();
+
+            @Override
+            public synchronized ImagePlus open(fpb.io.ImageSource source)
+                    throws IOException {
+                ImagePlus image = prepared.get(source);
+                if (image == null) {
+                    WorkItem item = bySource.get(source);
+                    if (item == null) throw new IOException("Unknown image " + source);
+                    image = projectedChannels(item, specs.size(), context, sourceAccess);
+                    prepared.put(source, image);
+                }
+                return image.duplicate();
+            }
+        });
+        PresentationTileConfig tiles = safeConfig.tileConfig;
+        if (tiles != null) {
+            params.dpi(tiles.outputDpi()).exportScale(Math.max(1, tiles.exportScale()));
+            if (tiles.scaleBarEnabled() && tiles.scaleBarLengthUm() > 0) {
+                params.scaleBarUm(tiles.scaleBarLengthUm());
+            }
+        }
+        params.outputFolder(outputRoot).figureName(figureName).hideDisplay(true);
+        fpb.ui.Step5Export.ExportResult result =
+                fpb.FPB.runAndWrite(params.build());
+        IJ.log("[Representative Figure] Figure Panel Builder export (SVG, TIFF, panels, "
+                + "manifest, methods) saved to " + result.figureDirectory());
+        return result.figureDirectory();
+    }
+
+    /** One whole-number range per channel, identical across every representative. */
+    private static int[] lockedRange(RenderContext context, List<WorkItem> items,
+                                     int channel) throws IOException {
+        DisplayRange first = null;
+        for (WorkItem item : items) {
+            ChannelSpec spec = item.channels.get(channel);
+            DisplayRange range = context.rangeResolver.resolve(item, spec);
+            if (range == null || !range.isValid()) {
+                throw new IOException("Figure Panel Builder needs one locked display range "
+                        + "for " + safe(spec.channelName) + "; it is set to auto-enhance "
+                        + "or missing. Set a min-max range for this channel.");
+            }
+            if (first == null) {
+                first = range;
+            } else if (first.min != range.min || first.max != range.max) {
+                throw new IOException("Figure Panel Builder needs the same display range "
+                        + "for " + safe(spec.channelName) + " in every representative image.");
+            }
+        }
+        int min = (int) Math.max(0, Math.min(65534, Math.floor(first.min)));
+        int max = (int) Math.max(min + 1, Math.min(65535, Math.ceil(first.max)));
+        return new int[] { min, max };
+    }
+
+    static fpb.render.ChannelColour figurePanelColour(String colorName) {
+        try {
+            return fpb.render.ChannelColour.fromName(colorName);
+        } catch (IllegalArgumentException unknown) {
+            return fpb.render.ChannelColour.GREY;
+        }
+    }
+
+    private static fpb.figure.PanelConfig figurePanelLayout(
+            RepresentativeFigureConfig config, List<String> channelNames) {
+        PresentationTileConfig tiles = config.tileConfig;
+        List<String> order = new ArrayList<String>();
+        if (tiles != null && tiles.channelOrder() != null) {
+            for (String entry : tiles.channelOrder()) {
+                if (entry == null) continue;
+                if ("merge".equalsIgnoreCase(entry.trim())) order.add("Merge");
+                else if (channelNames.contains(entry.trim())) order.add(entry.trim());
+            }
+        }
+        if (order.isEmpty()) {
+            order.addAll(channelNames);
+            order.add("Merge");
+        }
+        List<List<String>> rows = new ArrayList<List<String>>();
+        if (config.layout != null) {
+            for (List<String> row : config.layout.rows()) {
+                List<String> labels = new ArrayList<String>();
+                for (String condition : row) {
+                    labels.add(RepresentativeSelection.conditionLabel(condition));
+                }
+                rows.add(labels);
+            }
+        }
+        fpb.figure.PanelConfig.Builder builder = fpb.figure.PanelConfig.builder()
+                .createOverviewPanel(true)
+                .annotateIndividualPanels(false)
+                .channelOrder(order)
+                .labelMode(fpb.figure.PanelConfig.LabelMode.CHANNEL_NAME);
+        if (!rows.isEmpty()) builder.groupLayoutRows(rows);
+        if (tiles != null) {
+            builder.annotateOverviewPanel(tiles.annotateOverviewTile())
+                    .cellSizePx(Math.max(16, tiles.cellSizePx()))
+                    .outputDpi(tiles.outputDpi())
+                    .exportScale(Math.max(1, tiles.exportScale()))
+                    .scaleBarEnabled(tiles.scaleBarEnabled());
+            if (tiles.scaleBarEnabled() && tiles.scaleBarLengthUm() > 0) {
+                builder.scaleBarLengthUm(tiles.scaleBarLengthUm());
+            }
+            if (tiles.scaleBarPosition() != null) {
+                builder.scaleBarPosition(fpb.figure.PanelConfig.Position.valueOf(
+                        tiles.scaleBarPosition().name()));
+            }
+        }
+        return builder.build();
+    }
+
+    /**
+     * Opens one representative as FLASH's final render does and returns its
+     * maximum-projected channels as one 16-bit multichannel image.
+     */
+    private static ImagePlus projectedChannels(WorkItem item, int channelCount,
+                                               RenderContext context,
+                                               SourceAccess sourceAccess) throws IOException {
+        ImagePlus source;
+        try {
+            source = sourceAccess.openImage(item);
+        } catch (IOException failure) {
+            throw failure;
+        } catch (Exception failure) {
+            throw new IOException("Could not open " + safe(item.seriesName), failure);
+        }
+        if (source == null) {
+            throw new IOException("Could not open source image for series "
+                    + item.seriesNumber + " (" + item.seriesName + ").");
+        }
+        ImagePlus working = null;
+        ImagePlus[] split = null;
+        try {
+            working = applyConfiguredZSliceSubset(context.binConfig, item, source);
+            OrientationOps.applyTransform(working, item.orientationMetadata);
+            split = ChannelSplitter.split(working);
+            if (split == null || split.length < channelCount) {
+                throw new IOException(missingChannelsMessage(item, working,
+                        split == null ? 0 : split.length));
+            }
+            ImageStack stack = new ImageStack(working.getWidth(), working.getHeight());
+            for (int c = 0; c < channelCount; c++) {
+                ImagePlus mip = ZProjector.run(split[c], "max");
+                // Deconvolved data arrive as 32-bit; values keep their units.
+                stack.addSlice("C" + (c + 1),
+                        mip.getProcessor().convertToShortProcessor(false));
+                closeQuietly(mip);
+            }
+            ImagePlus out = new ImagePlus(safe(item.seriesName), stack);
+            out.setDimensions(channelCount, 1, 1);
+            if (working.getCalibration() != null) {
+                out.setCalibration(working.getCalibration().copy());
+            }
+            return out;
+        } finally {
+            closeArray(split);
+            if (working != null && working != source) closeQuietly(working);
+            closeQuietly(source);
+        }
+    }
+
+    /**
+     * Explains an image with fewer channels than the channel setup instead of
+     * silently drawing only the channels it has.
+     */
+    static String missingChannelsMessage(WorkItem item, ImagePlus image, int found) {
+        StringBuilder message = new StringBuilder()
+                .append(safe(item.seriesName)).append(" has ").append(found)
+                .append(found == 1 ? " channel" : " channels")
+                .append(" but ").append(item.channels.size())
+                .append(" are expected; only the first ").append(found)
+                .append(found == 1 ? " is" : " are").append(" shown.");
+        boolean rgb = image != null && (image.getBitDepth() == 24
+                || (found == 3 && image.getBitDepth() == 8));
+        if (rgb) {
+            message.append(" It looks like an RGB colour picture (such as an Echo")
+                    .append(" Revolution _Merge.tif or an ImageJ _RGB.tif): its")
+                    .append(" channels were blended into red, green and blue when it")
+                    .append(" was saved and cannot be separated. Use the multichannel")
+                    .append(" file instead.");
+        } else if (found == 1 && image != null
+                && (image.getNSlices() > 1 || image.getNFrames() > 1)) {
+            message.append(" Its ").append(Math.max(image.getNSlices(), image.getNFrames()))
+                    .append(" planes have no channel axis; if they are channels, use")
+                    .append(" Image > Hyperstacks > Re-order Hyperstack in Fiji and")
+                    .append(" save it again.");
+        }
+        return message.toString();
     }
 
     private static ImagePlus applyConfiguredZSliceSubset(BinConfig cfg,
@@ -2615,13 +2926,23 @@ public final class RepresentativePreviewRenderer {
         }
 
         static ColorMask from(String colorName) {
-            String c = safe(colorName).toLowerCase(Locale.ROOT);
-            boolean gray = c.isEmpty() || "gray".equals(c) || "grey".equals(c)
-                    || "grays".equals(c) || "greys".equals(c);
-            return new ColorMask(
-                    gray || "red".equals(c) || "magenta".equals(c) || "yellow".equals(c),
-                    gray || "green".equals(c) || "cyan".equals(c) || "yellow".equals(c),
-                    gray || "blue".equals(c) || "cyan".equals(c) || "magenta".equals(c));
+            String c = safe(colorName).trim().toLowerCase(Locale.ROOT);
+            if (c.matches("#?[0-9a-f]{6}")) {
+                int rgb = Integer.parseInt(c.startsWith("#") ? c.substring(1) : c, 16);
+                ColorMask hex = new ColorMask(((rgb >> 16) & 0xff) >= 128,
+                        ((rgb >> 8) & 0xff) >= 128, (rgb & 0xff) >= 128);
+                return hex.red || hex.green || hex.blue ? hex : new ColorMask(true, true, true);
+            }
+            boolean red = "red".equals(c) || "magenta".equals(c) || "yellow".equals(c);
+            boolean green = "green".equals(c) || "cyan".equals(c) || "yellow".equals(c);
+            boolean blue = "blue".equals(c) || "cyan".equals(c) || "magenta".equals(c);
+            if (!red && !green && !blue) {
+                // Grays, white and any name without a red/green/blue mapping
+                // (Fire, Orange...) render grey, as the range dialog shows them;
+                // an all-false mask used to draw the channel black.
+                return new ColorMask(true, true, true);
+            }
+            return new ColorMask(red, green, blue);
         }
     }
 

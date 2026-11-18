@@ -2,6 +2,7 @@ cff-version: 1.2.0
 message: "If you use FLASH in published work, please cite it as below."
 type: software
 title: "FLASH: Fluorescence Automated Spatial Histology"
+doi: "10.5281/zenodo.21633367"
 abstract: >-
   An ImageJ/Fiji plugin providing an end-to-end pipeline for fluorescence
   microscopy analysis: channel setup, ROI management, image preparation,
@@ -16,8 +17,8 @@ authors:
 repository-code: "https://github.com/Jay2owe/FLASH"
 url: "https://github.com/Jay2owe/FLASH"
 license: BSD-3-Clause
-version: 5.2.0
-date-released: 2026-10-01
+version: 5.3.0
+date-released: 2026-11-18
 keywords:
   - fiji
   - imagej

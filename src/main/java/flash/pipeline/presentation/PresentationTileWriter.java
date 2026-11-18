@@ -563,7 +563,9 @@ public final class PresentationTileWriter {
         int drawH = Math.max(1, (int) Math.round(image.getHeight() * scale));
         int drawX = x + (cell - drawW) / 2;
         int drawY = y + (cell - drawH) / 2;
-        g.drawImage(image, drawX, drawY, drawW, drawH, null);
+        // Area-average to the exact pixels covered; a bilinear draw reads only
+        // ~4 source pixels per output pixel, so large reductions alias.
+        AreaResample.drawFitted(g, image, drawX, drawY, drawW, drawH);
 
         if (config.annotateOverviewTile() && !config.annotateIndividualImages()) {
             double recordScale = drawW / (double) Math.max(1, record.widthPx());

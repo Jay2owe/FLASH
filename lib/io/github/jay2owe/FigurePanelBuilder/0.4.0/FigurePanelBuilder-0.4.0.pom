@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Figure Panel Builder 0.4.0 (BSD 3-Clause), bundled into FLASH with relocation.
+     Source: https://github.com/Jay2owe/FigurePanelBuilder/releases/tag/v0.4.0
+     DOI: 10.5281/zenodo.24328268. Its ImageJ dependency is provided by Fiji. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>io.github.jay2owe</groupId>
+	<artifactId>FigurePanelBuilder</artifactId>
+	<version>0.4.0</version>
+	<packaging>jar</packaging>
+</project>
