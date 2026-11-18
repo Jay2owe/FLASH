@@ -90,9 +90,9 @@ paper rerun; the guide states the current limits.
 
 ## Reproducible source snapshot
 
-The current tagged release is [FLASH 5.0.0](https://github.com/Jay2owe/FLASH/releases/tag/v5.0.0).
+The current tagged release is [FLASH 5.1.1](https://github.com/Jay2owe/FLASH/releases/tag/v5.1.1).
 For a fixed source snapshot, download that release's source archive or check out
-`v5.0.0`; the default branch and ImageJ update site can change over time.
+`v5.1.1`; the default branch and ImageJ update site can change over time.
 Record the FLASH version and analysis settings used with your results.
 The version-specific archive is [Zenodo record 21633368](https://doi.org/10.5281/zenodo.21633368).
 
@@ -260,13 +260,13 @@ src/test/java/flash/pipeline/
 If you use FLASH in published work, please cite it. The **concept DOI** below
 always resolves to the latest release:
 
-> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.0.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21633367
+> Malcolm, J. (2026). *FLASH: Fluorescence Automated Spatial Histology* (Version 5.1.1) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.21633367
 
 ```bibtex
 @software{malcolm_flash_2026,
   author    = {Malcolm, Jamie},
   title     = {{FLASH}: {F}luorescence {A}utomated {S}patial {H}istology},
-  version   = {5.0.0},
+  version   = {5.1.1},
   year      = {2026},
   publisher = {Zenodo},
   doi       = {10.5281/zenodo.21633367},

@@ -120,7 +120,7 @@ final class FeedbackReport {
     private static String version() {
         Package pkg = FeedbackReport.class.getPackage();
         String version = pkg == null ? null : pkg.getImplementationVersion();
-        return version == null || version.trim().isEmpty() ? "4.0.0" : version;
+        return version == null || version.trim().isEmpty() ? "5.1.1" : version;
     }
 
     private static String readText(File file) throws IOException {
