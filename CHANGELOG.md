@@ -12,9 +12,6 @@ published, and the 5.1.1 fix.
   hands over the same prepared pixels (deconvolution routing, Z-slice subset,
   orientation, maximum projection) and the same locked display ranges. Channels set to
   auto-enhance are reported in the Log and FLASH's own figure is still written.
-- Project status strip and analysis side panel in the main dialog.
-- Series include-range selection in the project builder.
-- In-plugin feedback reporting.
 
 ### Fixed
 - Representative and presentation figures shrink full-resolution images by area
@@ -26,6 +23,11 @@ published, and the 5.1.1 fix.
   are kept in `lib/`, so the GitHub update-site workflow can build the release.
 
 ## [5.1.1] - 2026-11-18
+
+### Added
+- Project status strip and analysis side panel in the main dialog.
+- Series include-range selection in the project builder.
+- In-plugin feedback reporting.
 
 ### Fixed
 - Saving a project file over a Dropbox or OneDrive online-only placeholder no longer
