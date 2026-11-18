@@ -94,7 +94,7 @@ The current tagged release is [FLASH 5.3.0](https://github.com/Jay2owe/FLASH/rel
 For a fixed source snapshot, download that release's source archive or check out
 `v5.3.0`; the default branch and ImageJ update site can change over time.
 Record the FLASH version and analysis settings used with your results.
-The version-specific archive is [Zenodo record 21633368](https://doi.org/10.5281/zenodo.21633368).
+The version-specific archive is [Zenodo record 24349244](https://doi.org/10.5281/zenodo.24349244).
 
 ## Usage
 
