@@ -266,6 +266,19 @@ public class PipelineDialog {
 
     /** Shows a compact analysis-local tracker instead of the generic phase breadcrumb. */
     public void setWorkflowTracker(String[] steps, int activeIndex) {
+        java.util.List<String> requested = new java.util.ArrayList<String>();
+        if (steps != null) {
+            for (int i = 0; i < steps.length; i++) {
+                String step = steps[i] == null ? "" : steps[i].trim();
+                if (!step.isEmpty()) requested.add(step);
+            }
+        }
+        int requestedIndex = requested.isEmpty() || activeIndex < 0
+                ? -1 : Math.min(activeIndex, requested.size() - 1);
+        if (workflowBreadcrumbEnabled && requested.equals(workflowSteps)
+                && requestedIndex == workflowActiveIndex) {
+            return; // unchanged: skip the breadcrumb rebuild on every toggle click
+        }
         workflowSteps.clear();
         if (steps != null) {
             for (int i = 0; i < steps.length; i++) {
@@ -1410,7 +1423,9 @@ public class PipelineDialog {
     /** Sets the primary default button label, e.g. "Run" for the main pipeline dialog. */
     public void setPrimaryButtonText(String text) {
         String trimmed = text == null ? "" : text.trim();
-        if (!trimmed.isEmpty()) {
+        // REGRESSION GUARD: toggles call this on every click; an unchanged label must not
+        // touch the window (each refresh used to re-pack the visible dialog = flicker).
+        if (!trimmed.isEmpty() && !trimmed.equals(okButton.getText())) {
             okButton.setText(trimmed);
             refreshFooterButtonSize(okButton, DEFAULT_FOOTER_BUTTON_MIN_WIDTH);
         }
@@ -1717,8 +1732,16 @@ public class PipelineDialog {
         buttonBar.revalidate();
         buttonBar.repaint();
         if (dialog.isShowing()) {
-            dialog.pack();
-            fitDialogToScreen();
+            // REGRESSION GUARD: never pack() a visible dialog here. pack + fit resized the
+            // native window several times per toggle click (visible flicker) and threw away
+            // any size the user chose. Only widen when the footer no longer fits.
+            int shortfall = buttonBar.getPreferredSize().width - buttonBar.getWidth();
+            if (shortfall > 0) {
+                Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+                int width = Math.min(dialog.getWidth() + shortfall,
+                        Math.max(MIN_DIALOG_WIDTH, (int) (screen.width * MAX_SCREEN_WIDTH_FRACTION)));
+                if (width > dialog.getWidth()) dialog.setSize(width, dialog.getHeight());
+            }
         }
     }
 

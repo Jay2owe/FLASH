@@ -5434,7 +5434,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
                     }
 
                     mcib3d.image3d.ImageHandler labelIH =
-                            mcib3d.image3d.ImageHandler.wrap(labelImg);
+                            flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(labelImg);
                     mcib3d.geom2.Objects3DIntPopulation population =
                             new mcib3d.geom2.Objects3DIntPopulation(labelIH);
 
@@ -6198,7 +6198,7 @@ public class SpatialAnalysis implements Analysis, RunRecordAware {
     }
 
     private Map<Integer, mcib3d.geom2.Object3DInt> loadObjectMap(ImagePlus labelImg) {
-        mcib3d.image3d.ImageHandler labelIH = mcib3d.image3d.ImageHandler.wrap(labelImg);
+        mcib3d.image3d.ImageHandler labelIH = flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(labelImg);
         mcib3d.geom2.Objects3DIntPopulation population =
                 new mcib3d.geom2.Objects3DIntPopulation(labelIH);
         Map<Integer, mcib3d.geom2.Object3DInt> objMap =

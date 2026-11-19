@@ -200,7 +200,7 @@ public final class ObjectsCounter3DWrapper {
         ImagePlus thresholded = thresholdCopy(img, threshold);
 
         // 2. Connected component labelling via mcib3d ImageLabeller
-        mcib3d.image3d.ImageHandler threshIH = mcib3d.image3d.ImageHandler.wrap(thresholded);
+        mcib3d.image3d.ImageHandler threshIH = flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(thresholded);
         mcib3d.image3d.ImageLabeller labeller = new mcib3d.image3d.ImageLabeller();
         labeller.setMinSize(minSize);
         labeller.setMaxSize(maxSize);
@@ -229,7 +229,7 @@ public final class ObjectsCounter3DWrapper {
         // 4. Build statistics table with the same columns as the legacy method
         Calibration cal = img.getCalibration();
         mcib3d.image3d.ImageHandler convergenceIH =
-                mcib3d.image3d.ImageHandler.wrap(redirectImage != null ? redirectImage : img);
+                flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(redirectImage != null ? redirectImage : img);
         ResultsTable stats = buildNativeStatisticsTable(population, cal, convergenceIH, labelledImp);
 
         // 5. Objects map
@@ -307,7 +307,7 @@ public final class ObjectsCounter3DWrapper {
         boolean closeFiltered = filteredLabelImage != labelImage;
 
         try {
-            mcib3d.image3d.ImageHandler labelledIH = mcib3d.image3d.ImageHandler.wrap(filteredLabelImage);
+            mcib3d.image3d.ImageHandler labelledIH = flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(filteredLabelImage);
 
             // Build population directly from pre-existing labels
             mcib3d.geom2.Objects3DIntPopulation population =
@@ -318,7 +318,7 @@ public final class ObjectsCounter3DWrapper {
             // Build statistics table with the same columns as runNative
             Calibration cal = filteredLabelImage.getCalibration();
             mcib3d.image3d.ImageHandler convergenceIH =
-                    (redirectImage != null) ? mcib3d.image3d.ImageHandler.wrap(redirectImage) : null;
+                    (redirectImage != null) ? flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(redirectImage) : null;
             ResultsTable stats = buildNativeStatisticsTable(population, cal, convergenceIH, filteredLabelImage);
 
             // Objects map
@@ -390,6 +390,19 @@ public final class ObjectsCounter3DWrapper {
             }
         }
         return filtered;
+    }
+
+    /**
+     * Wraps an image for mcib3d on its pixel grid. REGRESSION GUARD: mcib3d copies a
+     * non-zero calibration origin into the handler offset (orientation rotation sets
+     * one), which moves objects off the pixel grid: intensity reads fall outside the
+     * image (IntDen 0, Mean NaN) and bounding boxes go negative.
+     */
+    public static mcib3d.image3d.ImageHandler wrapAtPixelGrid(ImagePlus imp) {
+        if (imp == null) return null;
+        mcib3d.image3d.ImageHandler handler = mcib3d.image3d.ImageHandler.wrap(imp);
+        if (handler != null) handler.setOffset(0, 0, 0);
+        return handler;
     }
 
     /**

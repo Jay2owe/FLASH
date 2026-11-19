@@ -240,7 +240,7 @@ public final class AboutFlashDialog implements PlugIn {
     private static String readVersion() {
         Package pkg = AboutFlashDialog.class.getPackage();
         String v = pkg == null ? null : pkg.getImplementationVersion();
-        if (v == null || v.isEmpty()) return "5.3.0";
+        if (v == null || v.isEmpty()) return "5.3.1";
         return v;
     }
 

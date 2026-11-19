@@ -1,6 +1,6 @@
 {
   "name": "Figure-ready supplement",
-  "description": "Per-metric sheets with summary statistics block, figure-ready headers, p-gradient highlight, significance stars column.",
+  "description": "Per-metric sheets show summary statistics only (n, mean, SEM, median, IQR; not for pasting into Prism), figure-ready headers, p-gradient highlight, significance stars column.",
   "libraryVersion": "1",
   "includeExperimentalConditionsSheet": true,
   "includeDataSummarySheet": false,

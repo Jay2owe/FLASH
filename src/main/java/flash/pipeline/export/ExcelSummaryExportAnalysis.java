@@ -551,13 +551,24 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         return offLabel;
     }
 
+    /** Plain-language per-metric layout, saying which layouts paste straight into GraphPad Prism. */
+    static String metricSheetLayoutLabel(ExcelExportPreset.MetricSheetDetail detail) {
+        if (detail == ExcelExportPreset.MetricSheetDetail.SUMMARY_STATISTICS) {
+            return "summary statistics only - not for Prism";
+        }
+        if (detail == ExcelExportPreset.MetricSheetDetail.BOTH) {
+            return "Prism-ready values from A1, summary statistics to the right";
+        }
+        return "Prism-ready values from A1";
+    }
+
     static String buildPreviewHtml(ExcelExportPreset preset) {
         StringBuilder sheets = new StringBuilder();
         if (preset.isIncludeExperimentalConditionsSheet()) sheets.append("Experimental Conditions, ");
         if (preset.isIncludeDataSummarySheet()) sheets.append("Data Summary, ");
         if (preset.isIncludePerMetricSheets()) {
             sheets.append("Per-metric (");
-            sheets.append(preset.getMetricSheetDetail().token());
+            sheets.append(metricSheetLayoutLabel(preset.getMetricSheetDetail()));
             sheets.append("), ");
         }
         if (preset.isIncludeStatisticsSheet()) {
@@ -1555,31 +1566,61 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
             conditionValues.add(vals);
         }
 
+        // Layout (GraphPad Prism paste-ready): condition headers in row 0 with the
+        // per-animal values directly beneath, so the block A1:<last value> pastes
+        // into a Prism column table. Summary statistics never share those columns:
+        // with raw values they sit to the right after one blank column.
+        ExcelExportPreset.MetricSheetDetail mode = preset.getMetricSheetDetail();
+        boolean showRaw = mode == ExcelExportPreset.MetricSheetDetail.RAW_VALUES
+                || mode == ExcelExportPreset.MetricSheetDetail.BOTH;
+        boolean showSummary = mode == ExcelExportPreset.MetricSheetDetail.SUMMARY_STATISTICS
+                || mode == ExcelExportPreset.MetricSheetDetail.BOTH;
+        int nConditions = conditionOrder.size();
+        int summaryCol0 = showRaw ? nConditions + 1 : 0;
+        int summaryLabelCol = summaryCol0 + Math.max(1, nConditions);
+        String[] summaryLabels = {"n", "mean", "SEM", "median", "IQR"};
+        List<ExcelMetricSummariser.Summary> summaries =
+                new ArrayList<ExcelMetricSummariser.Summary>(conditionValues.size());
+        if (showSummary) {
+            for (List<Double> values : conditionValues) {
+                summaries.add(ExcelMetricSummariser.summarise(values));
+            }
+        }
+
         Row headerRow = sheet.createRow(0);
-        for (int c = 0; c < conditionOrder.size(); c++) {
-            Cell cell = headerRow.createCell(c);
-            setTextCellValue(cell, conditionOrder.get(c));
-            cell.setCellStyle(styles.headerStyle);
-            sheet.setColumnWidth(c, Math.max(conditionOrder.get(c).length() + 4, 12) * 256);
+        for (int c = 0; c < nConditions; c++) {
+            int width = Math.max(conditionOrder.get(c).length() + 4, 12) * 256;
+            if (showRaw) {
+                Cell cell = headerRow.createCell(c);
+                setTextCellValue(cell, conditionOrder.get(c));
+                cell.setCellStyle(styles.headerStyle);
+                sheet.setColumnWidth(c, width);
+            }
+            if (showSummary) {
+                Cell cell = headerRow.createCell(summaryCol0 + c);
+                setTextCellValue(cell, conditionOrder.get(c));
+                cell.setCellStyle(styles.headerStyle);
+                sheet.setColumnWidth(summaryCol0 + c, width);
+            }
+        }
+        if (showSummary && showRaw) {
+            Cell cell = headerRow.createCell(summaryLabelCol);
+            setTextCellValue(cell, "Summary");
+            cell.setCellStyle(styles.summaryLabelStyle);
         }
         afterRowWritten(sheetName, 0);
 
-        ExcelExportPreset.MetricSheetDetail mode = preset.getMetricSheetDetail();
-        int nextRow = 1;
-        if (mode == ExcelExportPreset.MetricSheetDetail.SUMMARY_STATISTICS
-                || mode == ExcelExportPreset.MetricSheetDetail.BOTH) {
-            nextRow = writeSummaryBlock(sheet, nextRow, conditionValues, styles);
-            nextRow += 1;
-        }
-
-        if (mode == ExcelExportPreset.MetricSheetDetail.RAW_VALUES
-                || mode == ExcelExportPreset.MetricSheetDetail.BOTH) {
-            int maxRows = 0;
+        int rawRows = 0;
+        if (showRaw) {
             for (List<Double> vals : conditionValues) {
-                maxRows = Math.max(maxRows, vals.size());
+                rawRows = Math.max(rawRows, vals.size());
             }
-            for (int r = 0; r < maxRows; r++) {
-                Row dataRow = sheet.createRow(nextRow + r);
+        }
+        int summaryRows = showSummary ? summaryLabels.length : 0;
+        int bodyRows = Math.max(rawRows, summaryRows);
+        for (int r = 0; r < bodyRows; r++) {
+            Row dataRow = sheet.createRow(1 + r);
+            if (r < rawRows) {
                 for (int c = 0; c < conditionValues.size(); c++) {
                     List<Double> vals = conditionValues.get(c);
                     if (r < vals.size()) {
@@ -1591,10 +1632,14 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
                         cell.setCellStyle(styles.cellStyle);
                     }
                 }
-                afterRowWritten(sheetName, dataRow.getRowNum());
             }
-            nextRow += maxRows;
+            if (r < summaryRows) {
+                writeSummaryRow(dataRow, r, summaryCol0, summaryLabelCol,
+                        summaryLabels[r], summaries, styles);
+            }
+            afterRowWritten(sheetName, dataRow.getRowNum());
         }
+        int nextRow = 1 + bodyRows;
 
         String desc = nameDesc[1];
         if (desc != null && !desc.isEmpty() && conditionOrder.size() > 0) {
@@ -1613,45 +1658,31 @@ public class ExcelSummaryExportAnalysis implements Analysis, RunRecordAware {
         }
     }
 
-    /**
-     * Writes a five-row summary block (n / mean / SEM / median / IQR) starting
-     * at {@code startRow}. Returns the next free row index.
-     */
-    private int writeSummaryBlock(Sheet sheet, int startRow,
-                                  List<List<Double>> conditionValues, Styles styles) throws IOException {
-        String[] labels = {"n", "mean", "SEM", "median", "IQR"};
-        List<ExcelMetricSummariser.Summary> summaries =
-                new ArrayList<ExcelMetricSummariser.Summary>(conditionValues.size());
-        for (List<Double> values : conditionValues) {
-            summaries.add(ExcelMetricSummariser.summarise(values));
-        }
-        for (int r = 0; r < labels.length; r++) {
-            Row row = sheet.createRow(startRow + r);
-            for (int c = 0; c < conditionValues.size(); c++) {
-                ExcelMetricSummariser.Summary summary = summaries.get(c);
-                if (summary.isEmpty()) {
-                    continue;
-                }
-                double value;
-                switch (r) {
-                    case 0: value = summary.count; break;
-                    case 1: value = summary.mean; break;
-                    case 2: value = summary.sem; break;
-                    case 3: value = summary.median; break;
-                    case 4: default: value = summary.iqr(); break;
-                }
-                if (isFinite(value)) {
-                    Cell cell = row.createCell(c);
-                    cell.setCellValue(value);
-                    cell.setCellStyle(r == 0 ? styles.centerStyle : styles.cellStyle);
-                }
+    /** Writes one summary-statistics row (n / mean / SEM / median / IQR) into {@code row}. */
+    private static void writeSummaryRow(Row row, int statIndex, int col0, int labelCol, String label,
+                                        List<ExcelMetricSummariser.Summary> summaries, Styles styles) {
+        for (int c = 0; c < summaries.size(); c++) {
+            ExcelMetricSummariser.Summary summary = summaries.get(c);
+            if (summary.isEmpty()) {
+                continue;
             }
-            Cell labelCell = row.createCell(Math.max(1, conditionValues.size()));
-            setTextCellValue(labelCell, labels[r]);
-            labelCell.setCellStyle(styles.summaryLabelStyle);
-            afterRowWritten(sheet.getSheetName(), row.getRowNum());
+            double value;
+            switch (statIndex) {
+                case 0: value = summary.count; break;
+                case 1: value = summary.mean; break;
+                case 2: value = summary.sem; break;
+                case 3: value = summary.median; break;
+                case 4: default: value = summary.iqr(); break;
+            }
+            if (isFinite(value)) {
+                Cell cell = row.createCell(col0 + c);
+                cell.setCellValue(value);
+                cell.setCellStyle(statIndex == 0 ? styles.centerStyle : styles.cellStyle);
+            }
         }
-        return startRow + labels.length;
+        Cell labelCell = row.createCell(labelCol);
+        setTextCellValue(labelCell, label);
+        labelCell.setCellStyle(styles.summaryLabelStyle);
     }
 
     private void writeStatisticsSheet(Workbook wb, File statisticsCsv,

@@ -177,4 +177,48 @@ public class ObjectsCounter3DWrapperTest {
         method.setAccessible(true);
         return (ImagePlus) method.invoke(null, source, threshold);
     }
+
+    /**
+     * Regression: orientation rotation leaves a non-zero calibration origin. mcib3d
+     * turned it into a handler offset, so every object read intensities outside the
+     * image (IntDen 0, Mean NaN) and reported negative bounding boxes.
+     */
+    @Test
+    public void fromLabelImageMeasuresOnPixelGridWhenCalibrationHasOrigin() {
+        assumeTrue(ObjectsCounter3DWrapper.isMcib3dAvailable());
+
+        ImageStack labelStack = new ImageStack(20, 20);
+        ImageStack intensityStack = new ImageStack(20, 20);
+        for (int z = 0; z < 3; z++) {
+            ij.process.ShortProcessor label = new ij.process.ShortProcessor(20, 20);
+            ij.process.ShortProcessor intensity = new ij.process.ShortProcessor(20, 20);
+            for (int y = 5; y < 10; y++) {
+                for (int x = 5; x < 10; x++) {
+                    label.set(x, y, 1);
+                    intensity.set(x, y, 100);
+                }
+            }
+            labelStack.addSlice(label);
+            intensityStack.addSlice(intensity);
+        }
+        ImagePlus labels = new ImagePlus("labels", labelStack);
+        ImagePlus intensity = new ImagePlus("intensity", intensityStack);
+        ij.measure.Calibration origin = new ij.measure.Calibration();
+        origin.xOrigin = 12;
+        origin.yOrigin = 316;
+        origin.zOrigin = 1;
+        labels.setCalibration(origin);
+        intensity.setCalibration(origin.copy());
+
+        ResultsTable stats = new ObjectsCounter3DWrapper()
+                .fromLabelImage(labels, intensity, true, false).getStatistics();
+
+        assertEquals(1, stats.size());
+        assertEquals(7500.0, stats.getValue("IntDen", 0), 1e-9);
+        assertEquals(100.0, stats.getValue("Mean", 0), 1e-9);
+        assertEquals(5.0, stats.getValue("BX", 0), 1e-9);
+        assertEquals(5.0, stats.getValue("BY", 0), 1e-9);
+        assertEquals(0.0, stats.getValue("BZ", 0), 1e-9);
+        assertEquals(316.0, labels.getCalibration().yOrigin, 0.0);
+    }
 }

@@ -1,6 +1,6 @@
 {
   "name": "Archive (everything + methods + gradient)",
-  "description": "Every sheet; per-metric summary + raw; methods appendix on; figure-ready headers; p-gradient; significance stars.",
+  "description": "Every sheet; per-metric raw values from A1 (paste straight into GraphPad Prism) with summary statistics beside them; methods appendix on; figure-ready headers; p-gradient; significance stars.",
   "libraryVersion": "1",
   "includeExperimentalConditionsSheet": true,
   "includeDataSummarySheet": true,

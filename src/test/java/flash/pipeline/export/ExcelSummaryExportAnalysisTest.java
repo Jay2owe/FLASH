@@ -471,6 +471,85 @@ public class ExcelSummaryExportAnalysisTest {
         return analysis;
     }
 
+    /**
+     * Regression: summary statistics shared columns with per-animal values, so the
+     * values could not be pasted into GraphPad Prism. Values must start at A2 under
+     * the condition headers with the statistics block to the right of a blank column.
+     */
+    @Test
+    public void bothModeKeepsPrismPasteBlockFreeOfSummaryStatistics() throws Exception {
+        File dir = temp.newFolder("excel-prism-layout");
+        FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
+        File summaryDir = layout.tablesProjectSummaryWriteDir();
+        assertTrue(summaryDir.isDirectory() || summaryDir.mkdirs());
+        writeCsv(new File(summaryDir, FlashProjectLayout.MASTER_OBJECTS_FILENAME),
+                Arrays.asList("AnimalName", "GFAP_Count"),
+                Arrays.asList(Arrays.asList("Mouse1", "1.0"),
+                        Arrays.asList("Mouse2", "3.0"),
+                        Arrays.asList("Mouse3", "5.0")));
+        LinkedHashMap<String, String> conditions = new LinkedHashMap<String, String>();
+        conditions.put("Mouse1", "CondA");
+        conditions.put("Mouse2", "CondA");
+        conditions.put("Mouse3", "CondB");
+        ConditionManifestIO.saveAssignments(dir.getAbsolutePath(), conditions);
+
+        ExcelSummaryExportAnalysis analysis = new ExcelSummaryExportAnalysis();
+        analysis.setHeadless(true);
+        analysis.setSuppressDialogs(true);
+        analysis.setPreset(new ExcelExportPreset(
+                "Both test", null,
+                false, false, true, false,
+                ExcelExportPreset.MetricSheetDetail.BOTH,
+                false,
+                ExcelExportPreset.SignificanceHighlight.OFF,
+                ExcelExportPreset.HeaderStyle.STANDARD,
+                false));
+        analysis.execute(dir.getAbsolutePath());
+
+        XSSFWorkbook workbook = openWorkbook(layout.summaryWorkbookWriteFile());
+        try {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.getSheetAt(0);
+            org.apache.poi.ss.usermodel.Row header = sheet.getRow(0);
+            assertEquals("CondA", header.getCell(0).getStringCellValue());
+            assertEquals("CondB", header.getCell(1).getStringCellValue());
+            assertNull(header.getCell(2));
+            assertEquals("CondA", header.getCell(3).getStringCellValue());
+            assertEquals("CondB", header.getCell(4).getStringCellValue());
+
+            // Paste block: only per-animal values below the headers.
+            double a1 = sheet.getRow(1).getCell(0).getNumericCellValue();
+            double a2 = sheet.getRow(2).getCell(0).getNumericCellValue();
+            assertEquals(4.0, a1 + a2, 1e-9);
+            assertEquals(5.0, sheet.getRow(1).getCell(1).getNumericCellValue(), 1e-9);
+            assertNull(sheet.getRow(2).getCell(1));
+            for (int r = 0; r <= 5; r++) {
+                assertNull(sheet.getRow(r).getCell(2));
+            }
+            for (int r = 3; r <= 5; r++) {
+                assertNull(sheet.getRow(r).getCell(0));
+                assertNull(sheet.getRow(r).getCell(1));
+            }
+
+            // Summary block to the right, labelled after its value columns.
+            assertEquals(2.0, sheet.getRow(1).getCell(3).getNumericCellValue(), 1e-9);
+            assertEquals("n", sheet.getRow(1).getCell(5).getStringCellValue());
+            assertEquals(2.0, sheet.getRow(2).getCell(3).getNumericCellValue(), 1e-9);
+            assertEquals(5.0, sheet.getRow(2).getCell(4).getNumericCellValue(), 1e-9);
+            assertEquals("mean", sheet.getRow(2).getCell(5).getStringCellValue());
+            assertEquals("IQR", sheet.getRow(5).getCell(5).getStringCellValue());
+        } finally {
+            workbook.close();
+        }
+    }
+
+    @Test
+    public void previewNamesWhichLayoutsArePrismReady() {
+        assertTrue(ExcelSummaryExportAnalysis.metricSheetLayoutLabel(
+                ExcelExportPreset.MetricSheetDetail.BOTH).contains("Prism-ready"));
+        assertTrue(ExcelSummaryExportAnalysis.metricSheetLayoutLabel(
+                ExcelExportPreset.MetricSheetDetail.SUMMARY_STATISTICS).contains("not for Prism"));
+    }
+
     private static void createMinimalProject(File dir) throws Exception {
         FlashProjectLayout layout = FlashProjectLayout.forDirectory(dir.getAbsolutePath());
         File summaryDir = layout.tablesProjectSummaryWriteDir();

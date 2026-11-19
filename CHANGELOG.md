@@ -1,5 +1,23 @@
 # Changelog
 
+## [5.3.1] - 2026-11-19
+
+### Fixed
+- 3D object measurements on rotated or flipped images: every object reported an
+  integrated density of 0, a mean of NaN and negative centre/bounding-box Y (and X)
+  coordinates. Orientation gives the image a calibration origin, which mcib3d applied as
+  a pixel offset, so intensities were read outside the image. All mcib3d measurements now
+  run on the pixel grid. Re-run 3D Object Analysis (and the steps after it) for projects
+  with orientation set.
+- Dialogs no longer flicker or snap back to their packed size when a toggle is clicked;
+  a toggle that updates the Next/Run button label used to re-pack the visible window.
+
+### Changed
+- Excel per-metric sheets: per-animal values now start directly under the condition
+  headers (A1 downwards), ready to paste into GraphPad Prism. When summary statistics are
+  included (n, mean, SEM, median, IQR), they sit to the right after a blank column instead
+  of above the values. The export preview says which layouts are Prism-ready.
+
 ## [5.3.0] - 2026-11-18
 
 Includes the measurement corrections from the 5.2.0 local candidate, which was not

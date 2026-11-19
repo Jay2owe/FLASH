@@ -5686,9 +5686,9 @@ public class ThreeDObjectAnalysis implements Analysis, RunRecordAware {
                         // Create populations to get the canonical iteration order
                         // (matches the order used by buildNativeStatisticsTable).
                         mcib3d.geom2.Objects3DIntPopulation popA =
-                                new mcib3d.geom2.Objects3DIntPopulation(mcib3d.image3d.ImageHandler.wrap(aObjImg));
+                                new mcib3d.geom2.Objects3DIntPopulation(flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(aObjImg));
                         mcib3d.geom2.Objects3DIntPopulation popB =
-                                new mcib3d.geom2.Objects3DIntPopulation(mcib3d.image3d.ImageHandler.wrap(bObjImg));
+                                new mcib3d.geom2.Objects3DIntPopulation(flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(bObjImg));
 
                         // Compute overlap directly from label images (pixel-by-pixel).
                         // The mcib3d MeasurePopulationColocalisation API does not return

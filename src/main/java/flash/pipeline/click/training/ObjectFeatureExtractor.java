@@ -150,7 +150,7 @@ public final class ObjectFeatureExtractor {
         Map<Integer, PixelStats> cellprob = pixelStatsByLabel(labelImage, auxImage, wantedLabels);
         Map<Integer, Double> quality = qualityByLabel(labelImage, canonicalPixelLabels);
 
-        mcib3d.image3d.ImageHandler labelHandler = mcib3d.image3d.ImageHandler.wrap(labelImage);
+        mcib3d.image3d.ImageHandler labelHandler = flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(labelImage);
         mcib3d.geom2.Objects3DIntPopulation population =
                 new mcib3d.geom2.Objects3DIntPopulation(labelHandler);
         List<mcib3d.geom2.Object3DInt> objects = population.getObjects3DInt();

@@ -264,12 +264,12 @@ public final class EnhancedClassicalMorphSuggester
                 : new HashSet<Integer>(labelsOfInterest);
         Map<Integer, Double> meansFromStats = meanByLabel(
                 EnhancedClassicalRunner.statsProperty(labelImage));
-        mcib3d.image3d.ImageHandler labelHandler = mcib3d.image3d.ImageHandler.wrap(labelImage);
+        mcib3d.image3d.ImageHandler labelHandler = flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(labelImage);
         mcib3d.geom2.Objects3DIntPopulation population =
                 new mcib3d.geom2.Objects3DIntPopulation(labelHandler);
         mcib3d.image3d.ImageHandler intensityHandler = intensityImage == null
                 ? null
-                : mcib3d.image3d.ImageHandler.wrap(intensityImage);
+                : flash.pipeline.objects.ObjectsCounter3DWrapper.wrapAtPixelGrid(intensityImage);
 
         Map<Integer, FeatureValues> out = new LinkedHashMap<Integer, FeatureValues>();
         List<mcib3d.geom2.Object3DInt> objects = population.getObjects3DInt();
